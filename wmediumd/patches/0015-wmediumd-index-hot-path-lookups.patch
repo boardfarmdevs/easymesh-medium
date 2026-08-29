@@ -1,0 +1,137 @@
+From: Codex <codex@openai.com>
+Subject: [PATCH] wmediumd: index hot-path link telemetry lookups
+
+A 25-radio tri-band lab can maintain 2,500 active telemetry link slots.  The
+frame receive path searched every slot for every multicast candidate and also
+searched the complete frequency-override table even when no override existed.
+At approximately 4,000 frames/s these two read-only observability/control
+lookups consumed about six percent of all sampled CPU time.
+
+Give every source/destination pair its four already-declared frequency slots
+when the bounded allocation fits, reducing the common telemetry lookup from
+O(all links) to four comparisons.  Keep the bounded linear fallback for a
+topology larger than the observer limit.  Raise that limit sufficiently for
+the planned 100-client profile while retaining a finite allocation.
+
+Track the number of active frequency overrides and take the base SNR path
+directly when the configurator has not installed any.  Maintain the count as
+atomic control transactions add, update and clear entries.
+
+The changes do not alter RF decisions, queue ordering or netlink delivery.
+
+---
+ wmediumd/control.c  | 34 ++++++++++++++++++++++++++--------
+ wmediumd/wmediumd.c |  2 ++
+ wmediumd/wmediumd.h |  1 +
+ 3 files changed, 29 insertions(+), 8 deletions(-)
+
+--- a/wmediumd/control.c
++++ b/wmediumd/control.c
+@@ -52,7 +52,7 @@
+ #define WMDC_FREQUENCY_MIN_MHZ 2300U
+ #define WMDC_FREQUENCY_MAX_MHZ 7125U
+ #define WMDC_FREQUENCY_SLOTS_PER_PAIR 4U
+-#define WMDT_ACTIVE_LINK_LIMIT 4096U
++#define WMDT_ACTIVE_LINK_LIMIT 65536U
+ #define WMDT_FREQUENCIES_PER_RADIO 8U
+ #define WMDT_VIFS_PER_RADIO 16U
+ #define WMDT_EVENT_CAPACITY 1024U
+@@ -159,6 +159,7 @@
+ 	size_t radio_frequency_capacity;
+ 	struct wmdt_active_link_state *active_links;
+ 	size_t active_link_capacity;
++	bool active_links_direct;
+ 	struct wmdt_vif_state *vifs;
+ 	size_t vif_capacity;
+ 	struct wmdt_event_state events[WMDT_EVENT_CAPACITY];
+@@ -288,11 +289,19 @@
+ {
+ 	struct wmd_telemetry *telemetry = ctx->telemetry;
+ 	struct wmdt_active_link_state *free_slot = NULL, *oldest = NULL;
+-	size_t i;
++	size_t begin, end, i;
+ 
+ 	if (!telemetry || source < 0 || destination < 0)
+ 		return NULL;
+-	for (i = 0; i < telemetry->active_link_capacity; i++) {
++	if (telemetry->active_links_direct) {
++		begin = ((size_t)source * ctx->num_stas + destination) *
++			WMDC_FREQUENCY_SLOTS_PER_PAIR;
++		end = begin + WMDC_FREQUENCY_SLOTS_PER_PAIR;
++	} else {
++		begin = 0;
++		end = telemetry->active_link_capacity;
++	}
++	for (i = begin; i < end; i++) {
+ 		struct wmdt_active_link_state *entry = &telemetry->active_links[i];
+ 
+ 		if (entry->active && entry->source == source &&
+@@ -457,8 +466,12 @@
+ int wmd_get_link_snr(struct wmediumd *ctx, struct station *sender,
+ 		     struct station *receiver, uint32_t frequency_mhz)
+ {
+-	int slot = frequency_override_slot(ctx, sender->index, receiver->index,
+-					   frequency_mhz);
++	int slot;
++
++	if (!ctx->frequency_override_count)
++		return ctx->get_link_snr(ctx, sender, receiver);
++	slot = frequency_override_slot(ctx, sender->index, receiver->index,
++				       frequency_mhz);
+ 
+ 	if (slot >= 0)
+ 		return ctx->frequency_overrides[slot].snr_db;
+@@ -919,11 +932,15 @@
+ 	/* Every identity, value and slot has been resolved before mutation. */
+ 	for (i = 0; i < count; i++) {
+ 		if (!resolved[i].override) {
+-			if (resolved[i].slot >= 0)
++			if (resolved[i].slot >= 0) {
+ 				memset(&ctx->frequency_overrides[resolved[i].slot], 0,
+ 				       sizeof(ctx->frequency_overrides[resolved[i].slot]));
++				ctx->frequency_override_count--;
++			}
+ 			continue;
+ 		}
++		if (!ctx->frequency_overrides[resolved[i].slot].active)
++			ctx->frequency_override_count++;
+ 		ctx->frequency_overrides[resolved[i].slot] =
+ 			(struct wmd_frequency_override) {
+ 				.source = resolved[i].source,
+@@ -1556,6 +1573,8 @@
+ 	if (active_capacity > WMDT_ACTIVE_LINK_LIMIT)
+ 		active_capacity = WMDT_ACTIVE_LINK_LIMIT;
+ 	ctx->telemetry->active_link_capacity = active_capacity;
++	ctx->telemetry->active_links_direct =
++		active_capacity == potential_links * WMDC_FREQUENCY_SLOTS_PER_PAIR;
+ 	ctx->telemetry->radio_frequency_capacity =
+ 		(size_t)ctx->num_stas * WMDT_FREQUENCIES_PER_RADIO;
+ 	ctx->telemetry->vif_capacity =
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -1779,6 +1779,7 @@
+ 		t.get_link_snr = selftest_pair_snr;
+ 		t.frequency_overrides = &frequency;
+ 		t.frequency_override_capacity = 1;
++		t.frequency_override_count = 1;
+ 		if (wmd_get_link_snr(&t, &source, &destination, 5180) == 7 &&
+ 		    wmd_get_link_snr(&t, &source, &destination, 2437) == 35)
+ 			printf("PASS frequency SNR: 5180 override=7, 2437 pair fallback=35\n");
+@@ -1788,6 +1789,7 @@
+ 		}
+ 		t.frequency_overrides = NULL;
+ 		t.frequency_override_capacity = 0;
++		t.frequency_override_count = 0;
+ 	}
+ 
+ 	/* ---------- WMD1 v2: ownership invariant vs RX-filter churn ---------- */
+--- a/wmediumd/wmediumd.h
++++ b/wmediumd/wmediumd.h
+@@ -238,6 +238,7 @@
+ 	u64 control_generation;
+ 	struct wmd_frequency_override *frequency_overrides;
+ 	size_t frequency_override_capacity;
++	size_t frequency_override_count;
+ 	struct wmd_telemetry *telemetry;
+ };
+ 

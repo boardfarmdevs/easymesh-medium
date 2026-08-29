@@ -1,0 +1,473 @@
+diff --git a/wmediumd/control.c b/wmediumd/control.c
+index 7b8ae0d..f38265c 100644
+--- a/wmediumd/control.c
++++ b/wmediumd/control.c
+@@ -32,6 +32,19 @@ struct resolved_update {
+ 	int snr_db;
+ };
+ 
++struct resolved_frequency_update {
++	int source;
++	int destination;
++	uint32_t frequency_mhz;
++	int snr_db;
++	bool override;
++	int slot;
++};
++
++#define WMDC_FREQUENCY_MIN_MHZ 2300U
++#define WMDC_FREQUENCY_MAX_MHZ 7125U
++#define WMDC_FREQUENCY_SLOTS_PER_PAIR 4U
++
+ static int station_index(struct wmediumd *ctx, const uint8_t *address)
+ {
+ 	int i;
+@@ -72,13 +85,20 @@ static int send_response(int fd, uint16_t opcode, uint32_t status,
+ static int send_info(struct wmd_control_client *client, uint16_t opcode)
+ {
+ 	struct wmediumd *ctx = client->ctx;
++	uint32_t capabilities = WMDC_CAP_RADIO_PAIR_SNR |
++		WMDC_CAP_ATOMIC_GENERATIONS | WMDC_CAP_READBACK | WMDC_CAP_DUMP;
++	uint32_t max_updates = ctx->num_stas * ctx->num_stas;
++
++	if (ctx->frequency_overrides) {
++		capabilities |= WMDC_CAP_FREQUENCY_QUALIFIED_SNR;
++		if (ctx->frequency_override_capacity > max_updates)
++			max_updates = ctx->frequency_override_capacity;
++	}
+ 	struct wmdc_info info = {
+ 		.instance_hi = htobe64(ctx->control_instance_hi),
+ 		.instance_lo = htobe64(ctx->control_instance_lo),
+-		.capabilities = htobe32(WMDC_CAP_RADIO_PAIR_SNR |
+-			WMDC_CAP_ATOMIC_GENERATIONS | WMDC_CAP_READBACK |
+-			WMDC_CAP_DUMP),
+-		.max_updates = htobe32(ctx->num_stas * ctx->num_stas),
++		.capabilities = htobe32(capabilities),
++		.max_updates = htobe32(max_updates),
+ 		.num_stations = htobe32(ctx->num_stas),
+ 	};
+ 
+@@ -86,6 +106,33 @@ static int send_info(struct wmd_control_client *client, uint16_t opcode)
+ 			     ctx->control_generation, &info, sizeof(info));
+ }
+ 
++static int frequency_override_slot(struct wmediumd *ctx, int source,
++				   int destination, uint32_t frequency_mhz)
++{
++	size_t i;
++
++	for (i = 0; i < ctx->frequency_override_capacity; i++) {
++		struct wmd_frequency_override *entry = &ctx->frequency_overrides[i];
++
++		if (entry->active && entry->source == source &&
++		    entry->destination == destination &&
++		    entry->frequency_mhz == frequency_mhz)
++			return i;
++	}
++	return -1;
++}
++
++int wmd_get_link_snr(struct wmediumd *ctx, struct station *sender,
++		     struct station *receiver, uint32_t frequency_mhz)
++{
++	int slot = frequency_override_slot(ctx, sender->index, receiver->index,
++					   frequency_mhz);
++
++	if (slot >= 0)
++		return ctx->frequency_overrides[slot].snr_db;
++	return ctx->get_link_snr(ctx, sender, receiver);
++}
++
+ static int resolve_links(struct wmediumd *ctx, const uint8_t *payload,
+ 			 uint32_t count, struct resolved_update *resolved,
+ 			 bool require_value)
+@@ -106,6 +153,73 @@ static int resolve_links(struct wmediumd *ctx, const uint8_t *payload,
+ 	return WMDC_OK;
+ }
+ 
++static bool slot_is_planned(const struct resolved_frequency_update *resolved,
++			    uint32_t count, int slot)
++{
++	uint32_t i;
++
++	for (i = 0; i < count; i++)
++		if (resolved[i].override && resolved[i].slot == slot)
++			return true;
++	return false;
++}
++
++static int resolve_frequency_links(struct wmediumd *ctx, const uint8_t *payload,
++				   uint32_t count,
++				   struct resolved_frequency_update *resolved)
++{
++	const struct wmdc_frequency_link *links =
++		(const struct wmdc_frequency_link *)payload;
++	uint32_t i, j;
++
++	if (!ctx->frequency_overrides)
++		return WMDC_ERR_INTERNAL;
++	for (i = 0; i < count; i++) {
++		uint16_t flags = be16toh(links[i].flags);
++		int slot;
++
++		resolved[i].source = station_index(ctx, links[i].source);
++		resolved[i].destination = station_index(ctx, links[i].destination);
++		resolved[i].frequency_mhz = be32toh(links[i].frequency_mhz);
++		resolved[i].snr_db = (int16_t)be16toh((uint16_t)links[i].snr_db);
++		resolved[i].override = flags & WMDC_FREQUENCY_OVERRIDE;
++		if (resolved[i].source < 0 || resolved[i].destination < 0 ||
++		    resolved[i].source == resolved[i].destination)
++			return WMDC_ERR_IDENTITY;
++		if (flags & ~WMDC_FREQUENCY_OVERRIDE)
++			return WMDC_ERR_VALUE;
++		if (resolved[i].frequency_mhz < WMDC_FREQUENCY_MIN_MHZ ||
++		    resolved[i].frequency_mhz > WMDC_FREQUENCY_MAX_MHZ)
++			return WMDC_ERR_FREQUENCY;
++		if (resolved[i].override &&
++		    (resolved[i].snr_db < -20 || resolved[i].snr_db > 60))
++			return WMDC_ERR_VALUE;
++		for (j = 0; j < i; j++)
++			if (resolved[j].source == resolved[i].source &&
++			    resolved[j].destination == resolved[i].destination &&
++			    resolved[j].frequency_mhz == resolved[i].frequency_mhz)
++				return WMDC_ERR_VALUE;
++
++		slot = frequency_override_slot(ctx, resolved[i].source,
++			resolved[i].destination, resolved[i].frequency_mhz);
++		if (resolved[i].override && slot < 0) {
++			size_t candidate;
++
++			for (candidate = 0;
++			     candidate < ctx->frequency_override_capacity; candidate++)
++				if (!ctx->frequency_overrides[candidate].active &&
++				    !slot_is_planned(resolved, i, candidate)) {
++					slot = candidate;
++					break;
++				}
++			if (slot < 0)
++				return WMDC_ERR_INTERNAL;
++		}
++		resolved[i].slot = slot;
++	}
++	return WMDC_OK;
++}
++
+ static int handle_apply(struct wmd_control_client *client,
+ 			const struct wmdc_header *request,
+ 			const uint8_t *payload, uint32_t payload_len)
+@@ -198,6 +312,118 @@ static int handle_dump(struct wmd_control_client *client)
+ 	return result;
+ }
+ 
++static int handle_frequency_apply(struct wmd_control_client *client,
++				  const struct wmdc_header *request,
++				  const uint8_t *payload, uint32_t payload_len)
++{
++	struct wmediumd *ctx = client->ctx;
++	struct resolved_frequency_update *resolved;
++	uint64_t generation = be64toh(request->generation);
++	uint32_t count, i;
++	int status;
++
++	if (!payload_len || payload_len % sizeof(struct wmdc_frequency_link))
++		return send_response(client->loop.fd, WMDC_OP_APPLY_FREQUENCY,
++			WMDC_ERR_LENGTH, ctx->control_generation, NULL, 0);
++	count = payload_len / sizeof(struct wmdc_frequency_link);
++	if (!ctx->frequency_overrides ||
++	    count > ctx->frequency_override_capacity)
++		return send_response(client->loop.fd, WMDC_OP_APPLY_FREQUENCY,
++			WMDC_ERR_LENGTH, ctx->control_generation, NULL, 0);
++	if (generation != ctx->control_generation + 1)
++		return send_response(client->loop.fd, WMDC_OP_APPLY_FREQUENCY,
++			WMDC_ERR_GENERATION, ctx->control_generation, NULL, 0);
++	resolved = calloc(count, sizeof(*resolved));
++	if (!resolved)
++		return send_response(client->loop.fd, WMDC_OP_APPLY_FREQUENCY,
++			WMDC_ERR_INTERNAL, ctx->control_generation, NULL, 0);
++	status = resolve_frequency_links(ctx, payload, count, resolved);
++	if (status != WMDC_OK) {
++		free(resolved);
++		return send_response(client->loop.fd, WMDC_OP_APPLY_FREQUENCY,
++			status, ctx->control_generation, NULL, 0);
++	}
++	/* Every identity, value and slot has been resolved before mutation. */
++	for (i = 0; i < count; i++) {
++		if (!resolved[i].override) {
++			if (resolved[i].slot >= 0)
++				memset(&ctx->frequency_overrides[resolved[i].slot], 0,
++				       sizeof(ctx->frequency_overrides[resolved[i].slot]));
++			continue;
++		}
++		ctx->frequency_overrides[resolved[i].slot] =
++			(struct wmd_frequency_override) {
++				.source = resolved[i].source,
++				.destination = resolved[i].destination,
++				.frequency_mhz = resolved[i].frequency_mhz,
++				.snr_db = resolved[i].snr_db,
++				.active = true,
++			};
++	}
++	ctx->control_generation = generation;
++	free(resolved);
++	return send_response(client->loop.fd, WMDC_OP_APPLY_FREQUENCY, WMDC_OK,
++			generation, payload, payload_len);
++}
++
++static int handle_frequency_get(struct wmd_control_client *client,
++				const uint8_t *payload, uint32_t payload_len)
++{
++	struct wmediumd *ctx = client->ctx;
++	struct resolved_frequency_update resolved;
++	struct wmdc_frequency_link response;
++	int slot, status, value;
++
++	if (payload_len != sizeof(response))
++		return send_response(client->loop.fd, WMDC_OP_GET_FREQUENCY,
++			WMDC_ERR_LENGTH, ctx->control_generation, NULL, 0);
++	status = resolve_frequency_links(ctx, payload, 1, &resolved);
++	if (status != WMDC_OK)
++		return send_response(client->loop.fd, WMDC_OP_GET_FREQUENCY,
++			status, ctx->control_generation, NULL, 0);
++	slot = frequency_override_slot(ctx, resolved.source, resolved.destination,
++				       resolved.frequency_mhz);
++	value = slot >= 0 ? ctx->frequency_overrides[slot].snr_db :
++		ctx->snr_matrix[resolved.source * ctx->num_stas + resolved.destination];
++	memcpy(&response, payload, sizeof(response));
++	response.snr_db = htobe16((uint16_t)value);
++	response.flags = htobe16(slot >= 0 ? WMDC_FREQUENCY_OVERRIDE : 0);
++	return send_response(client->loop.fd, WMDC_OP_GET_FREQUENCY, WMDC_OK,
++			ctx->control_generation, &response, sizeof(response));
++}
++
++static int handle_frequency_dump(struct wmd_control_client *client)
++{
++	struct wmediumd *ctx = client->ctx;
++	struct wmdc_frequency_link *links;
++	uint32_t count = 0;
++	size_t i;
++	int result;
++
++	links = calloc(ctx->frequency_override_capacity, sizeof(*links));
++	if (!links)
++		return send_response(client->loop.fd, WMDC_OP_DUMP_FREQUENCIES,
++			WMDC_ERR_INTERNAL, ctx->control_generation, NULL, 0);
++	for (i = 0; i < ctx->frequency_override_capacity; i++) {
++		struct wmd_frequency_override *entry = &ctx->frequency_overrides[i];
++
++		if (!entry->active)
++			continue;
++		memcpy(links[count].source, ctx->sta_array[entry->source]->addr, 6);
++		memcpy(links[count].destination,
++		       ctx->sta_array[entry->destination]->addr, 6);
++		links[count].frequency_mhz = htobe32(entry->frequency_mhz);
++		links[count].snr_db = htobe16((uint16_t)entry->snr_db);
++		links[count].flags = htobe16(WMDC_FREQUENCY_OVERRIDE);
++		count++;
++	}
++	result = send_response(client->loop.fd, WMDC_OP_DUMP_FREQUENCIES,
++			       WMDC_OK, ctx->control_generation, links,
++			       count * sizeof(*links));
++	free(links);
++	return result;
++}
++
+ static void control_disconnect(struct wmd_control_client *client)
+ {
+ 	client->ctx->control_client_active = false;
+@@ -253,6 +479,18 @@ static void control_handler(struct usfstl_loop_entry *entry)
+ 		if (payload_len == 0)
+ 			result = handle_dump(client);
+ 		break;
++	case WMDC_OP_APPLY_FREQUENCY:
++		result = handle_frequency_apply(client, header,
++			frame + sizeof(*header), payload_len);
++		break;
++	case WMDC_OP_GET_FREQUENCY:
++		result = handle_frequency_get(client, frame + sizeof(*header),
++					      payload_len);
++		break;
++	case WMDC_OP_DUMP_FREQUENCIES:
++		if (payload_len == 0)
++			result = handle_frequency_dump(client);
++		break;
+ 	default:
+ 		break;
+ 	}
+@@ -286,6 +524,7 @@ static void control_connected(int fd, void *data)
+ void wmd_control_start(struct wmediumd *ctx, const char *path)
+ {
+ 	uint64_t instance[2];
++	size_t payload_capacity, desired_capacity;
+ 	ssize_t bytes;
+ 
+ 	bytes = getrandom(instance, sizeof(instance), 0);
+@@ -297,6 +536,14 @@ void wmd_control_start(struct wmediumd *ctx, const char *path)
+ 	ctx->control_instance_lo = instance[1];
+ 	ctx->control_generation = 0;
+ 	ctx->control_client_active = false;
++	payload_capacity = (WMDC_MAX_FRAME - sizeof(struct wmdc_header)) /
++		sizeof(struct wmdc_frequency_link);
++	desired_capacity = (size_t)ctx->num_stas * ctx->num_stas *
++		WMDC_FREQUENCY_SLOTS_PER_PAIR;
++	ctx->frequency_override_capacity = desired_capacity < payload_capacity ?
++		desired_capacity : payload_capacity;
++	ctx->frequency_overrides = calloc(ctx->frequency_override_capacity,
++					  sizeof(*ctx->frequency_overrides));
+ 	usfstl_uds_create_seqpacket(path, control_connected, ctx);
+ 	chmod(path, 0660);
+ }
+diff --git a/wmediumd/control.h b/wmediumd/control.h
+index a7853f0..83e2bed 100644
+--- a/wmediumd/control.h
++++ b/wmediumd/control.h
+@@ -5,6 +5,7 @@
+ #include <stdint.h>
+ 
+ struct wmediumd;
++struct station;
+ 
+ #define WMDC_MAGIC 0x574d4443U
+ #define WMDC_VERSION 1
+@@ -16,6 +17,9 @@ enum wmdc_opcode {
+ 	WMDC_OP_APPLY = 3,
+ 	WMDC_OP_GET_LINK = 4,
+ 	WMDC_OP_DUMP_LINKS = 5,
++	WMDC_OP_APPLY_FREQUENCY = 6,
++	WMDC_OP_GET_FREQUENCY = 7,
++	WMDC_OP_DUMP_FREQUENCIES = 8,
+ };
+ 
+ enum wmdc_status {
+@@ -26,6 +30,7 @@ enum wmdc_status {
+ 	WMDC_ERR_IDENTITY = 4,
+ 	WMDC_ERR_VALUE = 5,
+ 	WMDC_ERR_INTERNAL = 6,
++	WMDC_ERR_FREQUENCY = 7,
+ };
+ 
+ enum wmdc_capability {
+@@ -33,8 +38,11 @@ enum wmdc_capability {
+ 	WMDC_CAP_ATOMIC_GENERATIONS = 1U << 1,
+ 	WMDC_CAP_READBACK = 1U << 2,
+ 	WMDC_CAP_DUMP = 1U << 3,
++	WMDC_CAP_FREQUENCY_QUALIFIED_SNR = 1U << 4,
+ };
+ 
++#define WMDC_FREQUENCY_OVERRIDE (1U << 0)
++
+ struct wmdc_header {
+ 	uint32_t magic;
+ 	uint16_t version;
+@@ -51,6 +59,14 @@ struct wmdc_link {
+ 	uint16_t reserved;
+ } __attribute__((packed));
+ 
++struct wmdc_frequency_link {
++	uint8_t source[6];
++	uint8_t destination[6];
++	uint32_t frequency_mhz;
++	int16_t snr_db;
++	uint16_t flags;
++} __attribute__((packed));
++
+ struct wmdc_info {
+ 	uint64_t instance_hi;
+ 	uint64_t instance_lo;
+@@ -61,5 +77,7 @@ struct wmdc_info {
+ } __attribute__((packed));
+ 
+ void wmd_control_start(struct wmediumd *ctx, const char *path);
++int wmd_get_link_snr(struct wmediumd *ctx, struct station *sender,
++		     struct station *receiver, uint32_t frequency_mhz);
+ 
+ #endif
+diff --git a/wmediumd/wmediumd.c b/wmediumd/wmediumd.c
+index d66ebe0..757eb1c 100644
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -662,7 +662,7 @@ static void queue_frame(struct wmediumd *ctx, struct station *station,
+ 	} else {
+ 		deststa = get_station_by_used_addr(ctx, dest);
+ 		if (deststa) {
+-			snr = ctx->get_link_snr(ctx, station, deststa) -
++			snr = wmd_get_link_snr(ctx, station, deststa, frame->freq) -
+ 				get_signal_offset_by_interference(ctx,
+ 					station->index, deststa->index,
+ 					frame->freq);
+@@ -1000,8 +1000,8 @@ static void wmediumd_deliver_frame(struct usfstl_job *job)
+ 				 * reverse link from sender -- check for
+ 				 * each receiver.
+ 				 */
+-				snr = ctx->get_link_snr(ctx, frame->sender,
+-							station);
++				snr = wmd_get_link_snr(ctx, frame->sender,
++						       station, frame->freq);
+ 				snr += ctx->get_fading_signal(ctx);
+ 				signal = snr + NOISE_LEVEL;
+ 				if (signal < CCA_THRESHOLD)
+@@ -1611,6 +1611,12 @@ static void init_pcapng(struct wmediumd *ctx, const char *filename)
+ 	fwrite(&idb, sizeof(idb), 1, ctx->pcap_file);
+ }
+ 
++static int selftest_pair_snr(struct wmediumd *ctx, struct station *sender,
++			     struct station *receiver)
++{
++	return ctx->snr_matrix[sender->index * ctx->num_stas + receiver->index];
++}
++
+ static int wmd_selftest(void)
+ {
+ 	int fails = 0, i, j;
+@@ -1665,6 +1671,31 @@ static int wmd_selftest(void)
+ 	}
+ 	free(t.intf);
+ 
++	/* ---------- WMD12: frequency-qualified SNR with pair fallback ---------- */
++	{
++		struct station source = {.index = 0}, destination = {.index = 1};
++		struct wmd_frequency_override frequency = {
++			.source = 0, .destination = 1, .frequency_mhz = 5180,
++			.snr_db = 7, .active = true,
++		};
++		int matrix[4] = {0, 35, 35, 0};
++
++		t.num_stas = 2;
++		t.snr_matrix = matrix;
++		t.get_link_snr = selftest_pair_snr;
++		t.frequency_overrides = &frequency;
++		t.frequency_override_capacity = 1;
++		if (wmd_get_link_snr(&t, &source, &destination, 5180) == 7 &&
++		    wmd_get_link_snr(&t, &source, &destination, 2437) == 35)
++			printf("PASS frequency SNR: 5180 override=7, 2437 pair fallback=35\n");
++		else {
++			printf("FAIL frequency SNR: override/fallback selection\n");
++			fails++;
++		}
++		t.frequency_overrides = NULL;
++		t.frequency_override_capacity = 0;
++	}
++
+ 	/* ---------- WMD1 v2: ownership invariant vs RX-filter churn ---------- */
+ 	{
+ 		struct station r3 = {}, apa = {};
+diff --git a/wmediumd/wmediumd.h b/wmediumd/wmediumd.h
+index d73c6af..52efe87 100644
+--- a/wmediumd/wmediumd.h
++++ b/wmediumd/wmediumd.h
+@@ -237,6 +237,16 @@ struct wmediumd {
+ 	u64 control_instance_lo;
+ 	u64 control_generation;
+ 	bool control_client_active;
++	struct wmd_frequency_override *frequency_overrides;
++	size_t frequency_override_capacity;
++};
++
++struct wmd_frequency_override {
++	int source;
++	int destination;
++	u32 frequency_mhz;
++	int snr_db;
++	bool active;
+ };
+ 
+ struct hwsim_tx_rate {

@@ -1,0 +1,32 @@
+# Keep one associated client on its serving AP while continuously varying the
+# bidirectional RF path. The wrapper discovers and binds that serving AP.
+scenario client_rcpi_monitor {
+    language 1
+    tick 1s
+    require radio_pair_snr
+    require atomic_generations
+    require readback
+    protect backhaul
+    restore captured
+
+    role client : station
+    role ap : fronthaul_ap
+
+    phase baseline for 10s {
+        link client <-> ap snr = 45dB
+        mark "stable high signal"
+    }
+
+    phase fall_1 for 10s { link client <-> ap snr 45dB -> 25dB linear }
+    phase rise_1 for 10s { link client <-> ap snr 25dB -> 45dB linear }
+    phase fall_2 for 10s { link client <-> ap snr 45dB -> 25dB linear }
+    phase rise_2 for 10s { link client <-> ap snr 25dB -> 45dB linear }
+    phase fall_3 for 10s { link client <-> ap snr 45dB -> 25dB linear }
+    phase rise_3 for 10s { link client <-> ap snr 25dB -> 45dB linear }
+    phase fall_4 for 10s { link client <-> ap snr 45dB -> 25dB linear }
+    phase rise_4 for 10s { link client <-> ap snr 25dB -> 45dB linear }
+    phase fall_5 for 10s { link client <-> ap snr 45dB -> 25dB linear }
+    phase rise_5 for 10s { link client <-> ap snr 25dB -> 45dB linear }
+    phase fall_6 for 10s { link client <-> ap snr 45dB -> 25dB linear }
+    phase rise_6 for 10s { link client <-> ap snr 25dB -> 45dB linear }
+}

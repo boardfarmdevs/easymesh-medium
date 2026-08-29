@@ -1,0 +1,293 @@
+mac80211_hwsim: add double-buffered kernel-medium link matrices
+
+Allow the optional in-kernel medium to override signal and deterministic loss
+for each source, receiver, and 2.4/5/6 GHz band.  Two matrix banks allow a
+userspace configurator to clear and stage an inactive scene before committing
+the whole lab atomically by changing kernel_medium_bank.
+
+Each receiver exposes kernel_medium_links under its existing hwsim debugfs
+directory.  The control syntax deliberately uses stable hwsim radio MACs:
+
+  clear-bank BANK
+  set BANK SOURCE_MAC BAND SIGNAL_DBM LOSS_PERCENT
+
+Reading the file identifies the receiver and returns all staged entries plus
+receiver totals.  This is an experimental lab ABI, not a proposed upstream
+mac80211_hwsim interface.
+
+--- a/drivers/net/wireless/virtual/mac80211_hwsim.c
++++ b/drivers/net/wireless/virtual/mac80211_hwsim.c
+@@ -26,6 +26,8 @@
+ #include <linux/etherdevice.h>
++#include <linux/hex.h>
+ #include <linux/platform_device.h>
+ #include <linux/debugfs.h>
++#include <linux/seq_file.h>
+ #include <linux/module.h>
+ #include <linux/ktime.h>
+ #include <net/genetlink.h>
+@@ -68,6 +70,40 @@
+ MODULE_PARM_DESC(kernel_medium_loss_pct,
+ 		 "Deterministic in-kernel medium packet loss percentage (0..100)");
+ 
++static unsigned int kernel_medium_bank;
++static unsigned int kernel_medium_generation;
++
++static int hwsim_kernel_medium_bank_set(const char *value,
++					const struct kernel_param *kp)
++{
++	unsigned int bank;
++	int error;
++
++	error = kstrtouint(value, 0, &bank);
++	if (error)
++		return error;
++	if (bank >= 2)
++		return -ERANGE;
++
++	WRITE_ONCE(kernel_medium_bank, bank);
++	WRITE_ONCE(kernel_medium_generation,
++		   READ_ONCE(kernel_medium_generation) + 1);
++	return 0;
++}
++
++static const struct kernel_param_ops hwsim_kernel_medium_bank_ops = {
++	.set = hwsim_kernel_medium_bank_set,
++	.get = param_get_uint,
++};
++
++module_param_cb(kernel_medium_bank, &hwsim_kernel_medium_bank_ops,
++		&kernel_medium_bank, 0644);
++MODULE_PARM_DESC(kernel_medium_bank,
++		 "Active in-kernel medium link-matrix bank (least significant bit)");
++module_param(kernel_medium_generation, uint, 0444);
++MODULE_PARM_DESC(kernel_medium_generation,
++		 "Committed in-kernel medium matrix generation");
++
+ static bool paged_rx = false;
+ module_param(paged_rx, bool, 0644);
+ MODULE_PARM_DESC(paged_rx, "Use paged SKBs for RX instead of linear ones");
+@@ -674,6 +680,17 @@
+ 	struct hrtimer beacon_timer;
+ };
+ 
++#define HWSIM_KERNEL_MEDIUM_BANKS 2
++#define HWSIM_KERNEL_MEDIUM_MAX_RADIOS 128
++#define HWSIM_KERNEL_MEDIUM_BANDS 3
++
++struct hwsim_kernel_medium_link {
++	u8 source[ETH_ALEN];
++	s8 signal;
++	u8 loss_pct;
++	u8 valid;
++};
++
+ struct mac80211_hwsim_data {
+ 	struct list_head list;
+ 	struct rhash_head rht;
+@@ -768,6 +785,10 @@
+ 	u64 kernel_medium_considered;
+ 	u64 kernel_medium_delivered;
+ 	u64 kernel_medium_dropped;
++	struct hwsim_kernel_medium_link
++		kernel_medium_links[HWSIM_KERNEL_MEDIUM_BANKS]
++				   [HWSIM_KERNEL_MEDIUM_MAX_RADIOS]
++				   [HWSIM_KERNEL_MEDIUM_BANDS];
+ 
+ 	/* only used when pmsr capability is supplied */
+ 	struct cfg80211_pmsr_capabilities pmsr_capa;
+@@ -1227,6 +1248,158 @@
+ 			 hwsim_fops_rx_rssi_read, hwsim_fops_rx_rssi_write,
+ 			 "%lld\n");
+ 
++static const char * const hwsim_kernel_medium_band_names[] = {
++	"2.4", "5", "6",
++};
++
++static int hwsim_kernel_medium_band_slot(const char *band)
++{
++	if (!strcmp(band, "2.4") || !strcmp(band, "2g"))
++		return 0;
++	if (!strcmp(band, "5") || !strcmp(band, "5g"))
++		return 1;
++	if (!strcmp(band, "6") || !strcmp(band, "6g"))
++		return 2;
++
++	return -EINVAL;
++}
++
++static int hwsim_kernel_medium_chan_slot(enum nl80211_band band)
++{
++	switch (band) {
++	case NL80211_BAND_2GHZ:
++		return 0;
++	case NL80211_BAND_5GHZ:
++		return 1;
++	case NL80211_BAND_6GHZ:
++		return 2;
++	default:
++		return -1;
++	}
++}
++
++static int hwsim_kernel_medium_links_show(struct seq_file *m, void *unused)
++{
++	struct mac80211_hwsim_data *data = m->private;
++	int bank, source, band;
++
++	seq_printf(m, "radio %pM idx %d active_bank %u\n",
++		   data->addresses[1].addr, data->idx,
++		   READ_ONCE(kernel_medium_bank) & 1);
++	seq_printf(m, "default signal %d loss_pct %u cutoff %d\n",
++		   READ_ONCE(data->rx_rssi),
++		   min(READ_ONCE(kernel_medium_loss_pct), 100U),
++		   READ_ONCE(kernel_medium_cutoff));
++
++	for (bank = 0; bank < HWSIM_KERNEL_MEDIUM_BANKS; bank++) {
++		for (source = 0;
++		     source < HWSIM_KERNEL_MEDIUM_MAX_RADIOS; source++) {
++			for (band = 0; band < HWSIM_KERNEL_MEDIUM_BANDS;
++			     band++) {
++				struct hwsim_kernel_medium_link *link =
++					&data->kernel_medium_links[bank][source][band];
++
++				if (!smp_load_acquire(&link->valid))
++					continue;
++				seq_printf(m, "set %d %pM %s %d %u\n", bank,
++					   link->source,
++					   hwsim_kernel_medium_band_names[band],
++					   READ_ONCE(link->signal),
++					   READ_ONCE(link->loss_pct));
++			}
++		}
++	}
++
++	seq_printf(m, "stats considered %llu delivered %llu dropped %llu\n",
++		   data->kernel_medium_considered,
++		   data->kernel_medium_delivered,
++		   data->kernel_medium_dropped);
++	return 0;
++}
++
++static int hwsim_kernel_medium_links_open(struct inode *inode,
++					  struct file *file)
++{
++	return single_open(file, hwsim_kernel_medium_links_show,
++			   inode->i_private);
++}
++
++static ssize_t hwsim_kernel_medium_links_write(struct file *file,
++					       const char __user *userbuf,
++					       size_t count, loff_t *ppos)
++{
++	struct seq_file *seq = file->private_data;
++	struct mac80211_hwsim_data *receiver = seq->private;
++	struct mac80211_hwsim_data *source;
++	struct hwsim_kernel_medium_link *link;
++	char buf[96], command[16], mac_text[18], band_text[8];
++	u8 source_addr[ETH_ALEN];
++	unsigned int bank, loss;
++	int signal, band, source_idx = -1;
++
++	if (!count || count >= sizeof(buf))
++		return -EINVAL;
++	if (copy_from_user(buf, userbuf, count))
++		return -EFAULT;
++	buf[count] = '\0';
++
++	if (sscanf(buf, "%15s %u", command, &bank) == 2 &&
++	    !strcmp(command, "clear-bank")) {
++		if (bank >= HWSIM_KERNEL_MEDIUM_BANKS)
++			return -ERANGE;
++		for (source_idx = 0;
++		     source_idx < HWSIM_KERNEL_MEDIUM_MAX_RADIOS; source_idx++) {
++			for (band = 0; band < HWSIM_KERNEL_MEDIUM_BANDS; band++)
++				smp_store_release(&receiver->kernel_medium_links[bank]
++								[source_idx][band].valid,
++						  0);
++		}
++		return count;
++	}
++
++	if (sscanf(buf, "%15s %u %17s %7s %d %u", command, &bank,
++		   mac_text, band_text, &signal, &loss) != 6 ||
++	    strcmp(command, "set"))
++		return -EINVAL;
++	if (bank >= HWSIM_KERNEL_MEDIUM_BANKS || loss > 100 ||
++	    signal >= 0 || signal < -127)
++		return -ERANGE;
++	band = hwsim_kernel_medium_band_slot(band_text);
++	if (band < 0 || !mac_pton(mac_text, source_addr))
++		return -EINVAL;
++
++	spin_lock_bh(&hwsim_radio_lock);
++	list_for_each_entry(source, &hwsim_radios, list) {
++		if (ether_addr_equal(source->addresses[1].addr, source_addr)) {
++			source_idx = source->idx;
++			break;
++		}
++	}
++	if (source_idx < 0 || source_idx >= HWSIM_KERNEL_MEDIUM_MAX_RADIOS) {
++		spin_unlock_bh(&hwsim_radio_lock);
++		return -ENOENT;
++	}
++
++	link = &receiver->kernel_medium_links[bank][source_idx][band];
++	smp_store_release(&link->valid, 0);
++	ether_addr_copy(link->source, source_addr);
++	WRITE_ONCE(link->signal, signal);
++	WRITE_ONCE(link->loss_pct, loss);
++	smp_store_release(&link->valid, 1);
++	spin_unlock_bh(&hwsim_radio_lock);
++
++	return count;
++}
++
++static const struct file_operations hwsim_kernel_medium_links_fops = {
++	.owner = THIS_MODULE,
++	.open = hwsim_kernel_medium_links_open,
++	.read = seq_read,
++	.write = hwsim_kernel_medium_links_write,
++	.llseek = seq_lseek,
++	.release = single_release,
++};
++
+ static netdev_tx_t hwsim_mon_xmit(struct sk_buff *skb,
+ 					struct net_device *dev)
+ {
+@@ -1894,13 +2067,25 @@
+ 		if (READ_ONCE(kernel_medium)) {
+ 			unsigned int loss = min(READ_ONCE(kernel_medium_loss_pct),
+ 						100U);
++			struct hwsim_kernel_medium_link *link = NULL;
++			unsigned int bank = READ_ONCE(kernel_medium_bank) & 1;
++			int band = hwsim_kernel_medium_chan_slot(chan->band);
+ 			u64 sequence;
++			int signal = READ_ONCE(data2->rx_rssi);
++
++			if (data->idx < HWSIM_KERNEL_MEDIUM_MAX_RADIOS && band >= 0)
++				link = &data2->kernel_medium_links[bank]
++							     [data->idx][band];
++			if (link && smp_load_acquire(&link->valid)) {
++				signal = READ_ONCE(link->signal);
++				loss = READ_ONCE(link->loss_pct);
++			}
+ 
+ 			data2->kernel_medium_considered++;
+ 			sequence = data2->kernel_medium_considered +
+ 				   ((u64)data->idx << 32);
+ 
+-			rx_status.signal = READ_ONCE(data2->rx_rssi);
++			rx_status.signal = signal;
+ 			if (rx_status.signal < READ_ONCE(kernel_medium_cutoff) ||
+ 			    (loss && sequence % 100 < loss)) {
+ 				data2->kernel_medium_dropped++;
+@@ -5880,6 +6065,8 @@
+ 			   &data->kernel_medium_delivered);
+ 	debugfs_create_u64("kernel_medium_dropped", 0444, data->debugfs,
+ 			   &data->kernel_medium_dropped);
++	debugfs_create_file("kernel_medium_links", 0600, data->debugfs, data,
++			    &hwsim_kernel_medium_links_fops);
+ 	if (!data->use_chanctx)
+ 		debugfs_create_file("dfs_simulate_radar", 0222,
+ 				    data->debugfs,

@@ -1,0 +1,11 @@
+{
+  "schema": "wmdcfg.mobility.v1",
+  "name": "extender-loss-recovery",
+  "tags": ["extender-loss", "recovery", "clients-10"],
+  "duration_ms": 90000,
+  "tick_ms": 2000,
+  "seed": 1707,
+  "nodes": [
+    {"role": "extender_4", "kind": "fronthaul_ap", "position": [18, 12], "presence": [[0, 20000], [60000, 90000]]}
+  ]
+}

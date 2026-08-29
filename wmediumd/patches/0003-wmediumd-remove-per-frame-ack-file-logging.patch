@@ -1,0 +1,56 @@
+From: Codex <codex@openai.com>
+Subject: [PATCH] wmediumd: remove per-frame ACK file logging
+
+The multichannel diagnostic block opens, appends, and closes
+/tmp/ack_dbg.log for every unicast frame.  With two extenders and five clients
+this produces thousands of synchronous filesystem operations per minute in the
+scheduler hot path, causing high latency and 20-40% packet loss even at 50 dB
+SNR.  It is instrumentation rather than medium behavior; remove it and its
+otherwise-unused bookkeeping.
+
+---
+ wmediumd/wmediumd.c | 15 +--------------
+ 1 file changed, 1 insertion(+), 14 deletions(-)
+
+diff --git a/wmediumd/wmediumd.c b/wmediumd/wmediumd.c
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -424,7 +424,6 @@ static int mc_lookup_owned_vif(const u8 *dest, u32 *freq)
+ 	return 0;
+ }
+ enum ack_eligibility { ACK_ELIGIBLE, ACK_OFFCHANNEL, ACK_FREQ_UNKNOWN };
+-static unsigned long mc_offchannel_noack;   /* WMD 2/4: stale off-channel ACKs suppressed */
+ static enum ack_eligibility mc_receiver_ack_eligibility(struct wmediumd *ctx, const u8 *dest, u32 tx_freq)
+ {
+ 	u32 dfreq;
+@@ -582,11 +581,8 @@ static void queue_frame(struct wmediumd *ctx, struct station *station,
+ 
+ 	/* WMD 2/4: is the receiver actually tuned to this frequency? */
+ 	enum ack_eligibility mc_elig = ACK_ELIGIBLE;
+-	u32 mc_dfreq = 0; int mc_dfreq_known = 0;
+-	if (!noack) {
+-		mc_dfreq_known = mc_lookup_owned_vif(dest, &mc_dfreq);
++	if (!noack)
+ 		mc_elig = mc_receiver_ack_eligibility(ctx, dest, frame->freq);
+-	}
+ 
+ 	double choice = drand48();
+ 
+@@ -645,15 +641,6 @@ static void queue_frame(struct wmediumd *ctx, struct station *station,
+ 		}
+ 		frame->flags |= HWSIM_TX_STAT_ACK;
+ 	}
+-	if (!noack) {   /* WMD 2/4 instrumentation */
+-		FILE *_f = fopen("/tmp/ack_dbg.log", "a");
+-		const char *_v = mc_elig==ACK_OFFCHANNEL?"OFFCHANNEL":(mc_elig==ACK_FREQ_UNKNOWN?"UNKNOWN":"ELIGIBLE");
+-		if (mc_elig == ACK_OFFCHANNEL) mc_offchannel_noack++;
+-		if (_f) { fprintf(_f, "MC-ACK TX=%02x:%02x:%02x:%02x:%02x:%02x RX=%02x:%02x:%02x:%02x:%02x:%02x txfreq=%u dstfreq=%u known=%d verdict=%s acked=%d offchan_total=%lu\n",
+-			station->addr[0],station->addr[1],station->addr[2],station->addr[3],station->addr[4],station->addr[5],
+-			dest[0],dest[1],dest[2],dest[3],dest[4],dest[5], (unsigned)frame->freq, mc_dfreq, mc_dfreq_known, _v, is_acked?1:0, mc_offchannel_noack); fclose(_f); }
+-	}
+-
+ 	/*
+ 	 * delivery time starts after any equal or higher prio frame
+ 	 * (or now, if none).
+-- 
+2.43.0

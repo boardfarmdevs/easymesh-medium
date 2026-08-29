@@ -1,0 +1,82 @@
+From: Codex <codex@openai.com>
+Subject: [PATCH 10/10] wmediumd: reject stale receive-frequency clones
+
+The frequency filter deliberately treated a radio with no transmit-learned
+VIF as eligible for multicast on every frequency.  After each wmediumd
+restart, every 2.4 GHz beacon was consequently cloned toward idle 5 GHz WLAN
+clients.  Linux rejected those HWSIM_CMD_FRAME messages with EINVAL.  Sequence
+correlation of the errors identified only multicast beacons sent to radios
+whose active frequency had not yet been learned.
+
+An hwsim radio which is scanning or joining transmits a probe/authentication
+frame before it needs the matching response.  That frame already updates the
+VIF owner and frequency map.  Do not guess a receive frequency before this
+evidence exists.  This removes the rejected clone flood while retaining
+multicast on every transmit-learned channel context of a multi-channel radio.
+
+The same evidence must be checked at delivery time for unicast.  A client can
+transmit a 2.4 GHz probe request, advance its scan to 5 GHz, and leave directed
+probe responses queued on the old channel.  Recheck the receiver immediately
+before cloning a unicast frame so stale scan responses are discarded in
+userspace instead of rejected by the kernel.
+
+---
+ wmediumd/wmediumd.c | 18 +++++++++++-------
+ 1 file changed, 11 insertions(+), 7 deletions(-)
+
+diff --git a/wmediumd/wmediumd.c b/wmediumd/wmediumd.c
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -428,22 +428,20 @@
+ /* A BPI radio can host VIFs on several channel contexts, while a client radio
+  * normally has only one.  Broadcast/multicast delivery must therefore match
+  * any frequency learned for the receiving radio, not blindly clone every
+- * beacon to every hwsim radio.  Keep unknown radios eligible during bootstrap
+- * until their first transmitted frame reveals an active channel. */
++ * beacon to every hwsim radio.  Unknown radios first transmit while scanning;
++ * that frame teaches their active frequency before a response is delivered. */
+ static int mc_station_receives_freq(struct station *station, u32 freq)
+ {
+ 	size_t i;
+-	int has_known_freq = 0;
+ 
+ 	for (i = 0; i < mc_n_vifs; i++) {
+ 		if (!mc_vifs[i].freq_known || mc_vifs[i].owner != station)
+ 			continue;
+-		has_known_freq = 1;
+ 		if (mc_vifs[i].freq == freq)
+ 			return 1;
+ 	}
+ 
+-	return !has_known_freq;
++	return 0;
+ }
+ 
+ enum ack_eligibility { ACK_ELIGIBLE, ACK_OFFCHANNEL, ACK_FREQ_UNKNOWN };
+@@ -1020,6 +1018,12 @@
+ 						      frame->cookie);
+ 
+ 			} else if (station_has_addr(station, dest)) {
++				/* A scan may move the receiver after this response was
++				 * queued.  Recheck at delivery time instead of asking the
++				 * kernel to reject a stale off-channel clone. */
++				if (!mc_station_receives_freq(station, frame->freq))
++					continue;
++
+ 				if (set_interference_duration(ctx,
+ 					frame->sender->index, frame->freq,
+ 					frame->duration, frame->signal))
+@@ -1649,8 +1653,8 @@
+ 			printf("PASS delivery: learned VIF resolves to its owning radio without ADD_MAC_ADDR replay\n");
+ 		else { printf("FAIL delivery: learned VIF did not resolve to owning radio\n"); fails++; }
+ 		if (mc_station_receives_freq(&r3, 5180) &&
+ 		    !mc_station_receives_freq(&r3, 2437) &&
+-		    mc_station_receives_freq(&apa, 2437))
+-			printf("PASS multicast: known radios reject off-channel clones; unknown radios bootstrap\n");
++		    !mc_station_receives_freq(&apa, 2437))
++			printf("PASS multicast: known radios match frequency; unknown radios wait for TX learning\n");
+ 		else { printf("FAIL multicast: receiver frequency eligibility\n"); fails++; }
+ 
+ 		/* Simulate what HWSIM_CMD_ADD_MAC_ADDR does: register the STA MAC in
+-- 
+2.43.0

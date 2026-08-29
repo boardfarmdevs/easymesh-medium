@@ -1,0 +1,53 @@
+From: Codex <codex@local>
+Subject: [PATCH] wmediumd: honor configured default SNR
+
+The generated lab configuration has always emitted model.default_snr, but the
+SNR matrix was initialized unconditionally to the compiled 30 dB default. Read
+and validate the configured value before initializing unspecified links.
+
+diff --git a/wmediumd/config.c b/wmediumd/config.c
+--- a/wmediumd/config.c
++++ b/wmediumd/config.c
+@@ -406,12 +406,13 @@ int load_config(struct wmediumd *ctx, const char *file, const char *per_file)
+ 	const config_setting_t *ids, *links, *model_type;
+ 	const config_setting_t *error_probs = NULL, *error_prob;
+ 	const config_setting_t *enable_interference;
+-	const config_setting_t *fading_coefficient, *default_prob;
++	const config_setting_t *fading_coefficient, *default_prob, *default_snr;
+ 	int count_ids, i, j;
+ 	int start, end, snr;
+ 	struct station *station;
+ 	const char *model_type_str;
+ 	float default_prob_value = 0.0;
++	int default_snr_value = SNR_DEFAULT;
+ 	bool *link_map = NULL;
+ 
+ 	/*initialize the config file*/
+@@ -497,9 +498,24 @@ int load_config(struct wmediumd *ctx, const char *file, const char *per_file)
+ 		w_flogf(ctx, LOG_ERR, stderr, "Out of memory!\n");
+ 		return -ENOMEM;
+ 	}
++	default_snr = config_lookup(cf, "model.default_snr");
++	if (default_snr) {
++		if (config_setting_type(default_snr) != CONFIG_TYPE_INT) {
++			w_flogf(ctx, LOG_ERR, stderr,
++				"model.default_snr should be an integer\n");
++			goto fail;
++		}
++		default_snr_value = config_setting_get_int(default_snr);
++		if (default_snr_value < -20 || default_snr_value > 60) {
++			w_flogf(ctx, LOG_ERR, stderr,
++				"model.default_snr should be in [-20, 60]\n");
++			goto fail;
++		}
++	}
++
+ 	/* set default snrs */
+ 	for (i = 0; i < count_ids * count_ids; i++)
+-		ctx->snr_matrix[i] = SNR_DEFAULT;
++		ctx->snr_matrix[i] = default_snr_value;
+ 
+ 	links = config_lookup(cf, "ifaces.links");
+ 	if (!links) {
+-- 
+2.43.0

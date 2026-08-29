@@ -1,0 +1,249 @@
+From 15fd6a83729098f6d3e2ad460b4ceff1ebd3ca25 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Fri, 21 Aug 2026 10:00:00 -0700
+Subject: [PATCH] wmediumd: add read-only multi-client metrics socket
+
+Candidate-link measurement must remain available while the scenario configurator holds its long-lived control connection. It must also not give an hwsim CPE authority to alter the simulated medium.
+
+Allow multiple generation-protected control clients and add -R for a second endpoint that accepts status/readback operations but rejects both APPLY opcodes. Advertise the read-only property in HELLO so consumers can fail closed if the wrong socket is mounted. The scenario writer remains on -C.
+
+Upstream-Status: Inappropriate [hwsim EasyMesh laboratory interface]
+Signed-off-by: Codex <codex@openai.com>
+---
+ wmediumd/control.c  | 55 ++++++++++++++++++++++++++++++++-------------
+ wmediumd/control.h  |  3 +++
+ wmediumd/wmediumd.c | 15 +++++++++++--
+ wmediumd/wmediumd.h |  1 -
+ 4 files changed, 56 insertions(+), 18 deletions(-)
+
+diff --git a/wmediumd/control.c b/wmediumd/control.c
+index f38265c..58f5499 100644
+--- a/wmediumd/control.c
++++ b/wmediumd/control.c
+@@ -24,6 +24,12 @@
+ struct wmd_control_client {
+ 	struct usfstl_loop_entry loop;
+ 	struct wmediumd *ctx;
++	bool read_only;
++};
++
++struct wmd_control_listener {
++	struct wmediumd *ctx;
++	bool read_only;
+ };
+ 
+ struct resolved_update {
+@@ -94,6 +100,8 @@ static int send_info(struct wmd_control_client *client, uint16_t opcode)
+ 		if (ctx->frequency_override_capacity > max_updates)
+ 			max_updates = ctx->frequency_override_capacity;
+ 	}
++	if (client->read_only)
++		capabilities |= WMDC_CAP_READ_ONLY;
+ 	struct wmdc_info info = {
+ 		.instance_hi = htobe64(ctx->control_instance_hi),
+ 		.instance_lo = htobe64(ctx->control_instance_lo),
+@@ -426,7 +434,6 @@ static int handle_frequency_dump(struct wmd_control_client *client)
+ 
+ static void control_disconnect(struct wmd_control_client *client)
+ {
+-	client->ctx->control_client_active = false;
+ 	usfstl_loop_unregister(&client->loop);
+ 	close(client->loop.fd);
+ 	free(client);
+@@ -469,8 +476,11 @@ static void control_handler(struct usfstl_loop_entry *entry)
+ 			result = send_info(client, opcode);
+ 		break;
+ 	case WMDC_OP_APPLY:
+-		result = handle_apply(client, header, frame + sizeof(*header),
+-				      payload_len);
++		result = client->read_only ?
++			send_response(entry->fd, opcode, WMDC_ERR_READ_ONLY,
++				client->ctx->control_generation, NULL, 0) :
++			handle_apply(client, header, frame + sizeof(*header),
++				     payload_len);
+ 		break;
+ 	case WMDC_OP_GET_LINK:
+ 		result = handle_get(client, frame + sizeof(*header), payload_len);
+@@ -480,8 +490,11 @@ static void control_handler(struct usfstl_loop_entry *entry)
+ 			result = handle_dump(client);
+ 		break;
+ 	case WMDC_OP_APPLY_FREQUENCY:
+-		result = handle_frequency_apply(client, header,
+-			frame + sizeof(*header), payload_len);
++		result = client->read_only ?
++			send_response(entry->fd, opcode, WMDC_ERR_READ_ONLY,
++				client->ctx->control_generation, NULL, 0) :
++			handle_frequency_apply(client, header,
++				frame + sizeof(*header), payload_len);
+ 		break;
+ 	case WMDC_OP_GET_FREQUENCY:
+ 		result = handle_frequency_get(client, frame + sizeof(*header),
+@@ -500,27 +513,36 @@ static void control_handler(struct usfstl_loop_entry *entry)
+ 
+ static void control_connected(int fd, void *data)
+ {
+-	struct wmediumd *ctx = data;
++	struct wmd_control_listener *listener = data;
+ 	struct wmd_control_client *client;
+ 
+ 	if (fd < 0)
+ 		return;
+-	if (ctx->control_client_active) {
+-		close(fd);
+-		return;
+-	}
+ 	client = calloc(1, sizeof(*client));
+ 	if (!client) {
+ 		close(fd);
+ 		return;
+ 	}
+-	ctx->control_client_active = true;
+-	client->ctx = ctx;
++	client->ctx = listener->ctx;
++	client->read_only = listener->read_only;
+ 	client->loop.fd = fd;
+ 	client->loop.handler = control_handler;
+ 	usfstl_loop_register(&client->loop);
+ }
+ 
++static void control_listener_start(struct wmediumd *ctx, const char *path,
++				   bool read_only)
++{
++	struct wmd_control_listener *listener = calloc(1, sizeof(*listener));
++
++	if (!listener)
++		return;
++	listener->ctx = ctx;
++	listener->read_only = read_only;
++	usfstl_uds_create_seqpacket(path, control_connected, listener);
++	chmod(path, read_only ? 0666 : 0660);
++}
++
+ void wmd_control_start(struct wmediumd *ctx, const char *path)
+ {
+ 	uint64_t instance[2];
+@@ -535,7 +557,6 @@ void wmd_control_start(struct wmediumd *ctx, const char *path)
+ 	ctx->control_instance_hi = instance[0];
+ 	ctx->control_instance_lo = instance[1];
+ 	ctx->control_generation = 0;
+-	ctx->control_client_active = false;
+ 	payload_capacity = (WMDC_MAX_FRAME - sizeof(struct wmdc_header)) /
+ 		sizeof(struct wmdc_frequency_link);
+ 	desired_capacity = (size_t)ctx->num_stas * ctx->num_stas *
+@@ -544,6 +565,10 @@ void wmd_control_start(struct wmediumd *ctx, const char *path)
+ 		desired_capacity : payload_capacity;
+ 	ctx->frequency_overrides = calloc(ctx->frequency_override_capacity,
+ 					  sizeof(*ctx->frequency_overrides));
+-	usfstl_uds_create_seqpacket(path, control_connected, ctx);
+-	chmod(path, 0660);
++	control_listener_start(ctx, path, false);
++}
++
++void wmd_control_start_readonly(struct wmediumd *ctx, const char *path)
++{
++	control_listener_start(ctx, path, true);
+ }
+diff --git a/wmediumd/control.h b/wmediumd/control.h
+index 83e2bed..b84f7d7 100644
+--- a/wmediumd/control.h
++++ b/wmediumd/control.h
+@@ -31,6 +31,7 @@ enum wmdc_status {
+ 	WMDC_ERR_VALUE = 5,
+ 	WMDC_ERR_INTERNAL = 6,
+ 	WMDC_ERR_FREQUENCY = 7,
++	WMDC_ERR_READ_ONLY = 8,
+ };
+ 
+ enum wmdc_capability {
+@@ -39,6 +40,7 @@ enum wmdc_capability {
+ 	WMDC_CAP_READBACK = 1U << 2,
+ 	WMDC_CAP_DUMP = 1U << 3,
+ 	WMDC_CAP_FREQUENCY_QUALIFIED_SNR = 1U << 4,
++	WMDC_CAP_READ_ONLY = 1U << 5,
+ };
+ 
+ #define WMDC_FREQUENCY_OVERRIDE (1U << 0)
+@@ -77,6 +79,7 @@ struct wmdc_info {
+ } __attribute__((packed));
+ 
+ void wmd_control_start(struct wmediumd *ctx, const char *path);
++void wmd_control_start_readonly(struct wmediumd *ctx, const char *path);
+ int wmd_get_link_snr(struct wmediumd *ctx, struct station *sender,
+ 		     struct station *receiver, uint32_t frequency_mhz);
+ 
+diff --git a/wmediumd/wmediumd.c b/wmediumd/wmediumd.c
+index 757eb1c..cd2e363 100644
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -1558,6 +1558,7 @@ static void print_help(int exval)
+ 	printf("  -u socket       expose vhost-user socket, don't use netlink\n");
+ 	printf("  -a socket       expose wmediumd API socket\n");
+ 	printf("  -C socket       expose atomic scenario-control socket\n");
++	printf("  -R socket       expose read-only link-metrics socket\n");
+ 	printf("  -n              force netlink use even with vhost-user\n");
+ 	printf("  -p FILE         log packets to pcapng file FILE\n");
+ 
+@@ -1784,7 +1785,7 @@ int main(int argc, char *argv[])
+ 	char *config_file = NULL;
+ 	char *per_file = NULL;
+ 	const char *time_socket = NULL, *api_socket = NULL;
+-	const char *control_socket = NULL;
++	const char *control_socket = NULL, *metrics_socket = NULL;
+ 	struct usfstl_sched_ctrl ctrl = {};
+ 	struct usfstl_vhost_user_server vusrv = {
+ 		.ops = &wmediumd_vu_ops,
+@@ -1807,7 +1808,7 @@ int main(int argc, char *argv[])
+ 	unsigned long int parse_log_lvl;
+ 	char* parse_end_token;
+ 
+-	while ((opt = getopt(argc, argv, "hVc:l:x:t:u:a:C:np:T")) != -1) {
++	while ((opt = getopt(argc, argv, "hVc:l:x:t:u:a:C:R:np:T")) != -1) {
+ 		switch (opt) {
+ 		case 'T':
+ 			exit(wmd_selftest());
+@@ -1853,6 +1854,9 @@ int main(int argc, char *argv[])
+ 		case 'C':
+ 			control_socket = optarg;
+ 			break;
++		case 'R':
++			metrics_socket = optarg;
++			break;
+ 		case 'n':
+ 			force_netlink = true;
+ 			break;
+@@ -1875,6 +1879,11 @@ int main(int argc, char *argv[])
+ 		printf("%s: config file must be supplied\n", argv[0]);
+ 		print_help(EXIT_FAILURE);
+ 	}
++	if (metrics_socket && !control_socket) {
++		printf("%s: -R requires -C so both sockets share initialized state\n",
++		       argv[0]);
++		return EXIT_FAILURE;
++	}
+ 
+ 	w_logf(&ctx, LOG_NOTICE, "Input configuration file: %s\n", config_file);
+ 
+@@ -1920,6 +1929,8 @@ int main(int argc, char *argv[])
+ 		usfstl_uds_create(api_socket, wmediumd_api_connected, &ctx);
+ 	if (control_socket)
+ 		wmd_control_start(&ctx, control_socket);
++	if (metrics_socket)
++		wmd_control_start_readonly(&ctx, metrics_socket);
+ 
+ 	if (time_socket) {
+ 		usfstl_sched_ctrl_start(&ctrl, time_socket,
+diff --git a/wmediumd/wmediumd.h b/wmediumd/wmediumd.h
+index 52efe87..934d074 100644
+--- a/wmediumd/wmediumd.h
++++ b/wmediumd/wmediumd.h
+@@ -236,7 +236,6 @@ struct wmediumd {
+ 	u64 control_instance_hi;
+ 	u64 control_instance_lo;
+ 	u64 control_generation;
+-	bool control_client_active;
+ 	struct wmd_frequency_override *frequency_overrides;
+ 	size_t frequency_override_capacity;
+ };
+-- 
+2.53.0
+

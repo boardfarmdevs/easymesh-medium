@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wmediumd-configurator"
+version = "0.1.0"
+description = "Deterministic RF scenario compiler for the EasyMesh hwsim lab"
+requires-python = ">=3.8"
+dependencies = []
+
+[project.scripts]
+wmdcfg = "wmdcfg.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["wmdcfg*"]

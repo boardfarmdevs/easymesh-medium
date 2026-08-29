@@ -1,0 +1,12 @@
+{
+  "schema": "wmdcfg.mobility.v1",
+  "name": "fast-transit",
+  "tags": ["fast-transit", "mobile-2", "clients-12"],
+  "duration_ms": 30000,
+  "tick_ms": 1000,
+  "seed": 1706,
+  "nodes": [
+    {"role": "sta_mobile_01", "path": [{"time_ms": 0, "position": [1, 2]}, {"time_ms": 10000, "position": [19, 2]}, {"time_ms": 20000, "position": [1, 12]}, {"time_ms": 30000, "position": [19, 12]}]},
+    {"role": "sta_mobile_02", "path": [{"time_ms": 0, "position": [19, 7]}, {"time_ms": 10000, "position": [1, 7]}, {"time_ms": 20000, "position": [19, 7]}, {"time_ms": 30000, "position": [1, 7]}]}
+  ]
+}

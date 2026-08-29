@@ -1,0 +1,12 @@
+{
+  "schema": "wmdcfg.mobility.v1",
+  "name": "disappear-reappear",
+  "tags": ["disappearance", "reappearance", "mobile-2", "clients-12"],
+  "duration_ms": 60000,
+  "tick_ms": 2000,
+  "seed": 1705,
+  "nodes": [
+    {"role": "sta_mobile_01", "position": [4, 4], "presence": [[0, 16000], [32000, 60000]]},
+    {"role": "sta_mobile_02", "position": [16, 10], "presence": [[0, 24000], [40000, 60000]]}
+  ]
+}

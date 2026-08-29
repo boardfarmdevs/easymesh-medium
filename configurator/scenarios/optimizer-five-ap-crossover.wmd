@@ -1,0 +1,47 @@
+# Five-agent optimizer acceptance stimulus.  The serving AP degrades while one
+# designated target improves; every other same-band candidate remains weak.
+# This makes the expected target unambiguous without giving the optimizer any
+# access to scenario truth.
+scenario optimizer_five_ap_crossover {
+    language 1
+    tick 1s
+    require radio_pair_snr
+    require atomic_generations
+    require readback
+    protect backhaul
+    restore captured
+
+    role client : station
+    role source : fronthaul_ap
+    role target : fronthaul_ap
+    role alternate_1 : fronthaul_ap
+    role alternate_2 : fronthaul_ap
+    role alternate_3 : fronthaul_ap
+
+    phase baseline for 10s {
+        parallel {
+            link client <-> source snr = 42dB
+            link client <-> target snr = 10dB
+            link client <-> alternate_1 snr = 10dB
+            link client <-> alternate_2 snr = 10dB
+            link client <-> alternate_3 snr = 10dB
+        }
+        mark "one strong serving AP; every candidate is weak"
+    }
+
+    phase crossover for 30s {
+        parallel {
+            link client <-> source snr 42dB -> 10dB linear
+            link client <-> target snr 10dB -> 42dB linear
+            link client <-> alternate_1 snr = 10dB
+            link client <-> alternate_2 snr = 10dB
+            link client <-> alternate_3 snr = 10dB
+        }
+        mark "only the designated target improves"
+    }
+
+    phase destination_hold for 90s {
+        hold
+        mark "hold the unique target across serialized observation and verification cycles"
+    }
+}

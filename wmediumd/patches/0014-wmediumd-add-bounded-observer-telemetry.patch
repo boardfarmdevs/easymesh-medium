@@ -1,0 +1,1822 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Rob Vogelaar <rob.vogelaar@libertyglobal.com>
+Date: Mon, 24 Aug 2026 00:00:00 -0700
+Subject: [PATCH] wmediumd: expose bounded observer telemetry
+
+Add a separate host-only, read-only observer endpoint with bounded cumulative
+packet and outcome counters, sparse active-link and radio-frequency state,
+learned VIF ownership, queue health, attributed netlink rejections, paged delta
+dumps, and a low-rate event ring. Keep the existing scenario and HAL metrics
+sockets unchanged.
+
+---
+diff --git a/wmediumd/control.c b/wmediumd/control.c
+index 58f5499..a9cd27a 100644
+--- a/wmediumd/control.c
++++ b/wmediumd/control.c
+@@ -25,11 +25,13 @@ struct wmd_control_client {
+ 	struct usfstl_loop_entry loop;
+ 	struct wmediumd *ctx;
+ 	bool read_only;
++	bool telemetry;
+ };
+ 
+ struct wmd_control_listener {
+ 	struct wmediumd *ctx;
+ 	bool read_only;
++	bool telemetry;
+ };
+ 
+ struct resolved_update {
+@@ -50,6 +52,325 @@ struct resolved_frequency_update {
+ #define WMDC_FREQUENCY_MIN_MHZ 2300U
+ #define WMDC_FREQUENCY_MAX_MHZ 7125U
+ #define WMDC_FREQUENCY_SLOTS_PER_PAIR 4U
++#define WMDT_ACTIVE_LINK_LIMIT 4096U
++#define WMDT_FREQUENCIES_PER_RADIO 8U
++#define WMDT_VIFS_PER_RADIO 16U
++#define WMDT_EVENT_CAPACITY 1024U
++
++struct wmdt_radio_frequency_state {
++	bool active;
++	int radio;
++	uint32_t frequency_mhz;
++	uint64_t last_update_sequence;
++	uint64_t last_seen_usec;
++	uint64_t frames;
++	uint64_t bytes;
++	uint64_t frame_types[4];
++	uint64_t eapol_frames;
++	uint64_t unicast_frames;
++	uint64_t multicast_frames;
++	uint64_t attempts;
++	uint64_t retries;
++	uint64_t rx_injected;
++	uint64_t drops;
++	uint32_t queue_depth_max;
++	uint8_t last_type;
++	uint8_t last_subtype;
++	uint8_t last_access_category;
++};
++
++struct wmdt_active_link_state {
++	bool active;
++	int source;
++	int destination;
++	uint32_t frequency_mhz;
++	uint32_t flags;
++	uint64_t last_update_sequence;
++	uint64_t first_seen_usec;
++	uint64_t last_seen_usec;
++	uint64_t frames;
++	uint64_t bytes;
++	uint64_t attempts;
++	uint64_t retries;
++	uint64_t acked;
++	uint64_t no_ack;
++	uint64_t rx_injected;
++	uint64_t drops_offchannel;
++	uint64_t drops_cca;
++	uint64_t drops_interference;
++	uint64_t drops_per;
++	uint64_t drops_no_receiver;
++	uint64_t netlink_rejections;
++	int32_t last_signal_dbm;
++	int32_t last_snr_db;
++	uint32_t last_per_million;
++	uint8_t last_type;
++	uint8_t last_subtype;
++	uint8_t last_access_category;
++};
++
++struct wmdt_vif_state {
++	bool active;
++	uint8_t vif[6];
++	int radio;
++	uint32_t frequency_mhz;
++	uint64_t last_update_sequence;
++};
++
++struct wmdt_event_state {
++	uint64_t sequence;
++	uint64_t time_usec;
++	uint32_t type;
++	int32_t value;
++	int source;
++	int destination;
++	uint32_t frequency_mhz;
++	uint32_t auxiliary;
++};
++
++struct wmd_telemetry {
++	uint64_t sequence;
++	uint64_t frames_seen;
++	uint64_t bytes_seen;
++	uint64_t frame_types[4];
++	uint64_t eapol_frames;
++	uint64_t unicast_frames;
++	uint64_t multicast_frames;
++	uint64_t tx_attempts;
++	uint64_t retries;
++	uint64_t tx_acked;
++	uint64_t tx_no_ack;
++	uint64_t rx_injected;
++	uint64_t multicast_candidates;
++	uint64_t drops_offchannel;
++	uint64_t drops_cca;
++	uint64_t drops_interference;
++	uint64_t drops_per;
++	uint64_t drops_no_receiver;
++	uint64_t netlink_clone_einval;
++	uint64_t netlink_other_errors;
++	uint64_t active_link_evictions;
++	uint64_t event_overruns;
++	uint64_t queue_delay_usec_max;
++	uint64_t queue_delay_usec_last;
++	uint32_t queue_depth;
++	uint32_t queue_depth_max;
++	struct wmdt_radio_frequency_state *radio_frequencies;
++	size_t radio_frequency_capacity;
++	struct wmdt_active_link_state *active_links;
++	size_t active_link_capacity;
++	struct wmdt_vif_state *vifs;
++	size_t vif_capacity;
++	struct wmdt_event_state events[WMDT_EVENT_CAPACITY];
++	uint64_t event_next_sequence;
++	uint64_t event_count;
++	uint32_t event_write_index;
++};
++
++static uint64_t telemetry_now_usec(void)
++{
++	return scheduler.current_time;
++}
++
++static uint32_t telemetry_probability(double probability)
++{
++	if (probability <= 0.0)
++		return 0;
++	if (probability >= 1.0)
++		return 1000000;
++	return (uint32_t)(probability * 1000000.0 + 0.5);
++}
++
++static uint8_t telemetry_frame_type(const struct frame *frame)
++{
++	uint8_t type;
++
++	if (frame->data_len < 2)
++		return 3;
++	type = frame->data[0] & FCTL_FTYPE;
++	if (type == FTYPE_MGMT)
++		return 0;
++	if (type == 0x04)
++		return 1;
++	if (type == FTYPE_DATA)
++		return 2;
++	return 3;
++}
++
++static uint8_t telemetry_frame_subtype(const struct frame *frame)
++{
++	return frame->data_len ? (frame->data[0] >> 4) & 0x0f : 0;
++}
++
++static bool telemetry_frame_is_eapol(const struct frame *frame)
++{
++	size_t header_len = 24;
++
++	if (telemetry_frame_type(frame) != 2 || frame->data_len < header_len ||
++	    (frame->data[1] & 0x40))
++		return false;
++	if ((frame->data[1] & (FCTL_TODS | FCTL_FROMDS)) ==
++	    (FCTL_TODS | FCTL_FROMDS))
++		header_len += 6;
++	if ((frame->data[0] & (FCTL_FTYPE | STYPE_QOS_DATA)) ==
++	    (FTYPE_DATA | STYPE_QOS_DATA))
++		header_len += 2;
++	if (frame->data_len < header_len + 8)
++		return false;
++	return memcmp(frame->data + header_len,
++		      "\xaa\xaa\x03\x00\x00\x00\x88\x8e", 8) == 0;
++}
++
++static void telemetry_event(struct wmediumd *ctx, uint32_t type,
++			    int source, int destination, uint32_t frequency_mhz,
++			    int32_t value, uint32_t auxiliary)
++{
++	struct wmd_telemetry *telemetry = ctx->telemetry;
++	struct wmdt_event_state *event;
++	uint64_t event_sequence;
++
++	if (!telemetry)
++		return;
++	event_sequence = ++telemetry->sequence;
++	telemetry->event_next_sequence = event_sequence;
++	event = &telemetry->events[telemetry->event_write_index];
++	telemetry->event_write_index =
++		(telemetry->event_write_index + 1) % WMDT_EVENT_CAPACITY;
++	if (telemetry->event_count == WMDT_EVENT_CAPACITY)
++		telemetry->event_overruns++;
++	else
++		telemetry->event_count++;
++	*event = (struct wmdt_event_state) {
++		.sequence = event_sequence,
++		.time_usec = telemetry_now_usec(),
++		.type = type,
++		.value = value,
++		.source = source,
++		.destination = destination,
++		.frequency_mhz = frequency_mhz,
++		.auxiliary = auxiliary,
++	};
++}
++
++static struct wmdt_radio_frequency_state *
++telemetry_radio_frequency(struct wmediumd *ctx, int radio,
++			  uint32_t frequency_mhz, bool create)
++{
++	struct wmd_telemetry *telemetry = ctx->telemetry;
++	struct wmdt_radio_frequency_state *free_slot = NULL;
++	size_t i;
++
++	if (!telemetry)
++		return NULL;
++	for (i = 0; i < telemetry->radio_frequency_capacity; i++) {
++		struct wmdt_radio_frequency_state *entry =
++			&telemetry->radio_frequencies[i];
++
++		if (entry->active && entry->radio == radio &&
++		    entry->frequency_mhz == frequency_mhz)
++			return entry;
++		if (!entry->active && !free_slot)
++			free_slot = entry;
++	}
++	if (!create || !free_slot)
++		return NULL;
++	*free_slot = (struct wmdt_radio_frequency_state) {
++		.active = true,
++		.radio = radio,
++		.frequency_mhz = frequency_mhz,
++	};
++	return free_slot;
++}
++
++static struct wmdt_active_link_state *
++telemetry_active_link(struct wmediumd *ctx, int source, int destination,
++		      uint32_t frequency_mhz, bool create)
++{
++	struct wmd_telemetry *telemetry = ctx->telemetry;
++	struct wmdt_active_link_state *free_slot = NULL, *oldest = NULL;
++	size_t i;
++
++	if (!telemetry || source < 0 || destination < 0)
++		return NULL;
++	for (i = 0; i < telemetry->active_link_capacity; i++) {
++		struct wmdt_active_link_state *entry = &telemetry->active_links[i];
++
++		if (entry->active && entry->source == source &&
++		    entry->destination == destination &&
++		    entry->frequency_mhz == frequency_mhz)
++			return entry;
++		if (!entry->active && !free_slot)
++			free_slot = entry;
++		if (entry->active && (!oldest ||
++		    entry->last_seen_usec < oldest->last_seen_usec))
++			oldest = entry;
++	}
++	if (!create)
++		return NULL;
++	if (!free_slot) {
++		free_slot = oldest;
++		telemetry->active_link_evictions++;
++		telemetry_event(ctx, WMDC_EVENT_ACTIVE_LINK_EVICTED,
++			free_slot->source, free_slot->destination,
++			free_slot->frequency_mhz, 0, 0);
++	}
++	*free_slot = (struct wmdt_active_link_state) {
++		.active = true,
++		.source = source,
++		.destination = destination,
++		.frequency_mhz = frequency_mhz,
++		.first_seen_usec = telemetry_now_usec(),
++	};
++	telemetry_event(ctx, WMDC_EVENT_LINK_ACTIVE, source, destination,
++			frequency_mhz, 0, 0);
++	return free_slot;
++}
++
++static void telemetry_update_link_common(struct wmd_telemetry *telemetry,
++					 struct wmdt_active_link_state *link,
++					 const struct frame *frame)
++{
++	if (!link)
++		return;
++	link->last_update_sequence = telemetry->sequence;
++	link->last_seen_usec = telemetry_now_usec();
++	link->last_signal_dbm = frame->signal;
++	link->last_snr_db = frame->telemetry_snr_db;
++	link->last_per_million = frame->telemetry_per_million;
++	link->last_type = telemetry_frame_type(frame);
++	link->last_subtype = telemetry_frame_subtype(frame);
++	link->last_access_category = frame->telemetry_access_category;
++}
++
++static int telemetry_count_active_links(const struct wmd_telemetry *telemetry)
++{
++	size_t i;
++	int count = 0;
++
++	for (i = 0; i < telemetry->active_link_capacity; i++)
++		count += telemetry->active_links[i].active;
++	return count;
++}
++
++static int telemetry_count_radio_frequencies(const struct wmd_telemetry *telemetry)
++{
++	size_t i;
++	int count = 0;
++
++	for (i = 0; i < telemetry->radio_frequency_capacity; i++)
++		count += telemetry->radio_frequencies[i].active;
++	return count;
++}
++
++static int telemetry_count_vifs(const struct wmd_telemetry *telemetry)
++{
++	size_t i;
++	int count = 0;
++
++	for (i = 0; i < telemetry->vif_capacity; i++)
++		count += telemetry->vifs[i].active;
++	return count;
++}
+ 
+ static int station_index(struct wmediumd *ctx, const uint8_t *address)
+ {
+@@ -102,6 +423,9 @@ static int send_info(struct wmd_control_client *client, uint16_t opcode)
+ 	}
+ 	if (client->read_only)
+ 		capabilities |= WMDC_CAP_READ_ONLY;
++	if (client->telemetry)
++		capabilities |= WMDC_CAP_TELEMETRY | WMDC_CAP_PAGED_DUMPS |
++			WMDC_CAP_VIF_OWNERSHIP | WMDC_CAP_EVENT_RING;
+ 	struct wmdc_info info = {
+ 		.instance_hi = htobe64(ctx->control_instance_hi),
+ 		.instance_lo = htobe64(ctx->control_instance_lo),
+@@ -141,6 +465,246 @@ int wmd_get_link_snr(struct wmediumd *ctx, struct station *sender,
+ 	return ctx->get_link_snr(ctx, sender, receiver);
+ }
+ 
++void wmd_telemetry_record_tx(struct wmediumd *ctx, struct frame *frame,
++			     struct station *destination, int access_category,
++			     unsigned int attempts, unsigned int retries,
++			     bool acked, bool no_ack, bool offchannel,
++			     int snr_db, double error_prob,
++			     uint64_t queue_delay_usec)
++{
++	struct wmd_telemetry *telemetry = ctx->telemetry;
++	struct wmdt_radio_frequency_state *radio;
++	struct wmdt_active_link_state *link = NULL;
++	uint8_t type;
++	bool multicast;
++
++	if (!telemetry)
++		return;
++	telemetry->sequence++;
++	type = telemetry_frame_type(frame);
++	multicast = frame->data_len >= 10 && (frame->data[4] & 0x01);
++	frame->telemetry_access_category = access_category;
++	frame->telemetry_destination = destination ? destination->index : -1;
++	frame->telemetry_snr_db = snr_db;
++	frame->telemetry_per_million = telemetry_probability(error_prob);
++	frame->telemetry_attempts = attempts;
++	frame->telemetry_retries = retries;
++
++	telemetry->frames_seen++;
++	telemetry->bytes_seen += frame->data_len;
++	telemetry->frame_types[type]++;
++	telemetry->eapol_frames += telemetry_frame_is_eapol(frame);
++	telemetry->unicast_frames += !multicast;
++	telemetry->multicast_frames += multicast;
++	telemetry->tx_attempts += attempts;
++	telemetry->retries += retries;
++	if (!no_ack) {
++		telemetry->tx_acked += acked;
++		telemetry->tx_no_ack += !acked;
++	}
++	telemetry->queue_depth++;
++	if (telemetry->queue_depth > telemetry->queue_depth_max)
++		telemetry->queue_depth_max = telemetry->queue_depth;
++	telemetry->queue_delay_usec_last = queue_delay_usec;
++	if (queue_delay_usec > telemetry->queue_delay_usec_max)
++		telemetry->queue_delay_usec_max = queue_delay_usec;
++
++	radio = telemetry_radio_frequency(ctx, frame->sender->index,
++					  frame->freq, true);
++	if (radio) {
++		radio->last_update_sequence = telemetry->sequence;
++		radio->last_seen_usec = telemetry_now_usec();
++		radio->frames++;
++		radio->bytes += frame->data_len;
++		radio->frame_types[type]++;
++		radio->eapol_frames += telemetry_frame_is_eapol(frame);
++		radio->unicast_frames += !multicast;
++		radio->multicast_frames += multicast;
++		radio->attempts += attempts;
++		radio->retries += retries;
++		if (telemetry->queue_depth > radio->queue_depth_max)
++			radio->queue_depth_max = telemetry->queue_depth;
++		radio->last_type = type;
++		radio->last_subtype = telemetry_frame_subtype(frame);
++		radio->last_access_category = access_category;
++	}
++
++	if (destination) {
++		link = telemetry_active_link(ctx, frame->sender->index,
++			destination->index, frame->freq, true);
++		if (link) {
++			link->frames++;
++			link->bytes += frame->data_len;
++			link->attempts += attempts;
++			link->retries += retries;
++			link->acked += !no_ack && acked;
++			link->no_ack += !no_ack && !acked;
++			if (offchannel)
++				link->drops_offchannel++;
++			else if (!no_ack && !acked)
++				link->drops_per++;
++			telemetry_update_link_common(telemetry, link, frame);
++		}
++	}
++	if (offchannel) {
++		telemetry->drops_offchannel++;
++		if (radio)
++			radio->drops++;
++	} else if (!multicast && destination && !acked) {
++		telemetry->drops_per++;
++		if (radio)
++			radio->drops++;
++	} else if (!multicast && !destination) {
++		telemetry->drops_no_receiver++;
++		if (radio)
++			radio->drops++;
++	}
++}
++
++void wmd_telemetry_record_rx(struct wmediumd *ctx, struct frame *frame,
++			     struct station *destination,
++			     enum wmd_telemetry_outcome outcome,
++			     int signal_dbm, int snr_db, double error_prob)
++{
++	struct wmd_telemetry *telemetry = ctx->telemetry;
++	struct wmdt_radio_frequency_state *radio;
++	struct wmdt_active_link_state *link;
++
++	if (!telemetry)
++		return;
++	telemetry->sequence++;
++	frame->telemetry_snr_db = snr_db;
++	frame->telemetry_per_million = telemetry_probability(error_prob);
++	link = destination ? telemetry_active_link(ctx, frame->sender->index,
++		destination->index, frame->freq, true) : NULL;
++	radio = telemetry_radio_frequency(ctx, frame->sender->index,
++					  frame->freq, true);
++	if (frame->data_len >= 10 && (frame->data[4] & 0x01)) {
++		telemetry->multicast_candidates++;
++		if (link)
++			link->flags |= WMDC_LINK_MULTICAST;
++	}
++	switch (outcome) {
++	case WMD_TELEMETRY_RX_INJECTED:
++		telemetry->rx_injected++;
++		if (radio)
++			radio->rx_injected++;
++		if (link)
++			link->rx_injected++;
++		break;
++	case WMD_TELEMETRY_DROP_OFFCHANNEL:
++		telemetry->drops_offchannel++;
++		if (link)
++			link->drops_offchannel++;
++		break;
++	case WMD_TELEMETRY_DROP_CCA:
++		telemetry->drops_cca++;
++		if (link)
++			link->drops_cca++;
++		break;
++	case WMD_TELEMETRY_DROP_INTERFERENCE:
++		telemetry->drops_interference++;
++		if (link)
++			link->drops_interference++;
++		break;
++	case WMD_TELEMETRY_DROP_PER:
++		telemetry->drops_per++;
++		if (link)
++			link->drops_per++;
++		break;
++	case WMD_TELEMETRY_DROP_NO_RECEIVER:
++		telemetry->drops_no_receiver++;
++		if (link)
++			link->drops_no_receiver++;
++		break;
++	}
++	if (radio && outcome != WMD_TELEMETRY_RX_INJECTED)
++		radio->drops++;
++	telemetry_update_link_common(telemetry, link, frame);
++	if (link)
++		link->last_signal_dbm = signal_dbm;
++}
++
++void wmd_telemetry_frame_done(struct wmediumd *ctx)
++{
++	if (ctx->telemetry && ctx->telemetry->queue_depth)
++		ctx->telemetry->queue_depth--;
++}
++
++void wmd_telemetry_vif_update(struct wmediumd *ctx, const u8 *vif,
++			      struct station *owner, u32 frequency_mhz,
++			      bool changed)
++{
++	struct wmd_telemetry *telemetry = ctx->telemetry;
++	struct wmdt_vif_state *entry = NULL;
++	size_t i;
++	bool learned = false;
++
++	if (!telemetry || !owner)
++		return;
++	for (i = 0; i < telemetry->vif_capacity; i++) {
++		if (telemetry->vifs[i].active &&
++		    memcmp(telemetry->vifs[i].vif, vif, 6) == 0) {
++			entry = &telemetry->vifs[i];
++			break;
++		}
++		if (!telemetry->vifs[i].active && !entry)
++			entry = &telemetry->vifs[i];
++	}
++	if (!entry)
++		return;
++	learned = !entry->active;
++	if (!learned && !changed && entry->radio == owner->index &&
++	    entry->frequency_mhz == frequency_mhz)
++		return;
++	telemetry->sequence++;
++	entry->active = true;
++	memcpy(entry->vif, vif, 6);
++	entry->radio = owner->index;
++	entry->frequency_mhz = frequency_mhz;
++	entry->last_update_sequence = telemetry->sequence;
++	telemetry_event(ctx, learned ? WMDC_EVENT_VIF_LEARNED :
++			WMDC_EVENT_VIF_CHANGED, owner->index, -1,
++			frequency_mhz, 0, 0);
++}
++
++void wmd_telemetry_generation(struct wmediumd *ctx, u64 generation,
++			      bool frequency_qualified, u32 updates)
++{
++	if (!ctx->telemetry)
++		return;
++	telemetry_event(ctx, WMDC_EVENT_GENERATION_APPLIED, -1, -1, 0,
++			(int32_t)(generation & 0x7fffffff),
++			updates | (frequency_qualified ? 0x80000000U : 0));
++}
++
++void wmd_telemetry_netlink_rejection(struct wmediumd *ctx,
++			     struct station *source,
++			     struct station *destination, u32 frequency_mhz,
++			     int error, bool transient)
++{
++	struct wmd_telemetry *telemetry = ctx->telemetry;
++	struct wmdt_active_link_state *link;
++
++	if (!telemetry)
++		return;
++	telemetry->sequence++;
++	if (transient)
++		telemetry->netlink_clone_einval++;
++	else
++		telemetry->netlink_other_errors++;
++	link = source && destination ? telemetry_active_link(ctx, source->index,
++		destination->index, frequency_mhz, true) : NULL;
++	if (link) {
++		link->netlink_rejections++;
++		link->last_update_sequence = telemetry->sequence;
++		link->last_seen_usec = telemetry_now_usec();
++	}
++	telemetry_event(ctx, WMDC_EVENT_NETLINK_REJECTION,
++		source ? source->index : -1, destination ? destination->index : -1,
++		frequency_mhz, error, transient);
++}
++
+ static int resolve_links(struct wmediumd *ctx, const uint8_t *payload,
+ 			 uint32_t count, struct resolved_update *resolved,
+ 			 bool require_value)
+@@ -263,6 +827,7 @@ static int handle_apply(struct wmd_control_client *client,
+ 		ctx->snr_matrix[resolved[i].source * ctx->num_stas +
+ 			resolved[i].destination] = resolved[i].snr_db;
+ 	ctx->control_generation = generation;
++	wmd_telemetry_generation(ctx, generation, false, count);
+ 	free(resolved);
+ 	return send_response(client->loop.fd, WMDC_OP_APPLY, WMDC_OK,
+ 			generation, payload, payload_len);
+@@ -369,6 +934,7 @@ static int handle_frequency_apply(struct wmd_control_client *client,
+ 			};
+ 	}
+ 	ctx->control_generation = generation;
++	wmd_telemetry_generation(ctx, generation, true, count);
+ 	free(resolved);
+ 	return send_response(client->loop.fd, WMDC_OP_APPLY_FREQUENCY, WMDC_OK,
+ 			generation, payload, payload_len);
+@@ -432,6 +998,383 @@ static int handle_frequency_dump(struct wmd_control_client *client)
+ 	return result;
+ }
+ 
++static uint64_t telemetry_oldest_event_sequence(const struct wmd_telemetry *telemetry)
++{
++	uint32_t oldest;
++
++	if (!telemetry || !telemetry->event_count)
++		return 0;
++	oldest = (telemetry->event_write_index + WMDT_EVENT_CAPACITY -
++		  telemetry->event_count) % WMDT_EVENT_CAPACITY;
++	return telemetry->events[oldest].sequence;
++}
++
++static int telemetry_page_request(const uint8_t *payload, uint32_t payload_len,
++				  size_t entry_size, uint64_t *since,
++				  uint32_t *cursor, uint32_t *limit)
++{
++	const struct wmdc_page_request *request;
++	uint32_t maximum = (WMDC_MAX_FRAME - sizeof(struct wmdc_header) -
++			    sizeof(struct wmdc_page_header)) / entry_size;
++
++	if (!payload_len) {
++		*since = 0;
++		*cursor = 0;
++		*limit = maximum < 128 ? maximum : 128;
++		return WMDC_OK;
++	}
++	if (payload_len != sizeof(*request))
++		return WMDC_ERR_LENGTH;
++	request = (const struct wmdc_page_request *)payload;
++	*since = be64toh(request->since_sequence);
++	*cursor = be32toh(request->cursor);
++	*limit = be32toh(request->limit);
++	if (!*limit)
++		*limit = maximum < 128 ? maximum : 128;
++	if (*limit > maximum)
++		*limit = maximum;
++	return WMDC_OK;
++}
++
++static int send_telemetry_page(struct wmd_control_client *client,
++			       uint16_t opcode, uint64_t snapshot,
++			       uint64_t oldest_event, uint32_t total,
++			       uint32_t next_cursor, uint32_t flags,
++			       const void *entries, uint32_t count,
++			       size_t entry_size)
++{
++	struct wmdc_page_header *header;
++	uint8_t *payload;
++	uint32_t payload_len = sizeof(*header) + count * entry_size;
++	int result;
++
++	payload = calloc(1, payload_len);
++	if (!payload)
++		return send_response(client->loop.fd, opcode, WMDC_ERR_INTERNAL,
++			client->ctx->control_generation, NULL, 0);
++	header = (struct wmdc_page_header *)payload;
++	header->snapshot_sequence = htobe64(snapshot);
++	header->oldest_event_sequence = htobe64(oldest_event);
++	header->total = htobe32(total);
++	header->next_cursor = htobe32(next_cursor);
++	header->flags = htobe32(flags);
++	if (count)
++		memcpy(payload + sizeof(*header), entries, count * entry_size);
++	result = send_response(client->loop.fd, opcode, WMDC_OK,
++		client->ctx->control_generation, payload, payload_len);
++	free(payload);
++	return result;
++}
++
++static int handle_telemetry_summary(struct wmd_control_client *client,
++				    uint32_t payload_len)
++{
++	struct wmd_telemetry *telemetry = client->ctx->telemetry;
++	struct wmdc_telemetry_summary summary = {};
++
++	if (payload_len)
++		return send_response(client->loop.fd, WMDC_OP_TELEMETRY_SUMMARY,
++			WMDC_ERR_LENGTH, client->ctx->control_generation, NULL, 0);
++	if (!telemetry)
++		return send_response(client->loop.fd, WMDC_OP_TELEMETRY_SUMMARY,
++			WMDC_ERR_INTERNAL, client->ctx->control_generation, NULL, 0);
++	summary.telemetry_sequence = htobe64(telemetry->sequence);
++	summary.uptime_usec = htobe64(telemetry_now_usec());
++	summary.frames_seen = htobe64(telemetry->frames_seen);
++	summary.bytes_seen = htobe64(telemetry->bytes_seen);
++	summary.management_frames = htobe64(telemetry->frame_types[0]);
++	summary.control_frames = htobe64(telemetry->frame_types[1]);
++	summary.data_frames = htobe64(telemetry->frame_types[2]);
++	summary.other_frames = htobe64(telemetry->frame_types[3]);
++	summary.eapol_frames = htobe64(telemetry->eapol_frames);
++	summary.unicast_frames = htobe64(telemetry->unicast_frames);
++	summary.multicast_frames = htobe64(telemetry->multicast_frames);
++	summary.tx_attempts = htobe64(telemetry->tx_attempts);
++	summary.retries = htobe64(telemetry->retries);
++	summary.tx_acked = htobe64(telemetry->tx_acked);
++	summary.tx_no_ack = htobe64(telemetry->tx_no_ack);
++	summary.rx_injected = htobe64(telemetry->rx_injected);
++	summary.multicast_candidates = htobe64(telemetry->multicast_candidates);
++	summary.drops_offchannel = htobe64(telemetry->drops_offchannel);
++	summary.drops_cca = htobe64(telemetry->drops_cca);
++	summary.drops_interference = htobe64(telemetry->drops_interference);
++	summary.drops_per = htobe64(telemetry->drops_per);
++	summary.drops_no_receiver = htobe64(telemetry->drops_no_receiver);
++	summary.netlink_clone_einval = htobe64(telemetry->netlink_clone_einval);
++	summary.netlink_other_errors = htobe64(telemetry->netlink_other_errors);
++	summary.active_link_evictions = htobe64(telemetry->active_link_evictions);
++	summary.event_overruns = htobe64(telemetry->event_overruns);
++	summary.queue_delay_usec_max = htobe64(telemetry->queue_delay_usec_max);
++	summary.queue_delay_usec_last = htobe64(telemetry->queue_delay_usec_last);
++	summary.queue_depth = htobe32(telemetry->queue_depth);
++	summary.queue_depth_max = htobe32(telemetry->queue_depth_max);
++	summary.active_links = htobe32(telemetry_count_active_links(telemetry));
++	summary.radio_frequencies =
++		htobe32(telemetry_count_radio_frequencies(telemetry));
++	summary.vifs = htobe32(telemetry_count_vifs(telemetry));
++	summary.event_capacity = htobe32(WMDT_EVENT_CAPACITY);
++	return send_response(client->loop.fd, WMDC_OP_TELEMETRY_SUMMARY,
++		WMDC_OK, client->ctx->control_generation, &summary,
++		sizeof(summary));
++}
++
++static int handle_radio_frequency_dump(struct wmd_control_client *client,
++				       const uint8_t *payload,
++				       uint32_t payload_len)
++{
++	struct wmd_telemetry *telemetry = client->ctx->telemetry;
++	struct wmdc_radio_frequency *entries;
++	uint64_t since;
++	uint32_t cursor, limit, total = 0, count = 0, next = WMDC_PAGE_END;
++	size_t i;
++	int status, result;
++
++	status = telemetry_page_request(payload, payload_len, sizeof(*entries),
++		&since, &cursor, &limit);
++	if (status != WMDC_OK || cursor > telemetry->radio_frequency_capacity)
++		return send_response(client->loop.fd,
++			WMDC_OP_DUMP_RADIO_FREQUENCIES,
++			status == WMDC_OK ? WMDC_ERR_VALUE : status,
++			client->ctx->control_generation, NULL, 0);
++	entries = calloc(limit, sizeof(*entries));
++	if (!entries)
++		return send_response(client->loop.fd,
++			WMDC_OP_DUMP_RADIO_FREQUENCIES, WMDC_ERR_INTERNAL,
++			client->ctx->control_generation, NULL, 0);
++	for (i = 0; i < telemetry->radio_frequency_capacity; i++)
++		if (telemetry->radio_frequencies[i].active &&
++		    telemetry->radio_frequencies[i].last_update_sequence > since)
++			total++;
++	for (i = cursor; i < telemetry->radio_frequency_capacity && count < limit; i++) {
++		struct wmdt_radio_frequency_state *state =
++			&telemetry->radio_frequencies[i];
++		struct wmdc_radio_frequency *entry;
++
++		if (!state->active || state->last_update_sequence <= since)
++			continue;
++		entry = &entries[count++];
++		memcpy(entry->radio, client->ctx->sta_array[state->radio]->addr, 6);
++		entry->frequency_mhz = htobe32(state->frequency_mhz);
++		entry->last_update_sequence = htobe64(state->last_update_sequence);
++		entry->last_seen_usec = htobe64(state->last_seen_usec);
++		entry->frames = htobe64(state->frames);
++		entry->bytes = htobe64(state->bytes);
++		entry->management_frames = htobe64(state->frame_types[0]);
++		entry->control_frames = htobe64(state->frame_types[1]);
++		entry->data_frames = htobe64(state->frame_types[2]);
++		entry->eapol_frames = htobe64(state->eapol_frames);
++		entry->unicast_frames = htobe64(state->unicast_frames);
++		entry->multicast_frames = htobe64(state->multicast_frames);
++		entry->attempts = htobe64(state->attempts);
++		entry->retries = htobe64(state->retries);
++		entry->rx_injected = htobe64(state->rx_injected);
++		entry->drops = htobe64(state->drops);
++		entry->queue_depth_max = htobe32(state->queue_depth_max);
++		entry->last_type = state->last_type;
++		entry->last_subtype = state->last_subtype;
++		entry->last_access_category = state->last_access_category;
++	}
++	for (; i < telemetry->radio_frequency_capacity; i++)
++		if (telemetry->radio_frequencies[i].active &&
++		    telemetry->radio_frequencies[i].last_update_sequence > since) {
++			next = i;
++			break;
++		}
++	result = send_telemetry_page(client, WMDC_OP_DUMP_RADIO_FREQUENCIES,
++		telemetry->sequence, telemetry_oldest_event_sequence(telemetry),
++		total, next, next == WMDC_PAGE_END ? 0 : WMDC_PAGE_MORE,
++		entries, count, sizeof(*entries));
++	free(entries);
++	return result;
++}
++
++static int handle_active_link_dump(struct wmd_control_client *client,
++				   const uint8_t *payload,
++				   uint32_t payload_len)
++{
++	struct wmd_telemetry *telemetry = client->ctx->telemetry;
++	struct wmdc_active_link *entries;
++	uint64_t since;
++	uint32_t cursor, limit, total = 0, count = 0, next = WMDC_PAGE_END;
++	size_t i;
++	int status, result;
++
++	status = telemetry_page_request(payload, payload_len, sizeof(*entries),
++		&since, &cursor, &limit);
++	if (status != WMDC_OK || cursor > telemetry->active_link_capacity)
++		return send_response(client->loop.fd, WMDC_OP_DUMP_ACTIVE_LINKS,
++			status == WMDC_OK ? WMDC_ERR_VALUE : status,
++			client->ctx->control_generation, NULL, 0);
++	entries = calloc(limit, sizeof(*entries));
++	if (!entries)
++		return send_response(client->loop.fd, WMDC_OP_DUMP_ACTIVE_LINKS,
++			WMDC_ERR_INTERNAL, client->ctx->control_generation, NULL, 0);
++	for (i = 0; i < telemetry->active_link_capacity; i++)
++		if (telemetry->active_links[i].active &&
++		    telemetry->active_links[i].last_update_sequence > since)
++			total++;
++	for (i = cursor; i < telemetry->active_link_capacity && count < limit; i++) {
++		struct wmdt_active_link_state *state = &telemetry->active_links[i];
++		struct wmdc_active_link *entry;
++
++		if (!state->active || state->last_update_sequence <= since)
++			continue;
++		entry = &entries[count++];
++		memcpy(entry->source,
++		       client->ctx->sta_array[state->source]->addr, 6);
++		memcpy(entry->destination,
++		       client->ctx->sta_array[state->destination]->addr, 6);
++		entry->frequency_mhz = htobe32(state->frequency_mhz);
++		entry->flags = htobe32(state->flags);
++		entry->last_update_sequence = htobe64(state->last_update_sequence);
++		entry->first_seen_usec = htobe64(state->first_seen_usec);
++		entry->last_seen_usec = htobe64(state->last_seen_usec);
++		entry->frames = htobe64(state->frames);
++		entry->bytes = htobe64(state->bytes);
++		entry->attempts = htobe64(state->attempts);
++		entry->retries = htobe64(state->retries);
++		entry->acked = htobe64(state->acked);
++		entry->no_ack = htobe64(state->no_ack);
++		entry->rx_injected = htobe64(state->rx_injected);
++		entry->drops_offchannel = htobe64(state->drops_offchannel);
++		entry->drops_cca = htobe64(state->drops_cca);
++		entry->drops_interference = htobe64(state->drops_interference);
++		entry->drops_per = htobe64(state->drops_per);
++		entry->drops_no_receiver = htobe64(state->drops_no_receiver);
++		entry->netlink_rejections = htobe64(state->netlink_rejections);
++		entry->last_signal_dbm = htobe32((uint32_t)state->last_signal_dbm);
++		entry->last_snr_db = htobe32((uint32_t)state->last_snr_db);
++		entry->last_per_million = htobe32(state->last_per_million);
++		entry->last_type = state->last_type;
++		entry->last_subtype = state->last_subtype;
++		entry->last_access_category = state->last_access_category;
++	}
++	for (; i < telemetry->active_link_capacity; i++)
++		if (telemetry->active_links[i].active &&
++		    telemetry->active_links[i].last_update_sequence > since) {
++			next = i;
++			break;
++		}
++	result = send_telemetry_page(client, WMDC_OP_DUMP_ACTIVE_LINKS,
++		telemetry->sequence, telemetry_oldest_event_sequence(telemetry),
++		total, next, next == WMDC_PAGE_END ? 0 : WMDC_PAGE_MORE,
++		entries, count, sizeof(*entries));
++	free(entries);
++	return result;
++}
++
++static int handle_vif_dump(struct wmd_control_client *client,
++			   const uint8_t *payload, uint32_t payload_len)
++{
++	struct wmd_telemetry *telemetry = client->ctx->telemetry;
++	struct wmdc_vif *entries;
++	uint64_t since;
++	uint32_t cursor, limit, total = 0, count = 0, next = WMDC_PAGE_END;
++	size_t i;
++	int status, result;
++
++	status = telemetry_page_request(payload, payload_len, sizeof(*entries),
++		&since, &cursor, &limit);
++	if (status != WMDC_OK || cursor > telemetry->vif_capacity)
++		return send_response(client->loop.fd, WMDC_OP_DUMP_VIFS,
++			status == WMDC_OK ? WMDC_ERR_VALUE : status,
++			client->ctx->control_generation, NULL, 0);
++	entries = calloc(limit, sizeof(*entries));
++	if (!entries)
++		return send_response(client->loop.fd, WMDC_OP_DUMP_VIFS,
++			WMDC_ERR_INTERNAL, client->ctx->control_generation, NULL, 0);
++	for (i = 0; i < telemetry->vif_capacity; i++)
++		if (telemetry->vifs[i].active &&
++		    telemetry->vifs[i].last_update_sequence > since)
++			total++;
++	for (i = cursor; i < telemetry->vif_capacity && count < limit; i++) {
++		struct wmdt_vif_state *state = &telemetry->vifs[i];
++		struct wmdc_vif *entry;
++
++		if (!state->active || state->last_update_sequence <= since)
++			continue;
++		entry = &entries[count++];
++		memcpy(entry->vif, state->vif, 6);
++		memcpy(entry->radio,
++		       client->ctx->sta_array[state->radio]->addr, 6);
++		entry->frequency_mhz = htobe32(state->frequency_mhz);
++		entry->last_update_sequence = htobe64(state->last_update_sequence);
++	}
++	for (; i < telemetry->vif_capacity; i++)
++		if (telemetry->vifs[i].active &&
++		    telemetry->vifs[i].last_update_sequence > since) {
++			next = i;
++			break;
++		}
++	result = send_telemetry_page(client, WMDC_OP_DUMP_VIFS,
++		telemetry->sequence, telemetry_oldest_event_sequence(telemetry),
++		total, next, next == WMDC_PAGE_END ? 0 : WMDC_PAGE_MORE,
++		entries, count, sizeof(*entries));
++	free(entries);
++	return result;
++}
++
++static int handle_event_dump(struct wmd_control_client *client,
++			     const uint8_t *payload, uint32_t payload_len)
++{
++	struct wmd_telemetry *telemetry = client->ctx->telemetry;
++	struct wmdc_event *entries;
++	uint64_t since, oldest_sequence;
++	uint32_t cursor, limit, total = 0, count = 0, matched = 0;
++	uint32_t flags = 0, next = WMDC_PAGE_END;
++	uint32_t oldest_index;
++	uint64_t offset;
++	int status, result;
++
++	status = telemetry_page_request(payload, payload_len, sizeof(*entries),
++		&since, &cursor, &limit);
++	if (status != WMDC_OK)
++		return send_response(client->loop.fd, WMDC_OP_DUMP_EVENTS,
++			status, client->ctx->control_generation, NULL, 0);
++	entries = calloc(limit, sizeof(*entries));
++	if (!entries)
++		return send_response(client->loop.fd, WMDC_OP_DUMP_EVENTS,
++			WMDC_ERR_INTERNAL, client->ctx->control_generation, NULL, 0);
++	oldest_sequence = telemetry_oldest_event_sequence(telemetry);
++	if (since && oldest_sequence && since < oldest_sequence - 1)
++		flags |= WMDC_PAGE_GAP;
++	oldest_index = (telemetry->event_write_index + WMDT_EVENT_CAPACITY -
++		telemetry->event_count) % WMDT_EVENT_CAPACITY;
++	for (offset = 0; offset < telemetry->event_count; offset++) {
++		struct wmdt_event_state *state = &telemetry->events[
++			(oldest_index + offset) % WMDT_EVENT_CAPACITY];
++		struct wmdc_event *entry;
++
++		if (state->sequence <= since)
++			continue;
++		total++;
++		if (matched++ < cursor || count == limit)
++			continue;
++		entry = &entries[count++];
++		entry->sequence = htobe64(state->sequence);
++		entry->time_usec = htobe64(state->time_usec);
++		entry->type = htobe32(state->type);
++		entry->value = htobe32((uint32_t)state->value);
++		if (state->source >= 0)
++			memcpy(entry->source,
++			       client->ctx->sta_array[state->source]->addr, 6);
++		if (state->destination >= 0)
++			memcpy(entry->destination,
++			       client->ctx->sta_array[state->destination]->addr, 6);
++		entry->frequency_mhz = htobe32(state->frequency_mhz);
++		entry->auxiliary = htobe32(state->auxiliary);
++	}
++	if (cursor + count < total) {
++		next = cursor + count;
++		flags |= WMDC_PAGE_MORE;
++	}
++	result = send_telemetry_page(client, WMDC_OP_DUMP_EVENTS,
++		telemetry->sequence, oldest_sequence, total, next, flags,
++		entries, count, sizeof(*entries));
++	free(entries);
++	return result;
++}
++
+ static void control_disconnect(struct wmd_control_client *client)
+ {
+ 	usfstl_loop_unregister(&client->loop);
+@@ -504,6 +1447,30 @@ static void control_handler(struct usfstl_loop_entry *entry)
+ 		if (payload_len == 0)
+ 			result = handle_frequency_dump(client);
+ 		break;
++	case WMDC_OP_TELEMETRY_SUMMARY:
++		if (client->telemetry)
++			result = handle_telemetry_summary(client, payload_len);
++		break;
++	case WMDC_OP_DUMP_RADIO_FREQUENCIES:
++		if (client->telemetry)
++			result = handle_radio_frequency_dump(client,
++				frame + sizeof(*header), payload_len);
++		break;
++	case WMDC_OP_DUMP_ACTIVE_LINKS:
++		if (client->telemetry)
++			result = handle_active_link_dump(client,
++				frame + sizeof(*header), payload_len);
++		break;
++	case WMDC_OP_DUMP_VIFS:
++		if (client->telemetry)
++			result = handle_vif_dump(client, frame + sizeof(*header),
++				payload_len);
++		break;
++	case WMDC_OP_DUMP_EVENTS:
++		if (client->telemetry)
++			result = handle_event_dump(client, frame + sizeof(*header),
++				payload_len);
++		break;
+ 	default:
+ 		break;
+ 	}
+@@ -525,13 +1492,14 @@ static void control_connected(int fd, void *data)
+ 	}
+ 	client->ctx = listener->ctx;
+ 	client->read_only = listener->read_only;
++	client->telemetry = listener->telemetry;
+ 	client->loop.fd = fd;
+ 	client->loop.handler = control_handler;
+ 	usfstl_loop_register(&client->loop);
+ }
+ 
+ static void control_listener_start(struct wmediumd *ctx, const char *path,
+-				   bool read_only)
++				   bool read_only, bool telemetry)
+ {
+ 	struct wmd_control_listener *listener = calloc(1, sizeof(*listener));
+ 
+@@ -539,8 +1507,9 @@ static void control_listener_start(struct wmediumd *ctx, const char *path,
+ 		return;
+ 	listener->ctx = ctx;
+ 	listener->read_only = read_only;
++	listener->telemetry = telemetry;
+ 	usfstl_uds_create_seqpacket(path, control_connected, listener);
+-	chmod(path, read_only ? 0666 : 0660);
++	chmod(path, read_only && !telemetry ? 0666 : 0660);
+ }
+ 
+ void wmd_control_start(struct wmediumd *ctx, const char *path)
+@@ -565,10 +1534,103 @@ void wmd_control_start(struct wmediumd *ctx, const char *path)
+ 		desired_capacity : payload_capacity;
+ 	ctx->frequency_overrides = calloc(ctx->frequency_override_capacity,
+ 					  sizeof(*ctx->frequency_overrides));
+-	control_listener_start(ctx, path, false);
++	control_listener_start(ctx, path, false, false);
+ }
+ 
+ void wmd_control_start_readonly(struct wmediumd *ctx, const char *path)
+ {
+-	control_listener_start(ctx, path, true);
++	control_listener_start(ctx, path, true, false);
++}
++
++static int wmd_telemetry_init(struct wmediumd *ctx)
++{
++	size_t active_capacity, potential_links;
++
++	if (ctx->telemetry)
++		return 0;
++	ctx->telemetry = calloc(1, sizeof(*ctx->telemetry));
++	if (!ctx->telemetry)
++		return -1;
++	potential_links = (size_t)ctx->num_stas * ctx->num_stas;
++	active_capacity = potential_links * WMDC_FREQUENCY_SLOTS_PER_PAIR;
++	if (active_capacity > WMDT_ACTIVE_LINK_LIMIT)
++		active_capacity = WMDT_ACTIVE_LINK_LIMIT;
++	ctx->telemetry->active_link_capacity = active_capacity;
++	ctx->telemetry->radio_frequency_capacity =
++		(size_t)ctx->num_stas * WMDT_FREQUENCIES_PER_RADIO;
++	ctx->telemetry->vif_capacity =
++		(size_t)ctx->num_stas * WMDT_VIFS_PER_RADIO;
++	ctx->telemetry->active_links = calloc(active_capacity,
++		sizeof(*ctx->telemetry->active_links));
++	ctx->telemetry->radio_frequencies = calloc(
++		ctx->telemetry->radio_frequency_capacity,
++		sizeof(*ctx->telemetry->radio_frequencies));
++	ctx->telemetry->vifs = calloc(ctx->telemetry->vif_capacity,
++		sizeof(*ctx->telemetry->vifs));
++	if (!ctx->telemetry->active_links ||
++	    !ctx->telemetry->radio_frequencies || !ctx->telemetry->vifs) {
++		free(ctx->telemetry->active_links);
++		free(ctx->telemetry->radio_frequencies);
++		free(ctx->telemetry->vifs);
++		free(ctx->telemetry);
++		ctx->telemetry = NULL;
++		return -1;
++	}
++	return 0;
++}
++
++void wmd_control_start_observer(struct wmediumd *ctx, const char *path)
++{
++	if (wmd_telemetry_init(ctx) < 0)
++		return;
++	control_listener_start(ctx, path, true, true);
++}
++
++int wmd_telemetry_selftest(void)
++{
++	struct wmediumd ctx = {.num_stas = 2};
++	struct station source = {.index = 0}, destination = {.index = 1};
++	struct station *stations[] = {&source, &destination};
++	struct frame *frame;
++	uint8_t vif[6] = {0x02, 0, 0, 0, 0, 1};
++	int failures = 0;
++
++	source.addr[5] = 1;
++	destination.addr[5] = 2;
++	ctx.sta_array = stations;
++	if (wmd_telemetry_init(&ctx) < 0)
++		return 1;
++	frame = calloc(1, sizeof(*frame) + 32);
++	if (!frame)
++		return 1;
++	frame->sender = &source;
++	frame->freq = 5180;
++	frame->data_len = 32;
++	frame->data[0] = FTYPE_DATA;
++	frame->data[4] = destination.addr[0];
++	wmd_telemetry_record_tx(&ctx, frame, &destination, IEEE80211_AC_BE,
++		2, 1, true, false, false, 30, 0.125, 400);
++	wmd_telemetry_record_rx(&ctx, frame, &destination,
++		WMD_TELEMETRY_RX_INJECTED, -61, 30, 0.125);
++	wmd_telemetry_frame_done(&ctx);
++	wmd_telemetry_vif_update(&ctx, vif, &destination, 5180, true);
++	wmd_telemetry_generation(&ctx, 3, true, 2);
++	wmd_telemetry_netlink_rejection(&ctx, &source, &destination, 5180,
++		-EINVAL, true);
++	if (ctx.telemetry->frames_seen != 1 || ctx.telemetry->bytes_seen != 32 ||
++	    ctx.telemetry->tx_attempts != 2 || ctx.telemetry->retries != 1 ||
++	    ctx.telemetry->rx_injected != 1 || ctx.telemetry->queue_depth != 0 ||
++	    ctx.telemetry->queue_depth_max != 1 ||
++	    ctx.telemetry->netlink_clone_einval != 1 ||
++	    telemetry_count_active_links(ctx.telemetry) != 1 ||
++	    telemetry_count_radio_frequencies(ctx.telemetry) != 1 ||
++	    telemetry_count_vifs(ctx.telemetry) != 1 ||
++	    ctx.telemetry->event_count < 4)
++		failures++;
++	free(frame);
++	free(ctx.telemetry->active_links);
++	free(ctx.telemetry->radio_frequencies);
++	free(ctx.telemetry->vifs);
++	free(ctx.telemetry);
++	return failures;
+ }
+diff --git a/wmediumd/control.h b/wmediumd/control.h
+index b84f7d7..dbfb7e2 100644
+--- a/wmediumd/control.h
++++ b/wmediumd/control.h
+@@ -20,6 +20,11 @@ enum wmdc_opcode {
+ 	WMDC_OP_APPLY_FREQUENCY = 6,
+ 	WMDC_OP_GET_FREQUENCY = 7,
+ 	WMDC_OP_DUMP_FREQUENCIES = 8,
++	WMDC_OP_TELEMETRY_SUMMARY = 9,
++	WMDC_OP_DUMP_RADIO_FREQUENCIES = 10,
++	WMDC_OP_DUMP_ACTIVE_LINKS = 11,
++	WMDC_OP_DUMP_VIFS = 12,
++	WMDC_OP_DUMP_EVENTS = 13,
+ };
+ 
+ enum wmdc_status {
+@@ -41,6 +46,10 @@ enum wmdc_capability {
+ 	WMDC_CAP_DUMP = 1U << 3,
+ 	WMDC_CAP_FREQUENCY_QUALIFIED_SNR = 1U << 4,
+ 	WMDC_CAP_READ_ONLY = 1U << 5,
++	WMDC_CAP_TELEMETRY = 1U << 6,
++	WMDC_CAP_PAGED_DUMPS = 1U << 7,
++	WMDC_CAP_VIF_OWNERSHIP = 1U << 8,
++	WMDC_CAP_EVENT_RING = 1U << 9,
+ };
+ 
+ #define WMDC_FREQUENCY_OVERRIDE (1U << 0)
+@@ -78,8 +87,151 @@ struct wmdc_info {
+ 	uint32_t reserved;
+ } __attribute__((packed));
+ 
++#define WMDC_PAGE_MORE (1U << 0)
++#define WMDC_PAGE_GAP (1U << 1)
++#define WMDC_PAGE_END UINT32_MAX
++
++struct wmdc_page_request {
++	uint64_t since_sequence;
++	uint32_t cursor;
++	uint32_t limit;
++} __attribute__((packed));
++
++struct wmdc_page_header {
++	uint64_t snapshot_sequence;
++	uint64_t oldest_event_sequence;
++	uint32_t total;
++	uint32_t next_cursor;
++	uint32_t flags;
++	uint32_t reserved;
++} __attribute__((packed));
++
++struct wmdc_telemetry_summary {
++	uint64_t telemetry_sequence;
++	uint64_t uptime_usec;
++	uint64_t frames_seen;
++	uint64_t bytes_seen;
++	uint64_t management_frames;
++	uint64_t control_frames;
++	uint64_t data_frames;
++	uint64_t other_frames;
++	uint64_t eapol_frames;
++	uint64_t unicast_frames;
++	uint64_t multicast_frames;
++	uint64_t tx_attempts;
++	uint64_t retries;
++	uint64_t tx_acked;
++	uint64_t tx_no_ack;
++	uint64_t rx_injected;
++	uint64_t multicast_candidates;
++	uint64_t drops_offchannel;
++	uint64_t drops_cca;
++	uint64_t drops_interference;
++	uint64_t drops_per;
++	uint64_t drops_no_receiver;
++	uint64_t netlink_clone_einval;
++	uint64_t netlink_other_errors;
++	uint64_t active_link_evictions;
++	uint64_t event_overruns;
++	uint64_t queue_delay_usec_max;
++	uint64_t queue_delay_usec_last;
++	uint32_t queue_depth;
++	uint32_t queue_depth_max;
++	uint32_t active_links;
++	uint32_t radio_frequencies;
++	uint32_t vifs;
++	uint32_t event_capacity;
++} __attribute__((packed));
++
++struct wmdc_radio_frequency {
++	uint8_t radio[6];
++	uint8_t reserved0[2];
++	uint32_t frequency_mhz;
++	uint32_t reserved1;
++	uint64_t last_update_sequence;
++	uint64_t last_seen_usec;
++	uint64_t frames;
++	uint64_t bytes;
++	uint64_t management_frames;
++	uint64_t control_frames;
++	uint64_t data_frames;
++	uint64_t eapol_frames;
++	uint64_t unicast_frames;
++	uint64_t multicast_frames;
++	uint64_t attempts;
++	uint64_t retries;
++	uint64_t rx_injected;
++	uint64_t drops;
++	uint32_t queue_depth_max;
++	uint8_t last_type;
++	uint8_t last_subtype;
++	uint8_t last_access_category;
++	uint8_t reserved2;
++} __attribute__((packed));
++
++#define WMDC_LINK_MULTICAST (1U << 0)
++
++struct wmdc_active_link {
++	uint8_t source[6];
++	uint8_t destination[6];
++	uint32_t frequency_mhz;
++	uint32_t flags;
++	uint64_t last_update_sequence;
++	uint64_t first_seen_usec;
++	uint64_t last_seen_usec;
++	uint64_t frames;
++	uint64_t bytes;
++	uint64_t attempts;
++	uint64_t retries;
++	uint64_t acked;
++	uint64_t no_ack;
++	uint64_t rx_injected;
++	uint64_t drops_offchannel;
++	uint64_t drops_cca;
++	uint64_t drops_interference;
++	uint64_t drops_per;
++	uint64_t drops_no_receiver;
++	uint64_t netlink_rejections;
++	int32_t last_signal_dbm;
++	int32_t last_snr_db;
++	uint32_t last_per_million;
++	uint8_t last_type;
++	uint8_t last_subtype;
++	uint8_t last_access_category;
++	uint8_t reserved;
++} __attribute__((packed));
++
++struct wmdc_vif {
++	uint8_t vif[6];
++	uint8_t radio[6];
++	uint32_t frequency_mhz;
++	uint64_t last_update_sequence;
++} __attribute__((packed));
++
++enum wmdc_event_type {
++	WMDC_EVENT_VIF_LEARNED = 1,
++	WMDC_EVENT_VIF_CHANGED = 2,
++	WMDC_EVENT_LINK_ACTIVE = 3,
++	WMDC_EVENT_GENERATION_APPLIED = 4,
++	WMDC_EVENT_NETLINK_REJECTION = 5,
++	WMDC_EVENT_ACTIVE_LINK_EVICTED = 6,
++};
++
++struct wmdc_event {
++	uint64_t sequence;
++	uint64_t time_usec;
++	uint32_t type;
++	int32_t value;
++	uint8_t source[6];
++	uint8_t destination[6];
++	uint32_t frequency_mhz;
++	uint32_t auxiliary;
++} __attribute__((packed));
++
+ void wmd_control_start(struct wmediumd *ctx, const char *path);
+ void wmd_control_start_readonly(struct wmediumd *ctx, const char *path);
++void wmd_control_start_observer(struct wmediumd *ctx, const char *path);
++int wmd_telemetry_selftest(void);
+ int wmd_get_link_snr(struct wmediumd *ctx, struct station *sender,
+ 		     struct station *receiver, uint32_t frequency_mhz);
+ 
+diff --git a/wmediumd/wmediumd.c b/wmediumd/wmediumd.c
+index cd2e363..52abf34 100644
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -372,20 +372,41 @@ static struct mc_vif_state *mc_vifs;
+ static size_t mc_n_vifs;
+ 
+ #define NL_CLONED_FRAME_TRACK_SLOTS 4096
+-static u32 nl_cloned_frame_seqs[NL_CLONED_FRAME_TRACK_SLOTS];
++struct nl_cloned_frame_track {
++	u32 sequence;
++	struct station *source;
++	struct station *destination;
++	u32 frequency_mhz;
++};
++static struct nl_cloned_frame_track
++	nl_cloned_frames[NL_CLONED_FRAME_TRACK_SLOTS];
+ 
+-static void nl_track_cloned_frame(struct nl_msg *msg)
++static void nl_track_cloned_frame(struct nl_msg *msg, struct station *source,
++				  struct station *destination,
++				  u32 frequency_mhz)
+ {
+ 	u32 seq = nlmsg_hdr(msg)->nlmsg_seq;
++	struct nl_cloned_frame_track *track;
+ 
+-	if (seq)
+-		nl_cloned_frame_seqs[seq % NL_CLONED_FRAME_TRACK_SLOTS] = seq;
++	if (!seq)
++		return;
++	track = &nl_cloned_frames[seq % NL_CLONED_FRAME_TRACK_SLOTS];
++	*track = (struct nl_cloned_frame_track) {
++		.sequence = seq,
++		.source = source,
++		.destination = destination,
++		.frequency_mhz = frequency_mhz,
++	};
+ }
+ 
+-static int nl_is_tracked_cloned_frame(u32 seq)
++static struct nl_cloned_frame_track *nl_tracked_cloned_frame(u32 seq)
+ {
+-	return seq &&
+-		nl_cloned_frame_seqs[seq % NL_CLONED_FRAME_TRACK_SLOTS] == seq;
++	struct nl_cloned_frame_track *track;
++
++	if (!seq)
++		return NULL;
++	track = &nl_cloned_frames[seq % NL_CLONED_FRAME_TRACK_SLOTS];
++	return track->sequence == seq ? track : NULL;
+ }
+ 
+ static struct mc_vif_state *mc_vif_find(const u8 *mac)
+@@ -404,9 +425,11 @@ static struct station *mc_vif_owner(const u8 *addr)
+ 	return v && v->freq_known ? v->owner : NULL;
+ }
+ 
+-static void mc_update_vif_owner(struct station *owner, const u8 *ta, u32 freq)
++static void mc_update_vif_owner(struct wmediumd *ctx, struct station *owner,
++				const u8 *ta, u32 freq)
+ {
+ 	struct mc_vif_state *v = mc_vif_find(ta);
++	bool changed;
+ 	if (!v) {
+ 		struct mc_vif_state *n =
+ 			realloc(mc_vifs, sizeof(*mc_vifs) * (mc_n_vifs + 1));
+@@ -418,7 +441,8 @@ static void mc_update_vif_owner(struct station *owner, const u8 *ta, u32 freq)
+ 		v->freq = 0;
+ 		v->freq_known = 0;
+ 	}
+-	if (!v->freq_known || v->freq != freq || v->owner != owner) {
++	changed = !v->freq_known || v->freq != freq || v->owner != owner;
++	if (changed) {
+ 		FILE *_f = fopen("/tmp/mc_owner.log", "a");
+ 		if (_f) {
+ 			fprintf(_f, "MC-OWNER mac=" MAC_FMT " radio=" MAC_FMT " %u->%u\n",
+@@ -430,6 +454,7 @@ static void mc_update_vif_owner(struct station *owner, const u8 *ta, u32 freq)
+ 	v->owner = owner;
+ 	v->freq = freq;
+ 	v->freq_known = 1;
++	wmd_telemetry_vif_update(ctx, ta, owner, freq, changed);
+ }
+ 
+ static int mc_lookup_owned_vif(const u8 *dest, u32 *freq)
+@@ -461,6 +486,16 @@ static int mc_station_receives_freq(struct station *station, u32 freq)
+ 	return 0;
+ }
+ 
++static int mc_station_has_learned_vif(struct station *station)
++{
++	size_t i;
++
++	for (i = 0; i < mc_n_vifs; i++)
++		if (mc_vifs[i].freq_known && mc_vifs[i].owner == station)
++			return 1;
++	return 0;
++}
++
+ enum ack_eligibility { ACK_ELIGIBLE, ACK_OFFCHANNEL, ACK_FREQ_UNKNOWN };
+ static enum ack_eligibility mc_receiver_ack_eligibility(struct wmediumd *ctx, const u8 *dest, u32 tx_freq)
+ {
+@@ -624,7 +659,7 @@ static void queue_frame(struct wmediumd *ctx, struct station *station,
+ 	struct station *tmpsta, *deststa;
+ 	int send_time;
+ 	int cw;
+-	double error_prob;
++	double error_prob = 0.0;
+ 	bool is_acked = false;
+ 	bool noack = false;
+ 	int i, j;
+@@ -784,6 +819,10 @@ static void queue_frame(struct wmediumd *ctx, struct station *station,
+ 
+ 	frame->duration = send_time;
+ 	frame->src = station->client;
++	wmd_telemetry_record_tx(ctx, frame, deststa, ac, retries,
++		noack || !retries ? 0 : retries - 1, is_acked, noack,
++		mc_elig == ACK_OFFCHANNEL, snr, error_prob,
++		target - scheduler.current_time);
+ 
+ 	if (ctx->need_start_notify) {
+ 		frame->start_job.start = target - send_time;
+@@ -851,6 +890,7 @@ static void wmediumd_remove_client(struct wmediumd *ctx, struct client *client)
+ 				if (frame->src == client) {
+ 					list_del(&frame->list);
+ 					usfstl_sched_del_job(&frame->job);
++					wmd_telemetry_frame_done(ctx);
+ 					free(frame);
+ 				}
+ 			}
+@@ -910,11 +950,13 @@ out:
+ /*
+  * Send a data frame to the kernel for reception at a specific radio.
+  */
+-static void send_cloned_frame_msg(struct wmediumd *ctx, struct client *src,
++static void send_cloned_frame_msg(struct wmediumd *ctx,
++				  struct station *sender,
+ 				  struct station *dst, u8 *data, int data_len,
+ 				  int rate_idx, int signal, int freq,
+ 				  uint64_t cookie)
+ {
++	struct client *src = sender->client;
+ 	struct client *client, *tmp;
+ 	struct nl_msg *msg, *cmsg = NULL;
+ 
+@@ -961,7 +1003,7 @@ static void send_cloned_frame_msg(struct wmediumd *ctx, struct client *src,
+ 		} else if (!dst->client || dst->client == client) {
+ 			wmediumd_send_to_client(ctx, client, msg);
+ 			if (client->type == CLIENT_NETLINK)
+-				nl_track_cloned_frame(msg);
++				nl_track_cloned_frame(msg, sender, dst, freq);
+ 		}
+ 	}
+ 
+@@ -979,6 +1021,7 @@ static void wmediumd_deliver_frame(struct usfstl_job *job)
+ 	struct station *station;
+ 	u8 *dest = hdr->addr1;
+ 	u8 *src = frame->sender->addr;
++	bool receiver_seen = false;
+ 
+ 	list_del(&frame->list);
+ 
+@@ -992,8 +1035,13 @@ static void wmediumd_deliver_frame(struct usfstl_job *job)
+ 				int snr, rate_idx, signal;
+ 				double error_prob;
+ 
+-				if (!mc_station_receives_freq(station, frame->freq))
++				if (!mc_station_receives_freq(station, frame->freq)) {
++					if (mc_station_has_learned_vif(station))
++						wmd_telemetry_record_rx(ctx, frame, station,
++							WMD_TELEMETRY_DROP_OFFCHANNEL,
++							NOISE_LEVEL, 0, 1.0);
+ 					continue;
++				}
+ 
+ 				/*
+ 				 * we may or may not receive this based on
+@@ -1004,13 +1052,20 @@ static void wmediumd_deliver_frame(struct usfstl_job *job)
+ 						       station, frame->freq);
+ 				snr += ctx->get_fading_signal(ctx);
+ 				signal = snr + NOISE_LEVEL;
+-				if (signal < CCA_THRESHOLD)
++				if (signal < CCA_THRESHOLD) {
++					wmd_telemetry_record_rx(ctx, frame, station,
++						WMD_TELEMETRY_DROP_CCA, signal, snr, 1.0);
+ 					continue;
++				}
+ 
+ 				if (set_interference_duration(ctx,
+ 					frame->sender->index, frame->freq,
+-					frame->duration, signal))
++					frame->duration, signal)) {
++					wmd_telemetry_record_rx(ctx, frame, station,
++						WMD_TELEMETRY_DROP_INTERFERENCE,
++						signal, snr, 1.0);
+ 					continue;
++				}
+ 
+ 				snr -= get_signal_offset_by_interference(ctx,
+ 					frame->sender->index, station->index,
+@@ -1022,47 +1077,75 @@ static void wmediumd_deliver_frame(struct usfstl_job *job)
+ 					station);
+ 
+ 				if (drand48() <= error_prob) {
++					wmd_telemetry_record_rx(ctx, frame, station,
++						WMD_TELEMETRY_DROP_PER,
++						signal, snr, error_prob);
+ 					w_logf(ctx, LOG_INFO, "Dropped mcast from "
+ 						   MAC_FMT " to " MAC_FMT " at receiver\n",
+ 						   MAC_ARGS(src), MAC_ARGS(station->addr));
+ 					continue;
+ 				}
+ 
+-				send_cloned_frame_msg(ctx, frame->sender->client,
++				send_cloned_frame_msg(ctx, frame->sender,
+ 						      station,
+ 						      frame->data,
+ 						      frame->data_len,
+ 						      1, signal,
+ 						      frame->freq,
+ 						      frame->cookie);
++				wmd_telemetry_record_rx(ctx, frame, station,
++					WMD_TELEMETRY_RX_INJECTED, signal, snr,
++					error_prob);
+ 
+ 			} else if (station_has_addr(station, dest)) {
++				receiver_seen = true;
+ 				/* A scan may move the receiver after this response was
+ 				 * queued.  Recheck at delivery time instead of asking the
+ 				 * kernel to reject a stale off-channel clone. */
+-				if (!mc_station_receives_freq(station, frame->freq))
++				if (!mc_station_receives_freq(station, frame->freq)) {
++					wmd_telemetry_record_rx(ctx, frame, station,
++						WMD_TELEMETRY_DROP_OFFCHANNEL,
++						frame->signal, frame->telemetry_snr_db,
++						frame->telemetry_per_million / 1000000.0);
+ 					continue;
++				}
+ 
+ 				if (set_interference_duration(ctx,
+ 					frame->sender->index, frame->freq,
+-					frame->duration, frame->signal))
++					frame->duration, frame->signal)) {
++					wmd_telemetry_record_rx(ctx, frame, station,
++						WMD_TELEMETRY_DROP_INTERFERENCE,
++						frame->signal, frame->telemetry_snr_db,
++						frame->telemetry_per_million / 1000000.0);
+ 					continue;
++				}
+ 
+-				send_cloned_frame_msg(ctx, frame->sender->client,
++				send_cloned_frame_msg(ctx, frame->sender,
+ 						      station,
+ 						      frame->data,
+ 						      frame->data_len,
+ 						      1, frame->signal,
+ 						      frame->freq,
+ 						      frame->cookie);
++				wmd_telemetry_record_rx(ctx, frame, station,
++					WMD_TELEMETRY_RX_INJECTED, frame->signal,
++					frame->telemetry_snr_db,
++					frame->telemetry_per_million / 1000000.0);
+ 			}
+ 		}
++		if (!is_multicast_ether_addr(dest) && !receiver_seen &&
++		    frame->telemetry_destination >= 0)
++			wmd_telemetry_record_rx(ctx, frame, NULL,
++				WMD_TELEMETRY_DROP_NO_RECEIVER,
++				frame->signal, frame->telemetry_snr_db,
++				frame->telemetry_per_million / 1000000.0);
+ 	} else
+ 		set_interference_duration(ctx, frame->sender->index,
+ 					  frame->freq, frame->duration,
+ 					  frame->signal);
+ 
+ 	send_tx_info_frame_nl(ctx, frame);
++	wmd_telemetry_frame_done(ctx);
+ 
+ 	free(frame);
+ }
+@@ -1111,6 +1194,7 @@ int nl_err_cb(struct sockaddr_nl *nla, struct nlmsgerr *nlerr, void *arg)
+ 	struct genlmsghdr *gnlh = nlmsg_data(&nlerr->msg);
+ 	struct wmediumd *ctx = arg;
+ 	u32 seq = nlerr->msg.nlmsg_seq;
++	struct nl_cloned_frame_track *track = nl_tracked_cloned_frame(seq);
+ 
+ 	/* mac80211_hwsim returns EINVAL when a well-formed cloned frame reaches a
+ 	 * radio while it is idle, stopped, or between channel contexts.  That is
+@@ -1118,11 +1202,19 @@ int nl_err_cb(struct sockaddr_nl *nla, struct nlmsgerr *nlerr, void *arg)
+ 	 * Only downgrade requests which this process constructed and tracked;
+ 	 * malformed or unrelated netlink failures remain errors. */
+ 	if (gnlh->cmd == HWSIM_CMD_FRAME && nlerr->error == -EINVAL &&
+-	    nl_is_tracked_cloned_frame(seq)) {
++	    track) {
++		wmd_telemetry_netlink_rejection(ctx, track->source,
++			track->destination, track->frequency_mhz,
++			nlerr->error, true);
+ 		w_logf(ctx, LOG_DEBUG,
+ 			"nl: cloned frame not received, seq %u\n", seq);
+ 		return NL_SKIP;
+ 	}
++	wmd_telemetry_netlink_rejection(ctx,
++		track ? track->source : NULL,
++		track ? track->destination : NULL,
++		track ? track->frequency_mhz : 0,
++		nlerr->error, false);
+ 
+ 	w_flogf(ctx, LOG_ERR, stderr, "nl: cmd %d, seq %d: %s\n", gnlh->cmd,
+ 			seq, strerror(abs(nlerr->error)));
+@@ -1213,7 +1305,7 @@ static void _process_messages(struct nl_msg *msg,
+ 			frame->freq = freq;
+ 			frame->sender = sender;
+ 			{ struct station *_owner = get_station_by_addr(ctx, hwaddr);
+-			  if (_owner) mc_update_vif_owner(_owner, src, freq); }   /* WMD 1/4 v2 */
++			  if (_owner) mc_update_vif_owner(ctx, _owner, src, freq); }   /* WMD 1/4 v2 */
+ 			frame->tx_rates_count =
+ 				tx_rates_len / sizeof(struct hwsim_tx_rate);
+ 			if (frame->tx_rates_count > IEEE80211_TX_MAX_RATES)
+@@ -1559,6 +1651,7 @@ static void print_help(int exval)
+ 	printf("  -a socket       expose wmediumd API socket\n");
+ 	printf("  -C socket       expose atomic scenario-control socket\n");
+ 	printf("  -R socket       expose read-only link-metrics socket\n");
++	printf("  -O socket       expose host-only paged telemetry socket\n");
+ 	printf("  -n              force netlink use even with vhost-user\n");
+ 	printf("  -p FILE         log packets to pcapng file FILE\n");
+ 
+@@ -1706,8 +1799,8 @@ static int wmd_selftest(void)
+ 		r3.addr[0] = 0x42; r3.addr[5] = 0x03;
+ 		apa.addr[0] = 0x42; apa.addr[5] = 0x01;
+ 
+-		mc_update_vif_owner(&r3, sta, 2437);
+-		mc_update_vif_owner(&r3, sta, 5180);   /* roam on the SAME owning radio */
++		mc_update_vif_owner(&t, &r3, sta, 2437);
++		mc_update_vif_owner(&t, &r3, sta, 5180);   /* roam on the SAME owning radio */
+ 		v = mc_vif_find(sta);
+ 		if (mc_lookup_owned_vif(sta, &f) && f == 5180 && v && v->owner == &r3)
+ 			printf("PASS ownership: STA owned by its own radio r3 @ 5180 after roam\n");
+@@ -1774,6 +1867,13 @@ static int wmd_selftest(void)
+ 		}
+ 	}
+ 
++	if (wmd_telemetry_selftest()) {
++		printf("FAIL telemetry: bounded counters and ownership state\n");
++		fails++;
++	} else {
++		printf("PASS telemetry: bounded counters, active link, VIF and event state\n");
++	}
++
+ 	printf("=== self-test %s (%d failures) ===\n", fails ? "FAILED" : "PASSED", fails);
+ 	return fails ? 1 : 0;
+ }
+@@ -1786,6 +1886,7 @@ int main(int argc, char *argv[])
+ 	char *per_file = NULL;
+ 	const char *time_socket = NULL, *api_socket = NULL;
+ 	const char *control_socket = NULL, *metrics_socket = NULL;
++	const char *observer_socket = NULL;
+ 	struct usfstl_sched_ctrl ctrl = {};
+ 	struct usfstl_vhost_user_server vusrv = {
+ 		.ops = &wmediumd_vu_ops,
+@@ -1808,7 +1909,7 @@ int main(int argc, char *argv[])
+ 	unsigned long int parse_log_lvl;
+ 	char* parse_end_token;
+ 
+-	while ((opt = getopt(argc, argv, "hVc:l:x:t:u:a:C:R:np:T")) != -1) {
++	while ((opt = getopt(argc, argv, "hVc:l:x:t:u:a:C:R:O:np:T")) != -1) {
+ 		switch (opt) {
+ 		case 'T':
+ 			exit(wmd_selftest());
+@@ -1857,6 +1958,9 @@ int main(int argc, char *argv[])
+ 		case 'R':
+ 			metrics_socket = optarg;
+ 			break;
++		case 'O':
++			observer_socket = optarg;
++			break;
+ 		case 'n':
+ 			force_netlink = true;
+ 			break;
+@@ -1884,6 +1988,11 @@ int main(int argc, char *argv[])
+ 		       argv[0]);
+ 		return EXIT_FAILURE;
+ 	}
++	if (observer_socket && !control_socket) {
++		printf("%s: -O requires -C so telemetry and control share initialized state\n",
++		       argv[0]);
++		return EXIT_FAILURE;
++	}
+ 
+ 	w_logf(&ctx, LOG_NOTICE, "Input configuration file: %s\n", config_file);
+ 
+@@ -1931,6 +2040,8 @@ int main(int argc, char *argv[])
+ 		wmd_control_start(&ctx, control_socket);
+ 	if (metrics_socket)
+ 		wmd_control_start_readonly(&ctx, metrics_socket);
++	if (observer_socket)
++		wmd_control_start_observer(&ctx, observer_socket);
+ 
+ 	if (time_socket) {
+ 		usfstl_sched_ctrl_start(&ctrl, time_socket,
+diff --git a/wmediumd/wmediumd.h b/wmediumd/wmediumd.h
+index 934d074..dbde58a 100644
+--- a/wmediumd/wmediumd.h
++++ b/wmediumd/wmediumd.h
+@@ -238,6 +238,7 @@ struct wmediumd {
+ 	u64 control_generation;
+ 	struct wmd_frequency_override *frequency_overrides;
+ 	size_t frequency_override_capacity;
++	struct wmd_telemetry *telemetry;
+ };
+ 
+ struct wmd_frequency_override {
+@@ -274,6 +275,12 @@ struct frame {
+ 	int flags;
+ 	int signal;
+ 	int duration;
++	int telemetry_access_category;
++	int telemetry_destination;
++	int telemetry_snr_db;
++	u32 telemetry_per_million;
++	u32 telemetry_attempts;
++	u32 telemetry_retries;
+ 	int tx_rates_count;
+ 	int tx_rate_flags_count;
+ 	struct station *sender;
+@@ -283,6 +290,15 @@ struct frame {
+ 	u8 data[0];			/* frame contents */
+ };
+ 
++enum wmd_telemetry_outcome {
++	WMD_TELEMETRY_RX_INJECTED,
++	WMD_TELEMETRY_DROP_OFFCHANNEL,
++	WMD_TELEMETRY_DROP_CCA,
++	WMD_TELEMETRY_DROP_INTERFERENCE,
++	WMD_TELEMETRY_DROP_PER,
++	WMD_TELEMETRY_DROP_NO_RECEIVER,
++};
++
+ struct log_distance_model_param {
+ 	double path_loss_exponent;
+ 	double Xg;
+@@ -313,5 +329,25 @@ int read_per_file(struct wmediumd *ctx, const char *file_name);
+ int w_logf(struct wmediumd *ctx, u8 level, const char *format, ...);
+ int w_flogf(struct wmediumd *ctx, u8 level, FILE *stream, const char *format, ...);
+ int index_to_rate(size_t index, u32 freq);
++void wmd_telemetry_record_tx(struct wmediumd *ctx, struct frame *frame,
++			     struct station *destination, int access_category,
++			     unsigned int attempts, unsigned int retries,
++			     bool acked, bool no_ack, bool offchannel,
++			     int snr_db, double error_prob,
++			     uint64_t queue_delay_usec);
++void wmd_telemetry_record_rx(struct wmediumd *ctx, struct frame *frame,
++			     struct station *destination,
++			     enum wmd_telemetry_outcome outcome,
++			     int signal_dbm, int snr_db, double error_prob);
++void wmd_telemetry_frame_done(struct wmediumd *ctx);
++void wmd_telemetry_vif_update(struct wmediumd *ctx, const u8 *vif,
++			      struct station *owner, u32 frequency_mhz,
++			      bool changed);
++void wmd_telemetry_generation(struct wmediumd *ctx, u64 generation,
++			      bool frequency_qualified, u32 updates);
++void wmd_telemetry_netlink_rejection(struct wmediumd *ctx,
++			     struct station *source,
++			     struct station *destination, u32 frequency_mhz,
++			     int error, bool transient);
+ 
+ #endif /* WMEDIUMD_H_ */
+

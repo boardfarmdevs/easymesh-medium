@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-23T12:00:00Z",
+  "stations": [
+    {
+      "mac": "42:00:00:00:01:00",
+      "label": "Agent-1",
+      "role": "controller-agent",
+      "owner": "bpibroadband",
+      "interface": ""
+    },
+    {
+      "mac": "42:00:00:00:02:00",
+      "label": "Extender-1",
+      "role": "extender",
+      "owner": "bpiap-1",
+      "interface": ""
+    },
+    {
+      "mac": "42:00:00:00:03:00",
+      "label": "sta-03",
+      "role": "wlan-client",
+      "owner": "wlan-client-03",
+      "interface": "wlan0"
+    }
+  ]
+}

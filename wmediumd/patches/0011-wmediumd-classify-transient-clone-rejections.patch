@@ -1,0 +1,82 @@
+From: Codex <codex@openai.com>
+Subject: [PATCH 11/11] wmediumd: classify transient clone rejections
+
+Linux mac80211_hwsim returns EINVAL both for malformed HWSIM_CMD_FRAME
+requests and when a valid cloned frame reaches a receiver which is idle,
+stopped, or between channel contexts.  The latter is normal RF delivery loss
+during client scanning.  Forced blackout/arrival testing made the ambiguity
+visible as repeated command-2 diagnostics even though association, traffic,
+and topology convergence all succeeded.
+
+Remember the netlink sequence numbers of cloned frames constructed by this
+process.  Downgrade EINVAL only when it refers to one of those known delivery
+requests.  Other commands, errors, and untracked command-2 failures retain the
+existing error diagnostic.  This removes misleading error-level output without
+blindly suppressing netlink protocol faults.
+
+---
+ wmediumd/wmediumd.c | 34 ++++++++++++++++++++++++++++++++--
+ 1 file changed, 32 insertions(+), 2 deletions(-)
+
+diff --git a/wmediumd/wmediumd.c b/wmediumd/wmediumd.c
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -371,6 +371,23 @@ static struct mc_vif_state {
+ static struct mc_vif_state *mc_vifs;
+ static size_t mc_n_vifs;
+ 
++#define NL_CLONED_FRAME_TRACK_SLOTS 4096
++static u32 nl_cloned_frame_seqs[NL_CLONED_FRAME_TRACK_SLOTS];
++
++static void nl_track_cloned_frame(struct nl_msg *msg)
++{
++	u32 seq = nlmsg_hdr(msg)->nlmsg_seq;
++
++	if (seq)
++		nl_cloned_frame_seqs[seq % NL_CLONED_FRAME_TRACK_SLOTS] = seq;
++}
++
++static int nl_is_tracked_cloned_frame(u32 seq)
++{
++	return seq &&
++		nl_cloned_frame_seqs[seq % NL_CLONED_FRAME_TRACK_SLOTS] == seq;
++}
++
+ static struct mc_vif_state *mc_vif_find(const u8 *mac)
+ {
+ 	size_t i;
+@@ -943,6 +960,8 @@ static void send_cloned_frame_msg(struct wmediumd *ctx, struct client *src,
+ 						src == client ? cmsg : msg);
+ 		} else if (!dst->client || dst->client == client) {
+ 			wmediumd_send_to_client(ctx, client, msg);
++			if (client->type == CLIENT_NETLINK)
++				nl_track_cloned_frame(msg);
+ 		}
+ 	}
+ 
+@@ -1091,9 +1110,22 @@ int nl_err_cb(struct sockaddr_nl *nla, struct nlmsgerr *nlerr, void *arg)
+ {
+ 	struct genlmsghdr *gnlh = nlmsg_data(&nlerr->msg);
+ 	struct wmediumd *ctx = arg;
++	u32 seq = nlerr->msg.nlmsg_seq;
++
++	/* mac80211_hwsim returns EINVAL when a well-formed cloned frame reaches a
++	 * radio while it is idle, stopped, or between channel contexts.  That is
++	 * normal RF delivery loss during scanning, not a daemon/protocol failure.
++	 * Only downgrade requests which this process constructed and tracked;
++	 * malformed or unrelated netlink failures remain errors. */
++	if (gnlh->cmd == HWSIM_CMD_FRAME && nlerr->error == -EINVAL &&
++	    nl_is_tracked_cloned_frame(seq)) {
++		w_logf(ctx, LOG_DEBUG,
++			"nl: cloned frame not received, seq %u\n", seq);
++		return NL_SKIP;
++	}
+ 
+ 	w_flogf(ctx, LOG_ERR, stderr, "nl: cmd %d, seq %d: %s\n", gnlh->cmd,
+-			nlerr->msg.nlmsg_seq, strerror(abs(nlerr->error)));
++			seq, strerror(abs(nlerr->error)));
+ 
+ 	return NL_SKIP;
+ }
+-- 
+2.43.0

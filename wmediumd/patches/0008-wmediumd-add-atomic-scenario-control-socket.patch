@@ -1,0 +1,543 @@
+From 21cc44dba6035c4977d3f7854d3d2e37ca32b738 Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Sat, 15 Aug 2026 19:46:17 -0700
+Subject: [PATCH] wmediumd: add atomic scenario control socket
+
+---
+ wmediumd/Makefile         |   2 +-
+ wmediumd/control.c        | 302 ++++++++++++++++++++++++++++++++++++++
+ wmediumd/control.h        |  65 ++++++++
+ wmediumd/inc/usfstl/uds.h |   2 +
+ wmediumd/lib/uds.c        |  19 ++-
+ wmediumd/wmediumd.c       |  10 +-
+ wmediumd/wmediumd.h       |   7 +
+ 7 files changed, 402 insertions(+), 5 deletions(-)
+ create mode 100644 wmediumd/control.c
+ create mode 100644 wmediumd/control.h
+
+diff --git a/wmediumd/Makefile b/wmediumd/Makefile
+index fa94eb0..9a2afdc 100644
+--- a/wmediumd/Makefile
++++ b/wmediumd/Makefile
+@@ -49,7 +49,7 @@ CFLAGS += $(shell $(PKG_CONFIG) --cflags $(NLLIBNAME))
+ 
+ CFLAGS+=-DVERSION_STR=$(VERSION_STR)
+ LDFLAGS+=-lconfig 
+-OBJECTS=wmediumd.o config.o per.o
++OBJECTS=wmediumd.o config.o per.o control.o
+ OBJECTS += lib/loop.o lib/sched.o lib/schedctrl.o
+ OBJECTS += lib/uds.o lib/vhost.o lib/wallclock.o
+ 
+diff --git a/wmediumd/control.c b/wmediumd/control.c
+new file mode 100644
+index 0000000..7b8ae0d
+--- /dev/null
++++ b/wmediumd/control.c
+@@ -0,0 +1,302 @@
++/*
++ * Dedicated atomic scenario control for the EasyMesh hwsim laboratory.
++ * SPDX-License-Identifier: GPL-2.0
++ */
++#include <endian.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/random.h>
++#include <sys/socket.h>
++#include <sys/stat.h>
++#include <time.h>
++#include <unistd.h>
++
++#include <usfstl/loop.h>
++#include <usfstl/uds.h>
++
++#include "control.h"
++#include "wmediumd.h"
++
++struct wmd_control_client {
++	struct usfstl_loop_entry loop;
++	struct wmediumd *ctx;
++};
++
++struct resolved_update {
++	int source;
++	int destination;
++	int snr_db;
++};
++
++static int station_index(struct wmediumd *ctx, const uint8_t *address)
++{
++	int i;
++
++	for (i = 0; i < ctx->num_stas; i++)
++		if (memcmp(ctx->sta_array[i]->addr, address, 6) == 0)
++			return i;
++	return -1;
++}
++
++static int send_response(int fd, uint16_t opcode, uint32_t status,
++			 uint64_t generation, const void *payload,
++			 uint32_t payload_len)
++{
++	uint8_t *frame;
++	struct wmdc_header *header;
++	ssize_t sent;
++
++	if (sizeof(*header) + payload_len > WMDC_MAX_FRAME)
++		return -1;
++	frame = calloc(1, sizeof(*header) + payload_len);
++	if (!frame)
++		return -1;
++	header = (struct wmdc_header *)frame;
++	header->magic = htobe32(WMDC_MAGIC);
++	header->version = htobe16(WMDC_VERSION);
++	header->opcode = htobe16(opcode);
++	header->payload_len = htobe32(payload_len);
++	header->status = htobe32(status);
++	header->generation = htobe64(generation);
++	if (payload_len)
++		memcpy(frame + sizeof(*header), payload, payload_len);
++	sent = send(fd, frame, sizeof(*header) + payload_len, MSG_NOSIGNAL);
++	free(frame);
++	return sent == (ssize_t)(sizeof(*header) + payload_len) ? 0 : -1;
++}
++
++static int send_info(struct wmd_control_client *client, uint16_t opcode)
++{
++	struct wmediumd *ctx = client->ctx;
++	struct wmdc_info info = {
++		.instance_hi = htobe64(ctx->control_instance_hi),
++		.instance_lo = htobe64(ctx->control_instance_lo),
++		.capabilities = htobe32(WMDC_CAP_RADIO_PAIR_SNR |
++			WMDC_CAP_ATOMIC_GENERATIONS | WMDC_CAP_READBACK |
++			WMDC_CAP_DUMP),
++		.max_updates = htobe32(ctx->num_stas * ctx->num_stas),
++		.num_stations = htobe32(ctx->num_stas),
++	};
++
++	return send_response(client->loop.fd, opcode, WMDC_OK,
++			     ctx->control_generation, &info, sizeof(info));
++}
++
++static int resolve_links(struct wmediumd *ctx, const uint8_t *payload,
++			 uint32_t count, struct resolved_update *resolved,
++			 bool require_value)
++{
++	const struct wmdc_link *links = (const struct wmdc_link *)payload;
++	uint32_t i;
++
++	for (i = 0; i < count; i++) {
++		resolved[i].source = station_index(ctx, links[i].source);
++		resolved[i].destination = station_index(ctx, links[i].destination);
++		resolved[i].snr_db = (int16_t)be16toh((uint16_t)links[i].snr_db);
++		if (resolved[i].source < 0 || resolved[i].destination < 0)
++			return WMDC_ERR_IDENTITY;
++		if (require_value &&
++		    (resolved[i].snr_db < -20 || resolved[i].snr_db > 60))
++			return WMDC_ERR_VALUE;
++	}
++	return WMDC_OK;
++}
++
++static int handle_apply(struct wmd_control_client *client,
++			const struct wmdc_header *request,
++			const uint8_t *payload, uint32_t payload_len)
++{
++	struct wmediumd *ctx = client->ctx;
++	struct resolved_update *resolved;
++	uint64_t generation = be64toh(request->generation);
++	uint32_t count, i;
++	int status;
++
++	if (!payload_len || payload_len % sizeof(struct wmdc_link))
++		return send_response(client->loop.fd, WMDC_OP_APPLY,
++			WMDC_ERR_LENGTH, ctx->control_generation, NULL, 0);
++	count = payload_len / sizeof(struct wmdc_link);
++	if (count > (uint32_t)(ctx->num_stas * ctx->num_stas))
++		return send_response(client->loop.fd, WMDC_OP_APPLY,
++			WMDC_ERR_LENGTH, ctx->control_generation, NULL, 0);
++	if (generation != ctx->control_generation + 1)
++		return send_response(client->loop.fd, WMDC_OP_APPLY,
++			WMDC_ERR_GENERATION, ctx->control_generation, NULL, 0);
++	resolved = calloc(count, sizeof(*resolved));
++	if (!resolved)
++		return send_response(client->loop.fd, WMDC_OP_APPLY,
++			WMDC_ERR_INTERNAL, ctx->control_generation, NULL, 0);
++	status = resolve_links(ctx, payload, count, resolved, true);
++	if (status != WMDC_OK) {
++		free(resolved);
++		return send_response(client->loop.fd, WMDC_OP_APPLY, status,
++			ctx->control_generation, NULL, 0);
++	}
++	/* Validation is complete. Only this loop mutates the live matrix. */
++	for (i = 0; i < count; i++)
++		ctx->snr_matrix[resolved[i].source * ctx->num_stas +
++			resolved[i].destination] = resolved[i].snr_db;
++	ctx->control_generation = generation;
++	free(resolved);
++	return send_response(client->loop.fd, WMDC_OP_APPLY, WMDC_OK,
++			generation, payload, payload_len);
++}
++
++static int handle_get(struct wmd_control_client *client,
++		      const uint8_t *payload, uint32_t payload_len)
++{
++	struct wmediumd *ctx = client->ctx;
++	struct resolved_update resolved;
++	struct wmdc_link response;
++	int status;
++
++	if (payload_len != sizeof(response))
++		return send_response(client->loop.fd, WMDC_OP_GET_LINK,
++			WMDC_ERR_LENGTH, ctx->control_generation, NULL, 0);
++	status = resolve_links(ctx, payload, 1, &resolved, false);
++	if (status != WMDC_OK)
++		return send_response(client->loop.fd, WMDC_OP_GET_LINK, status,
++			ctx->control_generation, NULL, 0);
++	memcpy(&response, payload, sizeof(response));
++	response.snr_db = htobe16((uint16_t)ctx->snr_matrix[
++		resolved.source * ctx->num_stas + resolved.destination]);
++	response.reserved = 0;
++	return send_response(client->loop.fd, WMDC_OP_GET_LINK, WMDC_OK,
++			ctx->control_generation, &response, sizeof(response));
++}
++
++static int handle_dump(struct wmd_control_client *client)
++{
++	struct wmediumd *ctx = client->ctx;
++	struct wmdc_link *links;
++	uint32_t count = 0;
++	int i, j, result;
++
++	links = calloc(ctx->num_stas * ctx->num_stas, sizeof(*links));
++	if (!links)
++		return send_response(client->loop.fd, WMDC_OP_DUMP_LINKS,
++			WMDC_ERR_INTERNAL, ctx->control_generation, NULL, 0);
++	for (i = 0; i < ctx->num_stas; i++) {
++		for (j = 0; j < ctx->num_stas; j++) {
++			if (i == j)
++				continue;
++			memcpy(links[count].source, ctx->sta_array[i]->addr, 6);
++			memcpy(links[count].destination, ctx->sta_array[j]->addr, 6);
++			links[count].snr_db = htobe16((uint16_t)
++				ctx->snr_matrix[i * ctx->num_stas + j]);
++			count++;
++		}
++	}
++	result = send_response(client->loop.fd, WMDC_OP_DUMP_LINKS, WMDC_OK,
++			       ctx->control_generation, links,
++			       count * sizeof(*links));
++	free(links);
++	return result;
++}
++
++static void control_disconnect(struct wmd_control_client *client)
++{
++	client->ctx->control_client_active = false;
++	usfstl_loop_unregister(&client->loop);
++	close(client->loop.fd);
++	free(client);
++}
++
++static void control_handler(struct usfstl_loop_entry *entry)
++{
++	struct wmd_control_client *client =
++		container_of(entry, struct wmd_control_client, loop);
++	uint8_t frame[WMDC_MAX_FRAME];
++	struct wmdc_header *header = (struct wmdc_header *)frame;
++	uint32_t payload_len;
++	uint16_t opcode;
++	ssize_t length;
++	int result = -1;
++
++	length = recv(entry->fd, frame, sizeof(frame), 0);
++	if (length <= 0) {
++		control_disconnect(client);
++		return;
++	}
++	if (length < (ssize_t)sizeof(*header) ||
++	    be32toh(header->magic) != WMDC_MAGIC ||
++	    be16toh(header->version) != WMDC_VERSION) {
++		send_response(entry->fd, 0, WMDC_ERR_PROTOCOL,
++			      client->ctx->control_generation, NULL, 0);
++		return;
++	}
++	payload_len = be32toh(header->payload_len);
++	opcode = be16toh(header->opcode);
++	if (payload_len != (uint32_t)(length - sizeof(*header))) {
++		send_response(entry->fd, opcode, WMDC_ERR_LENGTH,
++			      client->ctx->control_generation, NULL, 0);
++		return;
++	}
++	switch (opcode) {
++	case WMDC_OP_HELLO:
++	case WMDC_OP_STATUS:
++		if (payload_len == 0)
++			result = send_info(client, opcode);
++		break;
++	case WMDC_OP_APPLY:
++		result = handle_apply(client, header, frame + sizeof(*header),
++				      payload_len);
++		break;
++	case WMDC_OP_GET_LINK:
++		result = handle_get(client, frame + sizeof(*header), payload_len);
++		break;
++	case WMDC_OP_DUMP_LINKS:
++		if (payload_len == 0)
++			result = handle_dump(client);
++		break;
++	default:
++		break;
++	}
++	if (result < 0)
++		control_disconnect(client);
++}
++
++static void control_connected(int fd, void *data)
++{
++	struct wmediumd *ctx = data;
++	struct wmd_control_client *client;
++
++	if (fd < 0)
++		return;
++	if (ctx->control_client_active) {
++		close(fd);
++		return;
++	}
++	client = calloc(1, sizeof(*client));
++	if (!client) {
++		close(fd);
++		return;
++	}
++	ctx->control_client_active = true;
++	client->ctx = ctx;
++	client->loop.fd = fd;
++	client->loop.handler = control_handler;
++	usfstl_loop_register(&client->loop);
++}
++
++void wmd_control_start(struct wmediumd *ctx, const char *path)
++{
++	uint64_t instance[2];
++	ssize_t bytes;
++
++	bytes = getrandom(instance, sizeof(instance), 0);
++	if (bytes != sizeof(instance)) {
++		instance[0] = (uint64_t)time(NULL);
++		instance[1] = ((uint64_t)getpid() << 32) ^ (uint64_t)clock();
++	}
++	ctx->control_instance_hi = instance[0];
++	ctx->control_instance_lo = instance[1];
++	ctx->control_generation = 0;
++	ctx->control_client_active = false;
++	usfstl_uds_create_seqpacket(path, control_connected, ctx);
++	chmod(path, 0660);
++}
+diff --git a/wmediumd/control.h b/wmediumd/control.h
+new file mode 100644
+index 0000000..a7853f0
+--- /dev/null
++++ b/wmediumd/control.h
+@@ -0,0 +1,65 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef WMEDIUMD_CONTROL_H
++#define WMEDIUMD_CONTROL_H
++
++#include <stdint.h>
++
++struct wmediumd;
++
++#define WMDC_MAGIC 0x574d4443U
++#define WMDC_VERSION 1
++#define WMDC_MAX_FRAME (64U * 1024U)
++
++enum wmdc_opcode {
++	WMDC_OP_HELLO = 1,
++	WMDC_OP_STATUS = 2,
++	WMDC_OP_APPLY = 3,
++	WMDC_OP_GET_LINK = 4,
++	WMDC_OP_DUMP_LINKS = 5,
++};
++
++enum wmdc_status {
++	WMDC_OK = 0,
++	WMDC_ERR_PROTOCOL = 1,
++	WMDC_ERR_LENGTH = 2,
++	WMDC_ERR_GENERATION = 3,
++	WMDC_ERR_IDENTITY = 4,
++	WMDC_ERR_VALUE = 5,
++	WMDC_ERR_INTERNAL = 6,
++};
++
++enum wmdc_capability {
++	WMDC_CAP_RADIO_PAIR_SNR = 1U << 0,
++	WMDC_CAP_ATOMIC_GENERATIONS = 1U << 1,
++	WMDC_CAP_READBACK = 1U << 2,
++	WMDC_CAP_DUMP = 1U << 3,
++};
++
++struct wmdc_header {
++	uint32_t magic;
++	uint16_t version;
++	uint16_t opcode;
++	uint32_t payload_len;
++	uint32_t status;
++	uint64_t generation;
++} __attribute__((packed));
++
++struct wmdc_link {
++	uint8_t source[6];
++	uint8_t destination[6];
++	int16_t snr_db;
++	uint16_t reserved;
++} __attribute__((packed));
++
++struct wmdc_info {
++	uint64_t instance_hi;
++	uint64_t instance_lo;
++	uint32_t capabilities;
++	uint32_t max_updates;
++	uint32_t num_stations;
++	uint32_t reserved;
++} __attribute__((packed));
++
++void wmd_control_start(struct wmediumd *ctx, const char *path);
++
++#endif
+diff --git a/wmediumd/inc/usfstl/uds.h b/wmediumd/inc/usfstl/uds.h
+index 622e122..ee54ca9 100644
+--- a/wmediumd/inc/usfstl/uds.h
++++ b/wmediumd/inc/usfstl/uds.h
+@@ -15,6 +15,8 @@
+ 
+ void usfstl_uds_create(const char *path, void (*connected)(int, void *),
+ 		       void *data);
++void usfstl_uds_create_seqpacket(const char *path,
++				 void (*connected)(int, void *), void *data);
+ void usfstl_uds_remove(const char *path);
+ 
+ int usfstl_uds_connect(const char *path, void (*readable)(int, void *),
+diff --git a/wmediumd/lib/uds.c b/wmediumd/lib/uds.c
+index fc0fe2a..dc3a910 100644
+--- a/wmediumd/lib/uds.c
++++ b/wmediumd/lib/uds.c
+@@ -36,8 +36,9 @@ void usfstl_uds_accept_handler(struct usfstl_loop_entry *entry)
+ 	uds->connected(fd, uds->data);
+ }
+ 
+-void usfstl_uds_create(const char *path, void (*connected)(int, void *),
+-		       void *data)
++static void usfstl_uds_create_type(const char *path,
++				   void (*connected)(int, void *),
++				   void *data, int type)
+ {
+ 	struct usfstl_uds_server *uds = malloc(sizeof(*uds) + strlen(path) + 1);
+ 	struct stat buf;
+@@ -58,7 +59,7 @@ void usfstl_uds_create(const char *path, void (*connected)(int, void *),
+ 		USFSTL_ASSERT_EQ(errno, ENOENT, "%d");
+ 	}
+ 
+-	fd = socket(AF_UNIX, SOCK_STREAM, 0);
++	fd = socket(AF_UNIX, type, 0);
+ 	uds->entry.fd = fd;
+ 
+ 	strcpy(un.sun_path, path);
+@@ -71,6 +72,18 @@ void usfstl_uds_create(const char *path, void (*connected)(int, void *),
+ 	usfstl_loop_register(&uds->entry);
+ }
+ 
++void usfstl_uds_create(const char *path, void (*connected)(int, void *),
++		       void *data)
++{
++	usfstl_uds_create_type(path, connected, data, SOCK_STREAM);
++}
++
++void usfstl_uds_create_seqpacket(const char *path,
++				 void (*connected)(int, void *), void *data)
++{
++	usfstl_uds_create_type(path, connected, data, SOCK_SEQPACKET);
++}
++
+ void usfstl_uds_remove(const char *path)
+ {
+ 	struct usfstl_loop_entry *tmp;
+diff --git a/wmediumd/wmediumd.c b/wmediumd/wmediumd.c
+index c2e5e1e..67118ee 100644
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -47,6 +47,7 @@
+ #include "ieee80211.h"
+ #include "config.h"
+ #include "api.h"
++#include "control.h"
+ 
+ USFSTL_SCHEDULER(scheduler);
+ 
+@@ -1520,6 +1521,7 @@ static void print_help(int exval)
+ 	printf("  -t socket       set the time control socket\n");
+ 	printf("  -u socket       expose vhost-user socket, don't use netlink\n");
+ 	printf("  -a socket       expose wmediumd API socket\n");
++	printf("  -C socket       expose atomic scenario-control socket\n");
+ 	printf("  -n              force netlink use even with vhost-user\n");
+ 	printf("  -p FILE         log packets to pcapng file FILE\n");
+ 
+@@ -1715,6 +1717,7 @@ int main(int argc, char *argv[])
+ 	char *config_file = NULL;
+ 	char *per_file = NULL;
+ 	const char *time_socket = NULL, *api_socket = NULL;
++	const char *control_socket = NULL;
+ 	struct usfstl_sched_ctrl ctrl = {};
+ 	struct usfstl_vhost_user_server vusrv = {
+ 		.ops = &wmediumd_vu_ops,
+@@ -1737,7 +1740,7 @@ int main(int argc, char *argv[])
+ 	unsigned long int parse_log_lvl;
+ 	char* parse_end_token;
+ 
+-	while ((opt = getopt(argc, argv, "hVc:l:x:t:u:a:np:T")) != -1) {
++	while ((opt = getopt(argc, argv, "hVc:l:x:t:u:a:C:np:T")) != -1) {
+ 		switch (opt) {
+ 		case 'T':
+ 			exit(wmd_selftest());
+@@ -1780,6 +1783,9 @@ int main(int argc, char *argv[])
+ 		case 'a':
+ 			api_socket = optarg;
+ 			break;
++		case 'C':
++			control_socket = optarg;
++			break;
+ 		case 'n':
+ 			force_netlink = true;
+ 			break;
+@@ -1845,6 +1851,8 @@ int main(int argc, char *argv[])
+ 
+ 	if (api_socket)
+ 		usfstl_uds_create(api_socket, wmediumd_api_connected, &ctx);
++	if (control_socket)
++		wmd_control_start(&ctx, control_socket);
+ 
+ 	if (time_socket) {
+ 		usfstl_sched_ctrl_start(&ctrl, time_socket,
+diff --git a/wmediumd/wmediumd.h b/wmediumd/wmediumd.h
+index 150caa3..d73c6af 100644
+--- a/wmediumd/wmediumd.h
++++ b/wmediumd/wmediumd.h
+@@ -230,6 +230,13 @@ struct wmediumd {
+ 	u32 need_start_notify;
+ 
+ 	FILE *pcap_file;
++
++	/* Dedicated scenario-control state. The control implementation owns the
++	 * socket and client, while the frame path continues to read snr_matrix. */
++	u64 control_instance_hi;
++	u64 control_instance_lo;
++	u64 control_generation;
++	bool control_client_active;
+ };
+ 
+ struct hwsim_tx_rate {
+-- 
+2.53.0
+

@@ -1,0 +1,24 @@
+mac80211_hwsim: allow wmediumd to register with channels > 1
+
+Stock mac80211_hwsim rejects HWSIM_CMD_REGISTER with -EOPNOTSUPP whenever the
+radio pool was loaded with channels > 1. The guard is precautionary ("userspace
+multi-channel behaviour not asserted safe"), not a hard limitation: the kernel
+<-> wmediumd protocol already carries per-frame frequency (HWSIM_ATTR_FREQ), and
+a channels-aware wmediumd (see gen/wmediumd) handles the concurrent contexts.
+
+This is the single change that lets the EasyMesh lab run FEATURE_SINGLE_PHY
+(concurrent 2.4 GHz ch6 + 5 GHz ch36 on one phy, needing channels>=2) *under*
+wmediumd for a real RF gradient, instead of dropping to a 5 GHz-only channels=1
+medium. Downgrade the refusal to a one-shot warning.
+
+--- a/drivers/net/wireless/virtual/mac80211_hwsim.c
++++ b/drivers/net/wireless/virtual/mac80211_hwsim.c
+@@ -5769,7 +5769,7 @@
+ 	 * For current userspace, prohibit it since it won't work right.
+ 	 */
+ 	if (chans > 1)
+-		return -EOPNOTSUPP;
++		pr_warn("mac80211_hwsim: EXPERIMENTAL wmediumd with %u channels\n", chans);
+
+ 	if (hwsim_net_get_wmediumd(net))
+ 		return -EBUSY;

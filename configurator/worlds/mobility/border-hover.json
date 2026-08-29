@@ -1,0 +1,12 @@
+{
+  "schema": "wmdcfg.mobility.v1",
+  "name": "border-hover",
+  "tags": ["border-hover", "hysteresis", "mobile-2", "clients-12"],
+  "duration_ms": 60000,
+  "tick_ms": 2000,
+  "seed": 1703,
+  "nodes": [
+    {"role": "sta_mobile_01", "path": [{"time_ms": 0, "position": [5.4, 4]}, {"time_ms": 10000, "position": [6.6, 4]}, {"time_ms": 20000, "position": [5.4, 4]}, {"time_ms": 30000, "position": [6.6, 4]}, {"time_ms": 40000, "position": [5.4, 4]}, {"time_ms": 50000, "position": [6.6, 4]}, {"time_ms": 60000, "position": [5.4, 4]}]},
+    {"role": "sta_mobile_02", "path": [{"time_ms": 0, "position": [13.4, 10]}, {"time_ms": 10000, "position": [14.6, 10]}, {"time_ms": 20000, "position": [13.4, 10]}, {"time_ms": 30000, "position": [14.6, 10]}, {"time_ms": 40000, "position": [13.4, 10]}, {"time_ms": 50000, "position": [14.6, 10]}, {"time_ms": 60000, "position": [13.4, 10]}]}
+  ]
+}

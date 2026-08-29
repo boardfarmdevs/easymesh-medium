@@ -1,0 +1,36 @@
+# Slow, deterministic two-AP movement stimulus. Association is observed; it
+# never changes the meaning of ap_a or ap_b.
+scenario two_ap_crossover {
+    language 1
+    tick 1s
+    require radio_pair_snr
+    require atomic_generations
+    require readback
+    protect backhaul
+    restore captured
+
+    role client : station
+    role ap_a : fronthaul_ap
+    role ap_b : fronthaul_ap
+
+    phase baseline for 10s {
+        parallel {
+            link client <-> ap_a snr = 42dB
+            link client <-> ap_b snr = 10dB
+        }
+        mark "baseline established"
+    }
+
+    phase crossover for 30s {
+        parallel {
+            link client <-> ap_a snr 42dB -> 10dB linear
+            link client <-> ap_b snr 10dB -> 42dB linear
+        }
+        mark "crossover begins"
+    }
+
+    phase destination_hold for 20s {
+        hold
+        mark "final RF values held for policy convergence"
+    }
+}

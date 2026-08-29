@@ -1,0 +1,9 @@
+{
+  "schema": "wmdcfg.mobility.v1",
+  "name": "stationary",
+  "tags": ["stationary", "clients-10"],
+  "duration_ms": 60000,
+  "tick_ms": 2000,
+  "seed": 1701,
+  "nodes": []
+}

@@ -1,0 +1,81 @@
+From: Codex <codex@openai.com>
+Subject: [PATCH] wmediumd: use learned VIF ownership for frame delivery
+
+When wmediumd registers after AP interfaces already exist, mac80211_hwsim does
+not replay their HWSIM_CMD_ADD_MAC_ADDR events.  The multichannel ownership map
+correctly learns each BSSID from transmitted beacons, but station_has_addr()
+still consults only the receive-filter list.  An uplink ARP frame uses the AP
+BSSID as its 802.11 receiver, so wmediumd reports TX success without selecting
+any destination radio and the frame disappears.
+
+The receive-filter list is also not an ownership database: an associated
+station's address legitimately appears in its AP's filter.  If it wins lookup,
+downlink frames are looped back to the AP instead of delivered to the station.
+
+Make transmit-learned ownership authoritative whenever it is known and fall
+back to the filter list only for an address not learned from transmitted
+frames.  Extend the self-test for both absent ADD_MAC_ADDR replay and conflicting
+receive-filter state.
+
+---
+ wmediumd/wmediumd.c | 25 +++++++++++++++++++++++--
+ 1 file changed, 23 insertions(+), 2 deletions(-)
+
+diff --git a/wmediumd/wmediumd.c b/wmediumd/wmediumd.c
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -322,10 +322,18 @@ static struct station *get_station_by_addr(struct wmediumd *ctx, u8 *addr)
+ 	return NULL;
+ }
+ 
++static struct station *mc_vif_owner(const u8 *addr);
++
+ static bool station_has_addr(struct station *station, const u8 *addr)
+ {
++	struct station *owner = mc_vif_owner(addr);
+ 	unsigned int i;
+ 
++	/* Transmit-learned ownership is authoritative.  RX filter registrations
++	 * legitimately contain a peer's address and may appear on several radios. */
++	if (owner)
++		return owner == station;
++
+ 	if (memcmp(station->addr, addr, ETH_ALEN) == 0)
+ 		return true;
+ 
+@@ -371,6 +379,13 @@ static struct mc_vif_state *mc_vif_find(const u8 *mac)
+ 	return NULL;
+ }
+ 
++static struct station *mc_vif_owner(const u8 *addr)
++{
++	struct mc_vif_state *v = mc_vif_find(addr);
++
++	return v && v->freq_known ? v->owner : NULL;
++}
++
+ static void mc_update_vif_owner(struct station *owner, const u8 *ta, u32 freq)
+ {
+ 	struct mc_vif_state *v = mc_vif_find(ta);
+@@ -1521,13 +1536,18 @@ static int wmd_selftest(void)
+ 		if (mc_lookup_owned_vif(sta, &f) && f == 5180 && v && v->owner == &r3)
+ 			printf("PASS ownership: STA owned by its own radio r3 @ 5180 after roam\n");
+ 		else { printf("FAIL ownership: f=%u\n", f); fails++; }
++		if (station_has_addr(&r3, sta))
++			printf("PASS delivery: learned VIF resolves to its owning radio without ADD_MAC_ADDR replay\n");
++		else { printf("FAIL delivery: learned VIF did not resolve to owning radio\n"); fails++; }
+ 
+ 		/* Simulate what HWSIM_CMD_ADD_MAC_ADDR does: register the STA MAC in
+ 		 * AP-A's RX filter (station->addrs[]). Ownership must NOT change. */
+ 		apa.n_addrs = 1;
+ 		apa.addrs = calloc(1, sizeof(struct addr));
+ 		memcpy(apa.addrs[0].addr, sta, ETH_ALEN);
+-		if (mc_lookup_owned_vif(sta, &f) && f == 5180 && v->owner == &r3)
++		if (mc_lookup_owned_vif(sta, &f) && f == 5180 &&
++		    v->owner == &r3 && station_has_addr(&r3, sta) &&
++		    !station_has_addr(&apa, sta))
+ 			printf("PASS invariant: ADD_MAC_ADDR RX-filter churn does not alter ownership/freq\n");
+ 		else { printf("FAIL invariant: RX-filter churn changed ownership\n"); fails++; }
+ 		free(apa.addrs);
+-- 
+2.43.0

@@ -1,0 +1,19 @@
+{
+  "schema": "wmdcfg.mobility.v1",
+  "name": "asymmetric-link",
+  "tags": ["asymmetric", "mobile-1", "clients-11"],
+  "duration_ms": 60000,
+  "tick_ms": 2000,
+  "seed": 1708,
+  "nodes": [
+    {
+      "role": "sta_mobile_01",
+      "tx_gain_db_by_band": {"2.4": -7, "5": -10, "6": -12},
+      "path": [
+        {"time_ms": 0, "position": [3, 7]},
+        {"time_ms": 30000, "position": [10, 7]},
+        {"time_ms": 60000, "position": [17, 7]}
+      ]
+    }
+  ]
+}

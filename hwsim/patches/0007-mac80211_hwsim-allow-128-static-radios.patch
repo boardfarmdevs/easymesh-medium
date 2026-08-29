@@ -1,0 +1,18 @@
+mac80211_hwsim: allow the kernel-medium identity bound for static radios
+
+The EasyMesh stress profile needs five mesh radios plus one hundred client
+radios.  Raise the module-load bound from 100 to the already fixed and checked
+kernel-medium identity capacity of 128.  This remains a lab-only static pool;
+the default radio count is unchanged.
+
+--- a/drivers/net/wireless/virtual/mac80211_hwsim.c
++++ b/drivers/net/wireless/virtual/mac80211_hwsim.c
+@@ -7708,7 +7708,7 @@
+ {
+ 	int i, err;
+ 
+-	if (radios < 0 || radios > 100)
++	if (radios < 0 || radios > HWSIM_KERNEL_MEDIUM_MAX_RADIOS)
+ 		return -EINVAL;
+ 
+ 	if (channels < 1)

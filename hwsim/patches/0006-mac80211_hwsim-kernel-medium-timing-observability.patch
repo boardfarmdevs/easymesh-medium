@@ -1,0 +1,340 @@
+mac80211_hwsim: add bounded kernel-medium timing and airtime accounting
+
+Add an optional high-resolution receive-delay queue with deterministic jitter,
+a hard per-radio queue limit, and teardown draining.  Delay remains disabled
+by default.  Also account approximate per-band airtime and temporal overlap
+without yet turning overlap into collision loss.  The accounting is intended
+to guide later collision work, not to claim complete CSMA/CA fidelity.
+
+--- a/drivers/net/wireless/virtual/mac80211_hwsim.c
++++ b/drivers/net/wireless/virtual/mac80211_hwsim.c
+@@ -80,6 +80,21 @@
+ MODULE_PARM_DESC(kernel_medium_noise_floor,
+ 		 "Noise floor in dBm for the experimental rate-aware packet error model");
+ 
++static unsigned int kernel_medium_delay_us;
++module_param(kernel_medium_delay_us, uint, 0644);
++MODULE_PARM_DESC(kernel_medium_delay_us,
++		 "Bounded receive delay in microseconds for the experimental kernel medium");
++
++static unsigned int kernel_medium_jitter_us;
++module_param(kernel_medium_jitter_us, uint, 0644);
++MODULE_PARM_DESC(kernel_medium_jitter_us,
++		 "Deterministic receive-delay jitter in microseconds");
++
++static unsigned int kernel_medium_delay_queue_limit = 4096;
++module_param(kernel_medium_delay_queue_limit, uint, 0644);
++MODULE_PARM_DESC(kernel_medium_delay_queue_limit,
++		 "Maximum delayed frames queued per receiver radio");
++
+ static unsigned int kernel_medium_bank;
+ static unsigned int kernel_medium_generation;
+ 
+@@ -724,6 +739,8 @@
+ #define HWSIM_KERNEL_MEDIUM_MAX_RADIOS 128
+ #define HWSIM_KERNEL_MEDIUM_BANDS 3
+ 
++static u64 kernel_medium_band_busy_until_ns[HWSIM_KERNEL_MEDIUM_BANDS];
++
+ struct hwsim_kernel_medium_link {
+ 	u8 source[ETH_ALEN];
+ 	s8 signal;
+@@ -836,6 +853,18 @@
+ 	u8 kernel_medium_last_encoding;
+ 	u8 kernel_medium_last_nss;
+ 	u8 kernel_medium_last_bw;
++	struct sk_buff_head kernel_medium_delay_queue;
++	struct hrtimer kernel_medium_delay_timer;
++	bool kernel_medium_shutting_down;
++	u64 kernel_medium_last_due_ns;
++	u64 kernel_medium_delayed_queued;
++	u64 kernel_medium_delayed_delivered;
++	u64 kernel_medium_delay_overflow;
++	u64 kernel_medium_airtime_us[HWSIM_KERNEL_MEDIUM_BANDS];
++	u64 kernel_medium_overlap_observed[HWSIM_KERNEL_MEDIUM_BANDS];
++	u32 kernel_medium_delay_queue_high_water;
++	u32 kernel_medium_last_delay_us;
++	u32 kernel_medium_last_airtime_us;
+ 	struct hwsim_kernel_medium_link
+ 		kernel_medium_links[HWSIM_KERNEL_MEDIUM_BANKS]
+ 				   [HWSIM_KERNEL_MEDIUM_MAX_RADIOS]
+@@ -1419,6 +1448,65 @@
+ 	return 0;
+ }
+ 
++static unsigned int
++hwsim_kernel_medium_rate_kbps(struct mac80211_hwsim_data *source,
++			      const struct ieee80211_rx_status *status)
++{
++	static const unsigned int ht20_kbps[] = {
++		6500, 13000, 19500, 26000, 39000, 52000, 58500, 65000,
++	};
++	static const unsigned int vht20_kbps[] = {
++		6500, 13000, 19500, 26000, 39000,
++		52000, 58500, 65000, 78000, 86700,
++	};
++	struct ieee80211_supported_band *sband;
++	unsigned int rate, width = 1, nss = 1;
++	int idx = status->rate_idx;
++
++	if (status->encoding == RX_ENC_HT) {
++		nss = idx / 8 + 1;
++		rate = ht20_kbps[idx % 8] * nss;
++	} else if (status->encoding == RX_ENC_VHT) {
++		idx = clamp(idx, 0, (int)ARRAY_SIZE(vht20_kbps) - 1);
++		nss = status->nss ? status->nss : 1;
++		rate = vht20_kbps[idx] * nss;
++	} else {
++		sband = source->hw->wiphy->bands[status->band];
++		if (sband && idx >= 0 && idx < sband->n_bitrates)
++			return max(sband->bitrates[idx].bitrate * 100U, 1000U);
++		return 1000;
++	}
++
++	switch (status->bw) {
++	case RATE_INFO_BW_40:
++		width = 2;
++		break;
++	case RATE_INFO_BW_80:
++		width = 4;
++		break;
++	case RATE_INFO_BW_160:
++		width = 8;
++		break;
++	default:
++		break;
++	}
++	rate *= width;
++	if (status->enc_flags & RX_ENC_FLAG_SHORT_GI)
++		rate = rate * 10 / 9;
++	return max(rate, 1000U);
++}
++
++static unsigned int
++hwsim_kernel_medium_airtime_us(struct mac80211_hwsim_data *source,
++			       const struct ieee80211_rx_status *status,
++			       unsigned int frame_len)
++{
++	unsigned int rate_kbps = hwsim_kernel_medium_rate_kbps(source, status);
++
++	/* A reproducible accounting approximation: preamble plus payload time. */
++	return 20 + DIV_ROUND_UP_ULL((u64)frame_len * 8 * 1000, rate_kbps);
++}
++
+ static int hwsim_kernel_medium_links_show(struct seq_file *m, void *unused)
+ {
+ 	struct mac80211_hwsim_data *data = m->private;
+@@ -1434,6 +1522,16 @@
+ 	seq_printf(m, "model rate_per %u noise_floor %d\n",
+ 		   READ_ONCE(kernel_medium_rate_per),
+ 		   READ_ONCE(kernel_medium_noise_floor));
++	seq_printf(m, "timing delay_us %u jitter_us %u queue_limit %u queue_depth %u high_water %u queued %llu delivered %llu overflow %llu last_delay_us %u\n",
++		   min(READ_ONCE(kernel_medium_delay_us), 100000U),
++		   min(READ_ONCE(kernel_medium_jitter_us), 100000U),
++		   max(READ_ONCE(kernel_medium_delay_queue_limit), 1U),
++		   skb_queue_len(&data->kernel_medium_delay_queue),
++		   data->kernel_medium_delay_queue_high_water,
++		   data->kernel_medium_delayed_queued,
++		   data->kernel_medium_delayed_delivered,
++		   data->kernel_medium_delay_overflow,
++		   data->kernel_medium_last_delay_us);
+ 
+ 	for (bank = 0; bank < HWSIM_KERNEL_MEDIUM_BANKS; bank++) {
+ 		for (source = 0;
+@@ -1470,6 +1568,14 @@
+ 		   data->kernel_medium_last_encoding,
+ 		   data->kernel_medium_last_nss,
+ 		   data->kernel_medium_last_bw);
++	seq_printf(m, "airtime last_us %u band_2_4_us %llu band_5_us %llu band_6_us %llu overlap_2_4 %llu overlap_5 %llu overlap_6 %llu\n",
++		   data->kernel_medium_last_airtime_us,
++		   data->kernel_medium_airtime_us[0],
++		   data->kernel_medium_airtime_us[1],
++		   data->kernel_medium_airtime_us[2],
++		   data->kernel_medium_overlap_observed[0],
++		   data->kernel_medium_overlap_observed[1],
++		   data->kernel_medium_overlap_observed[2]);
+ 	return 0;
+ }
+ 
+@@ -2122,6 +2228,52 @@
+ 	ieee80211_rx_irqsafe(data->hw, skb);
+ }
+ 
++static u64
++hwsim_kernel_medium_delay_head_due(struct mac80211_hwsim_data *data)
++{
++	struct sk_buff *skb;
++	unsigned long flags;
++	u64 due_ns = 0;
++
++	spin_lock_irqsave(&data->kernel_medium_delay_queue.lock, flags);
++	skb = skb_peek(&data->kernel_medium_delay_queue);
++	if (skb)
++		due_ns = ktime_to_ns(skb->tstamp);
++	spin_unlock_irqrestore(&data->kernel_medium_delay_queue.lock, flags);
++	return due_ns;
++}
++
++static enum hrtimer_restart
++hwsim_kernel_medium_delay_timer(struct hrtimer *timer)
++{
++	struct mac80211_hwsim_data *data = container_of(timer,
++		struct mac80211_hwsim_data, kernel_medium_delay_timer);
++	struct ieee80211_rx_status status;
++	struct sk_buff *skb;
++	u64 due_ns, now_ns;
++
++	while (!READ_ONCE(data->kernel_medium_shutting_down)) {
++		due_ns = hwsim_kernel_medium_delay_head_due(data);
++		if (!due_ns)
++			return HRTIMER_NORESTART;
++		now_ns = ktime_get_ns();
++		if (due_ns > now_ns) {
++			hrtimer_set_expires(timer, ns_to_ktime(due_ns));
++			return HRTIMER_RESTART;
++		}
++
++		skb = skb_dequeue(&data->kernel_medium_delay_queue);
++		if (!skb)
++			continue;
++		memcpy(&status, IEEE80211_SKB_RXCB(skb), sizeof(status));
++		skb->tstamp = 0;
++		mac80211_hwsim_rx(data, &status, skb);
++		data->kernel_medium_delivered++;
++		data->kernel_medium_delayed_delivered++;
++	}
++	return HRTIMER_NORESTART;
++}
++
+ static bool mac80211_hwsim_tx_frame_no_nl(struct ieee80211_hw *hw,
+ 					  struct sk_buff *skb,
+ 					  struct ieee80211_channel *chan)
+@@ -2131,6 +2283,10 @@
+ 	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *) skb->data;
+ 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
+ 	struct ieee80211_rx_status rx_status;
++	unsigned int airtime_us = 0;
++	int medium_band = -1;
++	bool overlap = false;
++	u64 medium_now_ns = 0;
+ 	u64 now;
+ 
+ 	memset(&rx_status, 0, sizeof(rx_status));
+@@ -2188,11 +2344,26 @@
+ 	} else {
+ 		now = mac80211_hwsim_get_tsf_raw();
+ 	}
++	if (READ_ONCE(kernel_medium)) {
++		medium_band = hwsim_kernel_medium_chan_slot(chan->band);
++		airtime_us = hwsim_kernel_medium_airtime_us(data, &rx_status,
++							      skb->len);
++		medium_now_ns = ktime_get_ns();
++	}
+ 
+ 	/* Copy skb to all enabled radios that are on the current frequency */
+ 	spin_lock(&hwsim_radio_lock);
++	if (medium_band >= 0) {
++		u64 busy_until = kernel_medium_band_busy_until_ns[medium_band];
++		u64 end_ns = medium_now_ns + (u64)airtime_us * NSEC_PER_USEC;
++
++		overlap = medium_now_ns < busy_until;
++		if (end_ns > busy_until)
++			kernel_medium_band_busy_until_ns[medium_band] = end_ns;
++	}
+ 	list_for_each_entry(data2, &hwsim_radios, list) {
+ 		struct sk_buff *nskb;
++		u64 medium_sequence = 0;
+ 		struct tx_iter_data tx_iter_data = {
+ 			.receive = false,
+ 			.channel = chan,
+@@ -2242,6 +2413,14 @@
+ 			data2->kernel_medium_considered++;
+ 			sequence = data2->kernel_medium_considered +
+ 				   ((u64)data->idx << 32);
++			medium_sequence = sequence;
++			if (medium_band >= 0) {
++				data2->kernel_medium_airtime_us[medium_band] +=
++					airtime_us;
++				data2->kernel_medium_last_airtime_us = airtime_us;
++				if (overlap)
++					data2->kernel_medium_overlap_observed[medium_band]++;
++			}
+ 
+ 			rx_status.signal = signal;
+ 			if (READ_ONCE(kernel_medium_rate_per)) {
+@@ -2304,6 +2483,54 @@
+ 			ack = true;
+ 
+ 		rx_status.mactime = now + data2->tsf_offset;
++		if (READ_ONCE(kernel_medium) &&
++		    (READ_ONCE(kernel_medium_delay_us) ||
++		     READ_ONCE(kernel_medium_jitter_us))) {
++			unsigned int base = min(READ_ONCE(kernel_medium_delay_us),
++						100000U);
++			unsigned int jitter = min(READ_ONCE(kernel_medium_jitter_us),
++						  100000U);
++			unsigned int limit = max(
++				READ_ONCE(kernel_medium_delay_queue_limit), 1U);
++			s64 signed_delay = base;
++			u64 due_ns;
++			unsigned int depth;
++
++			if (jitter)
++				signed_delay +=
++					(s64)(medium_sequence % (2ULL * jitter + 1)) -
++					jitter;
++			if (signed_delay < 0)
++				signed_delay = 0;
++			if (signed_delay > 100000)
++				signed_delay = 100000;
++			if (skb_queue_len(&data2->kernel_medium_delay_queue) >= limit) {
++				kfree_skb(nskb);
++				data2->kernel_medium_delay_overflow++;
++				data2->kernel_medium_dropped++;
++				continue;
++			}
++
++			due_ns = ktime_get_ns() + signed_delay * NSEC_PER_USEC;
++			if (due_ns <= data2->kernel_medium_last_due_ns)
++				due_ns = data2->kernel_medium_last_due_ns + NSEC_PER_USEC;
++			data2->kernel_medium_last_due_ns = due_ns;
++			data2->kernel_medium_last_delay_us = signed_delay;
++			memcpy(IEEE80211_SKB_RXCB(nskb), &rx_status,
++			       sizeof(rx_status));
++			nskb->tstamp = ns_to_ktime(due_ns);
++			skb_queue_tail(&data2->kernel_medium_delay_queue, nskb);
++			data2->kernel_medium_delayed_queued++;
++			depth = skb_queue_len(&data2->kernel_medium_delay_queue);
++			if (depth > data2->kernel_medium_delay_queue_high_water)
++				data2->kernel_medium_delay_queue_high_water = depth;
++			due_ns = hwsim_kernel_medium_delay_head_due(data2);
++			if (due_ns)
++				hrtimer_start(&data2->kernel_medium_delay_timer,
++					      ns_to_ktime(due_ns),
++					      HRTIMER_MODE_ABS_SOFT);
++			continue;
++		}
+ 
+ 		mac80211_hwsim_rx(data2, &rx_status, nskb);
+ 
+@@ -5989,6 +6216,10 @@
+ 	INIT_DELAYED_WORK(&data->roc_start, hw_roc_start);
+ 	INIT_DELAYED_WORK(&data->roc_done, hw_roc_done);
+ 	INIT_DELAYED_WORK(&data->hw_scan, hw_scan_work);
++	skb_queue_head_init(&data->kernel_medium_delay_queue);
++	hrtimer_setup(&data->kernel_medium_delay_timer,
++		      hwsim_kernel_medium_delay_timer, CLOCK_MONOTONIC,
++		      HRTIMER_MODE_ABS_SOFT);
+ 
+ 	hw->queues = 5;
+ 	hw->offchannel_tx_hw_queue = 4;
+@@ -6329,6 +6560,9 @@
+ 				     struct genl_info *info)
+ {
+ 	hwsim_mcast_del_radio(data->idx, hwname, info);
++	WRITE_ONCE(data->kernel_medium_shutting_down, true);
++	hrtimer_cancel(&data->kernel_medium_delay_timer);
++	skb_queue_purge(&data->kernel_medium_delay_queue);
+ 	debugfs_remove_recursive(data->debugfs);
+ 	ieee80211_unregister_hw(data->hw);
+ 	device_release_driver(data->dev);

@@ -1,0 +1,100 @@
+mac80211_hwsim: add an optional impaired in-kernel medium
+
+Keep the existing userspace wmediumd path and the stock perfect-medium path
+unchanged by default.  When kernel_medium=1 and no userspace wmediumd is
+registered, apply a receiver signal threshold and a deterministic packet-loss
+percentage while cloning frames between same-channel hwsim radios.
+
+The first phase intentionally uses the existing per-radio rx_rssi debugfs
+control as its signal input.  It also exposes per-radio considered, delivered,
+and dropped counters.  A later patch adds link-specific matrix control without
+changing this opt-in/default contract.
+
+--- a/drivers/net/wireless/virtual/mac80211_hwsim.c
++++ b/drivers/net/wireless/virtual/mac80211_hwsim.c
+@@ -52,6 +52,21 @@ static int channels = 1;
+ module_param(channels, int, 0444);
+ MODULE_PARM_DESC(channels, "Number of concurrent channels");
+ 
++static bool kernel_medium;
++module_param(kernel_medium, bool, 0644);
++MODULE_PARM_DESC(kernel_medium,
++		 "Use the optional impaired in-kernel medium when wmediumd is absent");
++
++static int kernel_medium_cutoff = -95;
++module_param(kernel_medium_cutoff, int, 0644);
++MODULE_PARM_DESC(kernel_medium_cutoff,
++		 "Drop in-kernel medium receptions below this signal in dBm");
++
++static unsigned int kernel_medium_loss_pct;
++module_param(kernel_medium_loss_pct, uint, 0644);
++MODULE_PARM_DESC(kernel_medium_loss_pct,
++		 "Deterministic in-kernel medium packet loss percentage (0..100)");
++
+ static bool paged_rx = false;
+ module_param(paged_rx, bool, 0644);
+ MODULE_PARM_DESC(paged_rx, "Use paged SKBs for RX instead of linear ones");
+@@ -746,6 +761,13 @@ struct mac80211_hwsim_data {
+ 	/* RSSI in rx status of the receiver */
+ 	int rx_rssi;
+ 
++	/* Optional in-kernel medium observability.  Updates are serialized by
++	 * hwsim_radio_lock in the frame-cloning path.
++	 */
++	u64 kernel_medium_considered;
++	u64 kernel_medium_delivered;
++	u64 kernel_medium_dropped;
++
+ 	/* only used when pmsr capability is supplied */
+ 	struct cfg80211_pmsr_capabilities pmsr_capa;
+ 	struct cfg80211_pmsr_request *pmsr_request;
+@@ -1869,6 +1891,28 @@
+ 				continue;
+ 		}
+ 
++		if (READ_ONCE(kernel_medium)) {
++			unsigned int loss = min(READ_ONCE(kernel_medium_loss_pct),
++						100U);
++			u64 sequence;
++
++			data2->kernel_medium_considered++;
++			sequence = data2->kernel_medium_considered +
++				   ((u64)data->idx << 32);
++
++			rx_status.signal = READ_ONCE(data2->rx_rssi);
++			if (rx_status.signal < READ_ONCE(kernel_medium_cutoff) ||
++			    (loss && sequence % 100 < loss)) {
++				data2->kernel_medium_dropped++;
++				continue;
++			}
++		} else {
++			/* Preserve the stock perfect-medium signal calculation. */
++			rx_status.signal = data->rx_rssi;
++			if (info->control.vif)
++				rx_status.signal += info->control.vif->bss_conf.txpower;
++		}
++
+ 		/*
+ 		 * reserve some space for our vendor and the normal
+ 		 * radiotap header, since we're copying anyway
+@@ -1875,5 +1919,8 @@ static bool mac80211_hwsim_tx_frame_no_nl(struct ieee80211_hw *hw,
+ 
+ 		mac80211_hwsim_rx(data2, &rx_status, nskb);
++
++		if (READ_ONCE(kernel_medium))
++			data2->kernel_medium_delivered++;
+ 	}
+ 	spin_unlock(&hwsim_radio_lock);
+ 
+@@ -5827,5 +5874,11 @@ static int mac80211_hwsim_new_radio(struct genl_info *info,
+ 	debugfs_create_file("rx_rssi", 0666, data->debugfs, data,
+ 			    &hwsim_fops_rx_rssi);
++	debugfs_create_u64("kernel_medium_considered", 0444, data->debugfs,
++			   &data->kernel_medium_considered);
++	debugfs_create_u64("kernel_medium_delivered", 0444, data->debugfs,
++			   &data->kernel_medium_delivered);
++	debugfs_create_u64("kernel_medium_dropped", 0444, data->debugfs,
++			   &data->kernel_medium_dropped);
+ 	if (!data->use_chanctx)
+ 		debugfs_create_file("dfs_simulate_radar", 0222,
+ 				    data->debugfs,

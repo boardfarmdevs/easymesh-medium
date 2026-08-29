@@ -1,0 +1,48 @@
+From: Codex <codex@openai.com>
+Subject: [PATCH 7/7] wmediumd: enlarge hwsim netlink receive buffer
+
+A tri-band EasyMesh lab with 24 hwsim radios produces a continuous stream of
+beacons and data frames.  The libnl default receive buffer overflows under
+that load, and the kernel drops HWSIM_CMD_FRAME messages before wmediumd can
+process them.  This presents as unexplained packet loss even with a zero PER.
+
+Request a 4 MiB netlink receive buffer.  This matches the usual
+net.core.rmem_max setting while retaining a warning-and-continue fallback for
+hosts with a lower limit.
+
+---
+ wmediumd/wmediumd.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/wmediumd/wmediumd.c b/wmediumd/wmediumd.c
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -1450,6 +1450,7 @@ static void sock_event_cb(struct usfstl_loop_entry *entry)
+  */
+ static int init_netlink(struct wmediumd *ctx)
+ {
++	static const int netlink_buffer_size = 4 * 1024 * 1024;
+ 	struct nl_sock *sock;
+ 	int ret;
+ 
+@@ -1473,6 +1474,18 @@ static int init_netlink(struct wmediumd *ctx)
+ 	if (ret < 0) {
+ 		w_logf(ctx, LOG_ERR, "Error connecting netlink socket ret=%d\n", ret);
+ 		return -1;
+ 	}
++
++	/*
++	 * A multi-radio hwsim topology produces a continuous stream of beacon
++	 * and data frames.  libnl's small default receive buffer can overflow
++	 * before the event loop drains it, which makes mac80211_hwsim lose TX
++	 * requests before wmediumd can simulate them.  Request the largest
++	 * receive buffer allowed by the usual net.core.rmem_max setting.
++	 */
++	ret = nl_socket_set_buffer_size(sock, netlink_buffer_size, 0);
++	if (ret < 0)
++		w_logf(ctx, LOG_WARNING,
++			"Unable to enlarge netlink receive buffer ret=%d\n", ret);
+ 
+ 	ctx->family_id = genl_ctrl_resolve(sock, "MAC80211_HWSIM");
+-- 
+2.43.0

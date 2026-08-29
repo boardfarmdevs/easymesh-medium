@@ -1,0 +1,36 @@
+# Bind source_ap to the client's current AP and recovery_ap to a different AP.
+# This models client-facing RF loss only; the extender backhaul stays healthy.
+scenario client_extender_outage {
+    language 1
+    tick 1s
+    require radio_pair_snr
+    require atomic_generations
+    require readback
+    protect backhaul
+    restore captured
+
+    role client : station
+    role source_ap : fronthaul_ap
+    role recovery_ap : fronthaul_ap
+
+    phase baseline for 10s {
+        parallel {
+            link client <-> source_ap snr = 42dB
+            link client <-> recovery_ap snr = 30dB
+        }
+        mark "client is stable on the source extender"
+    }
+
+    phase source_rf_outage for 40s {
+        parallel {
+            link client <-> source_ap snr = -20dB
+            link client <-> recovery_ap snr = 42dB
+        }
+        mark "source fronthaul is unreachable; observe autonomous recovery"
+    }
+
+    phase recovery_hold for 20s {
+        hold
+        mark "hold the destination while controller and WebUI converge"
+    }
+}

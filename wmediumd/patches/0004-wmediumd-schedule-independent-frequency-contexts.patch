@@ -1,0 +1,83 @@
+From: Codex <codex@openai.com>
+Subject: [PATCH] wmediumd: schedule frequency contexts independently
+
+The multichannel interference model keeps per-frequency state, but queue_frame
+still waits for the last queued frame across every station regardless of
+frequency.  This recreates one global medium: 2.4 and 6 GHz beacon traffic
+serializes 5 GHz data.  A tri-band EasyMesh with 30 VAPs consequently sees long
+latency and 20-80% loss even with all data-path links at 50 dB SNR.
+
+For each access category, find the newest queued frame on the incoming frame's
+frequency and ignore tails on independent channel contexts.  Add a self-test
+that places a later 5180 MHz frame behind a 2437 MHz frame and verifies the
+2.4 GHz lookup selects its own tail.
+
+---
+ wmediumd/wmediumd.c | 33 ++++++++++++++++++++++++++++-----
+ 1 file changed, 28 insertions(+), 5 deletions(-)
+
+diff --git a/wmediumd/wmediumd.c b/wmediumd/wmediumd.c
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -526,7 +526,7 @@ static void queue_frame(struct wmediumd *ctx, struct station *station,
+ 	u8 *dest = hdr->addr1;
+ 	uint64_t target;
+ 	struct wqueue *queue;
+-	struct frame *tail;
++	struct frame *tail, *candidate;
+ 	struct station *tmpsta, *deststa;
+ 	int send_time;
+ 	int cw;
+@@ -643,13 +643,20 @@ static void queue_frame(struct wmediumd *ctx, struct station *station,
+ 	}
+ 	/*
+ 	 * delivery time starts after any equal or higher prio frame
+-	 * (or now, if none).
++	 * on the same medium frequency (or now, if none).  Different channel
++	 * contexts are independent; serializing their queue tails recreates a
++	 * single-channel medium and lets 2.4/6 GHz beacons starve 5 GHz data.
+ 	 */
+ 	target = scheduler.current_time;
+ 	for (i = 0; i <= ac; i++) {
+ 		list_for_each_entry(tmpsta, &ctx->stations, list) {
+-			tail = list_last_entry_or_null(&tmpsta->queues[i].frames,
+-						       struct frame, list);
++			tail = NULL;
++			list_for_each_entry_reverse(candidate, &tmpsta->queues[i].frames, list) {
++				if (candidate->freq == frame->freq) {
++					tail = candidate;
++					break;
++				}
++			}
+ 			if (tail && target < tail->job.start)
+ 				target = tail->job.start;
+ 		}
+@@ -1540,6 +1547,26 @@ static int wmd_selftest(void)
+ 		free(apa.addrs);
+ 	}
+ 
++	/* ---------- WMD4: independent per-frequency scheduler tails ---------- */
++	{
++		struct wqueue q = {};
++		struct frame f24 = {}, f5 = {}, *tail = NULL, *candidate;
++		INIT_LIST_HEAD(&q.frames);
++		f24.freq = 2437; f24.job.start = 2400;
++		f5.freq = 5180; f5.job.start = 5000;
++		list_add_tail(&f24.list, &q.frames);
++		list_add_tail(&f5.list, &q.frames);
++		list_for_each_entry_reverse(candidate, &q.frames, list) {
++			if (candidate->freq == 2437) {
++				tail = candidate;
++				break;
++			}
++		}
++		if (tail == &f24 && tail->job.start == 2400)
++			printf("PASS scheduling: 2437 MHz ignores later 5180 MHz queue tail\n");
++		else { printf("FAIL scheduling: cross-frequency tail serialized medium\n"); fails++; }
++	}
++
+ 	printf("=== self-test %s (%d failures) ===\n", fails ? "FAILED" : "PASSED", fails);
+ 	return fails ? 1 : 0;
+ }
+-- 
+2.43.0

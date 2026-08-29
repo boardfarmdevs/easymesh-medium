@@ -1,0 +1,71 @@
+From: Codex <codex@openai.com>
+Subject: [PATCH 6/6] wmediumd: filter multicast delivery by radio frequency
+
+Multicast delivery currently clones every frame toward every configured hwsim
+radio.  In a multichannel lab this sends 2.4, 5 and 6 GHz beacons to radios
+which are not listening on that frequency.  Linux rejects those clones, and
+the resulting netlink load can starve real data frames.
+
+Track the frequencies already learned for each radio from its transmitted
+VIFs.  Deliver multicast on any learned channel context of a multi-channel
+radio, reject known off-channel clones, and preserve permissive delivery for
+an as-yet unknown radio during bootstrap.
+
+---
+ wmediumd/wmediumd.c | 30 ++++++++++++++++++++++++++++++
+ 1 file changed, 30 insertions(+)
+
+diff --git a/wmediumd/wmediumd.c b/wmediumd/wmediumd.c
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -419,5 +419,27 @@ static int mc_lookup_owned_vif(const u8 *dest, u32 *freq)
+ 	return 0;
+ }
++
++/* A BPI radio can host VIFs on several channel contexts, while a client radio
++ * normally has only one.  Broadcast/multicast delivery must therefore match
++ * any frequency learned for the receiving radio, not blindly clone every
++ * beacon to every hwsim radio.  Keep unknown radios eligible during bootstrap
++ * until their first transmitted frame reveals an active channel. */
++static int mc_station_receives_freq(struct station *station, u32 freq)
++{
++	size_t i;
++	int has_known_freq = 0;
++
++	for (i = 0; i < mc_n_vifs; i++) {
++		if (!mc_vifs[i].freq_known || mc_vifs[i].owner != station)
++			continue;
++		has_known_freq = 1;
++		if (mc_vifs[i].freq == freq)
++			return 1;
++	}
++
++	return !has_known_freq;
++}
++
+ enum ack_eligibility { ACK_ELIGIBLE, ACK_OFFCHANNEL, ACK_FREQ_UNKNOWN };
+ static enum ack_eligibility mc_receiver_ack_eligibility(struct wmediumd *ctx, const u8 *dest, u32 tx_freq)
+ {
+@@ -954,6 +977,9 @@ static void wmediumd_deliver_frame(struct usfstl_job *job)
+ 				int snr, rate_idx, signal;
+ 				double error_prob;
+ 
++				if (!mc_station_receives_freq(station, frame->freq))
++					continue;
++
+ 				/*
+ 				 * we may or may not receive this based on
+ 				 * reverse link from sender -- check for
+@@ -1621,5 +1647,10 @@ static int wmd_selftest(void)
+ 			printf("PASS delivery: learned VIF resolves to its owning radio without ADD_MAC_ADDR replay\n");
+ 		else { printf("FAIL delivery: learned VIF did not resolve to owning radio\n"); fails++; }
++		if (mc_station_receives_freq(&r3, 5180) &&
++		    !mc_station_receives_freq(&r3, 2437) &&
++		    mc_station_receives_freq(&apa, 2437))
++			printf("PASS multicast: known radios reject off-channel clones; unknown radios bootstrap\n");
++		else { printf("FAIL multicast: receiver frequency eligibility\n"); fails++; }
+ 
+ 		/* Simulate what HWSIM_CMD_ADD_MAC_ADDR does: register the STA MAC in
+ 		 * AP-A's RX filter (station->addrs[]). Ownership must NOT change. */
+-- 
+2.43.0

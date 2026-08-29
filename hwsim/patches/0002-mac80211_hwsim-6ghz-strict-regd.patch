@@ -1,0 +1,33 @@
+mac80211_hwsim: make the simulated custom regdom authoritative for 6 GHz
+
+OPTIONAL, independent of the multichannel change in 0001. Needed only if the lab
+brings up 6 GHz (band 3) APs.
+
+Two tweaks so a simulated 6 GHz AP is allowed to beacon:
+  1. Add REGULATORY_STRICT_REG alongside REGULATORY_CUSTOM_REG so the custom
+     hwsim regdom is authoritative and is not intersected away by the global
+     regulatory domain (which would otherwise mark 6 GHz NO-IR / no-beacon).
+  2. Point HWSIM_REGTEST_CUSTOM_WORLD at a 6 GHz-capable custom regdom
+     (hwsim_world_regdom_custom_03) instead of _custom_01.
+
+Skip this patch for a 2.4/5 GHz-only lab.
+
+--- a/drivers/net/wireless/virtual/mac80211_hwsim.c
++++ b/drivers/net/wireless/virtual/mac80211_hwsim.c
+@@ -5310,6 +5310,7 @@
+ 	if (param->regd) {
+ 		data->regd = param->regd;
+ 		hw->wiphy->regulatory_flags |= REGULATORY_CUSTOM_REG;
++		hw->wiphy->regulatory_flags |= REGULATORY_STRICT_REG;   /* sim: custom regd authoritative, ignore global intersect (6GHz AP) */
+ 		wiphy_apply_custom_regulatory(hw->wiphy, param->regd);
+ 		/* give the regulatory workqueue a chance to run */
+ 		schedule_timeout_interruptible(1);
+@@ -6633,7 +6634,7 @@
+ 				param.regd = &hwsim_world_regdom_custom_01;
+ 			break;
+ 		case HWSIM_REGTEST_CUSTOM_WORLD:
+-			param.regd = &hwsim_world_regdom_custom_01;
++			param.regd = &hwsim_world_regdom_custom_03;   /* 6GHz-capable regdom */
+ 			break;
+ 		case HWSIM_REGTEST_CUSTOM_WORLD_2:
+ 			if (i == 0)

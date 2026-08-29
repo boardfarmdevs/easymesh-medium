@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>wmediumd Console</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">EasyMesh hwsim evaluation plane</p>
+      <h1>wmediumd Console</h1>
+      <p class="subtitle">Live paths, radio/VIF ownership, medium decisions, outcomes and typed scenario controls.</p>
+    </div>
+    <div class="header-badges"><div id="health-badge" class="badge waiting">health unavailable</div><div id="connection" class="badge waiting">waiting for wmediumd</div></div>
+  </header>
+
+  <main>
+    <section class="cards" aria-label="Medium status">
+      <article><span>Frames / second</span><strong id="frames-rate">—</strong></article>
+      <article><span>Traffic / second</span><strong id="bytes-rate">—</strong></article>
+      <article><span>Active paths</span><strong id="active-count">—</strong></article>
+      <article><span>Deliveries / no-ack</span><strong id="delivery-count">—</strong></article>
+      <article><span>Retries / drops</span><strong id="retry-count">—</strong></article>
+      <article><span>Queue now / max</span><strong id="queue-count">—</strong></article>
+    </section>
+
+    <section id="telemetry-notice" class="notice">
+      <strong>Waiting for the dedicated telemetry socket.</strong>
+      An older read-only endpoint still shows configured pair state, but packet metrics remain explicitly unavailable.
+    </section>
+
+    <section class="panel" id="controls-panel">
+      <div class="panel-heading">
+        <div><p class="eyebrow">Opt-in, typed and generation checked</p><h2>Controls</h2></div>
+        <span id="controls-badge" class="badge disabled">disabled — read-only</span>
+      </div>
+      <p id="controls-reason" class="muted">The Console does not open the writable socket unless started with <code>--enable-control</code>.</p>
+      <div id="controls-form" class="control-grid" aria-disabled="true">
+        <label>Source radio<select id="control-source" disabled></select></label>
+        <label>Destination radio<select id="control-destination" disabled></select></label>
+        <label>Frequency MHz<input id="control-frequency" type="number" min="2300" max="7125" value="5180" disabled></label>
+        <label>SNR dB<input id="control-snr" type="number" min="-20" max="60" value="30" disabled></label>
+        <div class="control-actions"><button id="pair-set" disabled>Set pair SNR</button><button id="frequency-set" disabled>Set frequency SNR</button><button id="frequency-clear" disabled>Clear frequency override</button><button id="control-undo" disabled>Undo last</button></div>
+      </div>
+      <p id="control-result" class="table-summary">No control transaction issued.</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <div><p class="eyebrow">Association, packet and RF views</p><h2>Live medium graph</h2></div>
+        <div class="filters"><label>Mode<select id="graph-mode"><option value="association">Current associations</option><option value="active">Packet paths (debug)</option><option value="configured">Configured pair state</option></select></label><label>Selected radio<select id="source-select"></select></label></div>
+      </div>
+      <svg id="graph" viewBox="0 0 1000 560" role="img" aria-label="Live wmediumd radio graph"></svg>
+      <p id="graph-summary" class="table-summary">No radio selected.</p>
+      <div class="legend"><span class="snr association"></span> current client association <span class="snr strong"></span> strong ≥40 dB <span class="snr medium"></span> 20–39 dB <span class="snr weak"></span> &lt;20 dB <span class="snr multicast"></span> multicast packet fan-out <span class="snr override"></span> configured override</div>
+    </section>
+
+    <section class="two-column">
+      <article class="panel">
+        <p class="eyebrow">Lifetime counters</p><h2>Frame and outcome summary</h2>
+        <dl id="telemetry-summary" class="metric-list"></dl>
+      </article>
+      <article class="panel">
+        <p class="eyebrow">Bounded diagnostics</p><h2>Health</h2>
+        <dl id="health-summary" class="metric-list"></dl>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading"><div><p class="eyebrow">Packets actually processed</p><h2>Active link paths</h2></div><input id="active-filter" type="search" placeholder="Filter MAC or frequency"></div>
+      <div class="table-wrap"><table><thead><tr><th>Source → destination</th><th>Band / channel</th><th>Frames / bytes</th><th>Attempts / retry / ack</th><th>Signal / SNR / PER</th><th>Delivery / drops</th><th>Last frame</th></tr></thead><tbody id="active-body"></tbody></table></div>
+      <p id="active-summary" class="table-summary"></p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading"><div><p class="eyebrow">Radio activity</p><h2>Radio / frequency counters</h2></div></div>
+      <div class="table-wrap"><table><thead><tr><th>Radio</th><th>Band / channel</th><th>Frames / bytes</th><th>Mgmt / ctrl / data / EAPOL</th><th>Unicast / multicast</th><th>Attempts / retries</th><th>Injected / drops</th></tr></thead><tbody id="radio-body"></tbody></table></div>
+    </section>
+
+    <section class="two-column">
+      <article class="panel">
+        <p class="eyebrow">Observed interface ownership, not association</p><h2>VIF → hwsim radio mapping</h2>
+        <p class="muted">A learned VIF is a frame-header MAC such as an AP BSSID, VAP or client interface that wmediumd has observed on a particular hwsim radio. It lets the medium route addressed frames to the owning radio; multiple VIFs may belong to one radio and these rows are not Wi-Fi connection edges.</p>
+        <div class="table-wrap compact"><table><thead><tr><th>VIF</th><th>Radio</th><th>Band / channel</th></tr></thead><tbody id="vif-body"></tbody></table></div>
+      </article>
+      <article class="panel">
+        <p class="eyebrow">Newest last</p><h2>Event timeline</h2>
+        <ol id="event-timeline" class="timeline"></ol>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <div><p class="eyebrow">Configured potential paths</p><h2>Rule readback</h2></div>
+        <div class="filters"><input id="link-filter" type="search" placeholder="Filter MAC address"><select id="kind-filter"><option value="all">All rules</option><option value="pair">Pair state</option><option value="frequency">Frequency overrides</option></select></div>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>Kind</th><th>Source</th><th>Destination</th><th>Band / channel</th><th>Frequency</th><th>SNR</th></tr></thead><tbody id="links-body"></tbody></table></div>
+      <p id="table-summary" class="table-summary"></p>
+    </section>
+
+    <section class="two-column">
+      <article class="panel"><p class="eyebrow">Wire contract</p><h2>Capabilities</h2><ul id="capabilities"></ul></article>
+      <article class="panel"><p class="eyebrow">Reproducibility</p><h2>Artifacts</h2><dl id="artifacts"></dl></article>
+      <article class="panel"><p class="eyebrow">Optional generated overlay</p><h2>Radio identities</h2><dl id="identity-status"></dl></article>
+    </section>
+  </main>
+
+  <footer><span id="captured">No snapshot captured.</span><span>REST <code>/api/v1/</code> · WebSocket <code>/api/v1/stream</code> · Prometheus <code>/metrics</code></span></footer>
+  <script src="/graph-layout.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

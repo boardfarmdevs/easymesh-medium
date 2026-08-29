@@ -1,0 +1,219 @@
+mac80211_hwsim: add optional deterministic rate-aware PER
+
+Layer an opt-in packet error approximation over the kernel-medium link
+matrix.  The model derives SNR from the selected link signal and an explicit
+noise floor, maps legacy/HT/VHT rates to a required SNR, and applies a small
+deterministic loss curve near that threshold.  Configured matrix loss remains
+independent and the two percentages are combined.
+
+The model is disabled by default and is intentionally described as a lab
+approximation rather than an RF-accurate PHY.  Expose its last decision and
+counters in the existing debugfs readback so experiments are auditable.
+
+--- a/drivers/net/wireless/virtual/mac80211_hwsim.c
++++ b/drivers/net/wireless/virtual/mac80211_hwsim.c
+@@ -70,6 +70,16 @@
+ MODULE_PARM_DESC(kernel_medium_loss_pct,
+ 		 "Deterministic in-kernel medium packet loss percentage (0..100)");
+ 
++static bool kernel_medium_rate_per;
++module_param(kernel_medium_rate_per, bool, 0644);
++MODULE_PARM_DESC(kernel_medium_rate_per,
++		 "Apply an experimental rate-aware packet error model");
++
++static int kernel_medium_noise_floor = -91;
++module_param(kernel_medium_noise_floor, int, 0644);
++MODULE_PARM_DESC(kernel_medium_noise_floor,
++		 "Noise floor in dBm for the experimental rate-aware packet error model");
++
+ static unsigned int kernel_medium_bank;
+ static unsigned int kernel_medium_generation;
+ 
+@@ -815,6 +825,17 @@
+ 	u64 kernel_medium_considered;
+ 	u64 kernel_medium_delivered;
+ 	u64 kernel_medium_dropped;
++	u64 kernel_medium_rate_considered;
++	u64 kernel_medium_rate_dropped;
++	s16 kernel_medium_last_signal;
++	s16 kernel_medium_last_snr;
++	s16 kernel_medium_last_required_snr;
++	u8 kernel_medium_last_rate_loss_pct;
++	u8 kernel_medium_last_effective_loss_pct;
++	u8 kernel_medium_last_rate_idx;
++	u8 kernel_medium_last_encoding;
++	u8 kernel_medium_last_nss;
++	u8 kernel_medium_last_bw;
+ 	struct hwsim_kernel_medium_link
+ 		kernel_medium_links[HWSIM_KERNEL_MEDIUM_BANKS]
+ 				   [HWSIM_KERNEL_MEDIUM_MAX_RADIOS]
+@@ -1308,6 +1329,96 @@
+ 	}
+ }
+ 
++/*
++ * Deliberately small deterministic approximation for laboratory experiments.
++ * It is not an RF-accurate PHY model.  The thresholds make a chosen MCS or
++ * legacy rate progressively less reliable as signal approaches the required
++ * SNR, while leaving the existing signal/cutoff/loss model unchanged unless
++ * kernel_medium_rate_per is explicitly enabled.
++ */
++static unsigned int
++hwsim_kernel_medium_rate_loss(struct mac80211_hwsim_data *source,
++			      const struct ieee80211_rx_status *status,
++			      int signal, int *snr_out, int *required_out)
++{
++	static const u8 mcs_required_snr[] = {
++		4, 7, 9, 12, 16, 20, 23, 25, 28, 30,
++	};
++	struct ieee80211_supported_band *sband;
++	int idx = status->rate_idx;
++	int nss = status->nss ? status->nss : 1;
++	int required, snr, margin;
++
++	if (status->encoding == RX_ENC_HT) {
++		nss = idx / 8 + 1;
++		idx %= 8;
++		required = mcs_required_snr[idx];
++	} else if (status->encoding == RX_ENC_VHT) {
++		idx = clamp(idx, 0, (int)ARRAY_SIZE(mcs_required_snr) - 1);
++		required = mcs_required_snr[idx];
++	} else {
++		int bitrate = 10;
++
++		sband = source->hw->wiphy->bands[status->band];
++		if (sband && idx >= 0 && idx < sband->n_bitrates)
++			bitrate = sband->bitrates[idx].bitrate;
++		if (bitrate <= 10)
++			required = 4;
++		else if (bitrate <= 20)
++			required = 5;
++		else if (bitrate <= 55)
++			required = 6;
++		else if (bitrate <= 110)
++			required = 8;
++		else if (bitrate <= 240)
++			required = 10;
++		else if (bitrate <= 360)
++			required = 12;
++		else if (bitrate <= 480)
++			required = 16;
++		else
++			required = 18;
++	}
++
++	required += 2 * max(nss - 1, 0);
++	switch (status->bw) {
++	case RATE_INFO_BW_40:
++		required += 3;
++		break;
++	case RATE_INFO_BW_80:
++		required += 6;
++		break;
++	case RATE_INFO_BW_160:
++		required += 9;
++		break;
++	default:
++		break;
++	}
++
++	snr = signal - READ_ONCE(kernel_medium_noise_floor);
++	margin = snr - required;
++	*snr_out = snr;
++	*required_out = required;
++
++	if (margin <= -6)
++		return 100;
++	if (margin == -5)
++		return 95;
++	if (margin == -4)
++		return 85;
++	if (margin == -3)
++		return 70;
++	if (margin == -2)
++		return 50;
++	if (margin == -1)
++		return 30;
++	if (margin == 0)
++		return 15;
++	if (margin == 1)
++		return 5;
++	return 0;
++}
++
+ static int hwsim_kernel_medium_links_show(struct seq_file *m, void *unused)
+ {
+ 	struct mac80211_hwsim_data *data = m->private;
+@@ -1320,6 +1431,9 @@
+ 		   READ_ONCE(data->rx_rssi),
+ 		   min(READ_ONCE(kernel_medium_loss_pct), 100U),
+ 		   READ_ONCE(kernel_medium_cutoff));
++	seq_printf(m, "model rate_per %u noise_floor %d\n",
++		   READ_ONCE(kernel_medium_rate_per),
++		   READ_ONCE(kernel_medium_noise_floor));
+ 
+ 	for (bank = 0; bank < HWSIM_KERNEL_MEDIUM_BANKS; bank++) {
+ 		for (source = 0;
+@@ -1344,6 +1458,18 @@
+ 		   data->kernel_medium_considered,
+ 		   data->kernel_medium_delivered,
+ 		   data->kernel_medium_dropped);
++	seq_printf(m, "rate stats considered %llu dropped %llu last_signal %d last_snr %d required_snr %d rate_loss_pct %u effective_loss_pct %u rate_idx %u encoding %u nss %u bw %u\n",
++		   data->kernel_medium_rate_considered,
++		   data->kernel_medium_rate_dropped,
++		   data->kernel_medium_last_signal,
++		   data->kernel_medium_last_snr,
++		   data->kernel_medium_last_required_snr,
++		   data->kernel_medium_last_rate_loss_pct,
++		   data->kernel_medium_last_effective_loss_pct,
++		   data->kernel_medium_last_rate_idx,
++		   data->kernel_medium_last_encoding,
++		   data->kernel_medium_last_nss,
++		   data->kernel_medium_last_bw);
+ 	return 0;
+ }
+ 
+@@ -2097,11 +2223,13 @@
+ 		if (READ_ONCE(kernel_medium)) {
+ 			unsigned int loss = min(READ_ONCE(kernel_medium_loss_pct),
+ 						100U);
++			unsigned int rate_loss = 0;
+ 			struct hwsim_kernel_medium_link *link = NULL;
+ 			unsigned int bank = READ_ONCE(kernel_medium_bank) & 1;
+ 			int band = hwsim_kernel_medium_chan_slot(chan->band);
+ 			u64 sequence;
+ 			int signal = READ_ONCE(data2->rx_rssi);
++			int snr = 0, required_snr = 0;
+ 
+ 			if (data->idx < HWSIM_KERNEL_MEDIUM_MAX_RADIOS && band >= 0)
+ 				link = &data2->kernel_medium_links[bank]
+@@ -2116,9 +2244,29 @@
+ 				   ((u64)data->idx << 32);
+ 
+ 			rx_status.signal = signal;
++			if (READ_ONCE(kernel_medium_rate_per)) {
++				rate_loss = hwsim_kernel_medium_rate_loss(data,
++								     &rx_status,
++								     signal, &snr,
++								     &required_snr);
++				/* Combine independent configured and rate losses. */
++				loss = loss + rate_loss - (loss * rate_loss) / 100;
++				data2->kernel_medium_rate_considered++;
++				data2->kernel_medium_last_signal = signal;
++				data2->kernel_medium_last_snr = snr;
++				data2->kernel_medium_last_required_snr = required_snr;
++				data2->kernel_medium_last_rate_loss_pct = rate_loss;
++				data2->kernel_medium_last_effective_loss_pct = loss;
++				data2->kernel_medium_last_rate_idx = rx_status.rate_idx;
++				data2->kernel_medium_last_encoding = rx_status.encoding;
++				data2->kernel_medium_last_nss = rx_status.nss;
++				data2->kernel_medium_last_bw = rx_status.bw;
++			}
+ 			if (rx_status.signal < READ_ONCE(kernel_medium_cutoff) ||
+ 			    (loss && sequence % 100 < loss)) {
+ 				data2->kernel_medium_dropped++;
++				if (rate_loss)
++					data2->kernel_medium_rate_dropped++;
+ 				continue;
+ 			}
+ 		} else {

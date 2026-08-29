@@ -1,0 +1,37 @@
+{
+  "schema": "wmdcfg.world-layout.v1",
+  "name": "home-five-agent",
+  "tags": ["home", "five-agent", "layout-a", "walls", "static-10"],
+  "space": {"width_m": 20, "height_m": 14},
+  "propagation": {
+    "reference_distance_m": 1,
+    "reference_snr_db_by_band": {"2.4": 54, "5": 50, "6": 47},
+    "path_loss_exponent": 2.2,
+    "shadowing_stddev_db": 0,
+    "minimum_snr_db": -20,
+    "maximum_snr_db": 60
+  },
+  "walls": [
+    {"name": "hall-west", "start": [6, 0], "end": [6, 9], "loss_db": 5},
+    {"name": "hall-east", "start": [14, 5], "end": [14, 14], "loss_db": 5},
+    {"name": "bedroom", "start": [0, 9], "end": [9, 9], "loss_db": 5},
+    {"name": "office", "start": [11, 5], "end": [20, 5], "loss_db": 5}
+  ],
+  "nodes": [
+    {"role": "gateway", "kind": "fronthaul_ap", "position": [10, 7]},
+    {"role": "extender_1", "kind": "fronthaul_ap", "position": [2, 2]},
+    {"role": "extender_2", "kind": "fronthaul_ap", "position": [18, 2]},
+    {"role": "extender_3", "kind": "fronthaul_ap", "position": [2, 12]},
+    {"role": "extender_4", "kind": "fronthaul_ap", "position": [18, 12]},
+    {"role": "sta_static_01", "kind": "station", "position": [1, 1]},
+    {"role": "sta_static_02", "kind": "station", "position": [4, 3]},
+    {"role": "sta_static_03", "kind": "station", "position": [8, 2]},
+    {"role": "sta_static_04", "kind": "station", "position": [12, 2]},
+    {"role": "sta_static_05", "kind": "station", "position": [19, 1]},
+    {"role": "sta_static_06", "kind": "station", "position": [1, 13]},
+    {"role": "sta_static_07", "kind": "station", "position": [5, 11]},
+    {"role": "sta_static_08", "kind": "station", "position": [10, 12]},
+    {"role": "sta_static_09", "kind": "station", "position": [15, 10]},
+    {"role": "sta_static_10", "kind": "station", "position": [19, 13]}
+  ]
+}

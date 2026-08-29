@@ -1,0 +1,20 @@
+{
+  "schema": "wmdcfg.mobility.v1",
+  "name": "flash-crowd",
+  "tags": ["flash-crowd", "appearance", "mobile-10", "clients-20"],
+  "duration_ms": 60000,
+  "tick_ms": 2000,
+  "seed": 1704,
+  "nodes": [
+    {"role": "sta_mobile_01", "position": [7, 6], "presence": [[20000, 50000]]},
+    {"role": "sta_mobile_02", "position": [8, 6], "presence": [[20000, 50000]]},
+    {"role": "sta_mobile_03", "position": [9, 6], "presence": [[20000, 50000]]},
+    {"role": "sta_mobile_04", "position": [10, 6], "presence": [[20000, 50000]]},
+    {"role": "sta_mobile_05", "position": [11, 6], "presence": [[20000, 50000]]},
+    {"role": "sta_mobile_06", "position": [7, 8], "presence": [[20000, 50000]]},
+    {"role": "sta_mobile_07", "position": [8, 8], "presence": [[20000, 50000]]},
+    {"role": "sta_mobile_08", "position": [9, 8], "presence": [[20000, 50000]]},
+    {"role": "sta_mobile_09", "position": [10, 8], "presence": [[20000, 50000]]},
+    {"role": "sta_mobile_10", "position": [11, 8], "presence": [[20000, 50000]]}
+  ]
+}

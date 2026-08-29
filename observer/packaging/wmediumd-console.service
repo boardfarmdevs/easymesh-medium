@@ -1,0 +1,45 @@
+[Unit]
+Description=wmediumd Console telemetry and UI
+Documentation=file:/usr/local/share/doc/wmediumd-console/README.md
+After=network.target
+ConditionFileIsExecutable=/usr/local/bin/wmediumd-console
+
+[Service]
+Type=simple
+User=wmediumd-console
+Group=wmediumd-console
+SupplementaryGroups=lxd
+EnvironmentFile=-/etc/default/wmediumd-console
+ExecStart=/usr/local/bin/wmediumd-console --listen=${WMEDIUMD_CONSOLE_LISTEN} --socket=${WMEDIUMD_CONSOLE_SOCKET} --identity-inventory=${WMEDIUMD_CONSOLE_IDENTITY_INVENTORY} --config=${WMEDIUMD_CONSOLE_CONFIG} --pid-file=${WMEDIUMD_CONSOLE_PID_FILE} --daemon-manifest=${WMEDIUMD_CONSOLE_DAEMON_MANIFEST} $WMEDIUMD_CONSOLE_EXTRA_ARGS
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=10s
+UMask=0027
+
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+# The shared lxd group gates the wmediumd sockets, but the service itself must
+# never receive LXD API access. Hide known LXD/Incus daemon sockets inside its
+# mount namespace while retaining /run/wmediumd-control.sock for typed opt-in.
+InaccessiblePaths=-/var/snap/lxd/common/lxd/unix.socket -/var/lib/lxd/unix.socket -/run/lxd.socket -/var/lib/incus/unix.socket
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+TasksMax=64
+LimitNOFILE=1024
+
+[Install]
+WantedBy=multi-user.target

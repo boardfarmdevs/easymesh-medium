@@ -1,0 +1,22 @@
+# Negative control: keep one station equally strong to both candidate APs.
+scenario all_strong {
+    language 1
+    tick 1s
+    require radio_pair_snr
+    require atomic_generations
+    require readback
+    protect backhaul
+    restore captured
+
+    role client : station
+    role ap_a : fronthaul_ap
+    role ap_b : fronthaul_ap
+
+    phase baseline for 10s {
+        parallel {
+            link client <-> ap_a snr = 40dB
+            link client <-> ap_b snr = 40dB
+        }
+        mark "all candidate links strong"
+    }
+}
