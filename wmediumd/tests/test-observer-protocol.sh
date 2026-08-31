@@ -41,6 +41,7 @@ import struct
 MAGIC = 0x574D4443
 HEADER = struct.Struct("!IHHIIQ")
 PAGE = struct.Struct("!QII")
+ASSOCIATION = struct.Struct("!6s6s6s2xII")
 
 
 def request(opcode, payload=b"", generation=0):
@@ -59,8 +60,15 @@ def request(opcode, payload=b"", generation=0):
 
 header, info = request(1)
 capabilities = struct.unpack_from("!I", info, 16)[0]
-for bit in (5, 6, 7, 8, 9):
+for bit in (5, 6, 7, 8, 9, 10):
     assert capabilities & (1 << bit), hex(capabilities)
+
+# The provisioned endpoint is known, but no association frame has traversed
+# this socket-only test. The ownership API must distinguish that unknown state
+# instead of inventing a link or returning a protocol error.
+endpoint = bytes.fromhex("420000000000")
+header, body = request(14, ASSOCIATION.pack(endpoint, bytes(6), bytes(6), 0, 0))
+assert header[4] == 9 and not body, (header, body)
 
 # The observer socket must reject even a syntactically incomplete mutation
 # before it reaches the shared apply implementation.
@@ -77,6 +85,6 @@ for opcode, entry_size in ((10, 136), (11, 164), (12, 24), (13, 44)):
 
 print(
     f"PASS observer protocol caps=0x{capabilities:x} "
-    f"summary={len(summary)} paged-dumps=4 mutation=read-only"
+    f"summary={len(summary)} paged-dumps=4 association=unknown mutation=read-only"
 )
 PY

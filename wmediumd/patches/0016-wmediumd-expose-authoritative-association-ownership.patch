@@ -1,0 +1,373 @@
+From c806e7a7eeef01b6e252515dce93260756e24af3 Mon Sep 17 00:00:00 2001
+From: Rob Vogelaar <revogelaar@gmail.com>
+Date: Mon, 31 Aug 2026 09:08:44 -0700
+Subject: [PATCH] wmediumd: expose authoritative association ownership
+
+Track endpoint ownership only from ACKed successful association/reassociation completion and valid ACKed ToDS/FromDS unicast data. Expose station and owning provisioned base-radio identities over the read-only control protocol so hwsim consumers can distinguish stale old-AP peers without using inactivity as association evidence.
+
+Unknown, ambiguous, multicast and failed frames never mutate the map. The self-test covers restart reconstruction, roam replacement, idle retention and rejection of an unacknowledged old-AP downlink.
+
+Upstream-Status: Inappropriate [hwsim EasyMesh laboratory interface]
+---
+ wmediumd/control.c  | 208 +++++++++++++++++++++++++++++++++++++++++++-
+ wmediumd/control.h  |  17 ++++
+ wmediumd/wmediumd.h |   6 ++
+ 3 files changed, 228 insertions(+), 3 deletions(-)
+
+diff --git a/wmediumd/control.c b/wmediumd/control.c
+index f2924c3..62a8398 100644
+--- a/wmediumd/control.c
++++ b/wmediumd/control.c
+@@ -57,6 +57,13 @@ struct resolved_frequency_update {
+ #define WMDT_VIFS_PER_RADIO 16U
+ #define WMDT_EVENT_CAPACITY 1024U
+ 
++#define IEEE80211_STYPE_ASSOC_RESP 1U
++#define IEEE80211_STYPE_REASSOC_RESP 3U
++#define IEEE80211_STYPE_DISASSOC 10U
++#define IEEE80211_STYPE_DEAUTH 12U
++#define IEEE80211_MGMT_HDR_LEN 24U
++#define IEEE80211_ASSOC_STATUS_OFFSET (IEEE80211_MGMT_HDR_LEN + 2U)
++
+ struct wmdt_radio_frequency_state {
+ 	bool active;
+ 	int radio;
+@@ -391,6 +398,127 @@ static int station_index(struct wmediumd *ctx, const uint8_t *address)
+ 	return -1;
+ }
+ 
++static int station_index_endpoint(struct wmediumd *ctx,
++				  const uint8_t *address)
++{
++	int index = station_index(ctx, address);
++	int i;
++	unsigned int j;
++
++	if (index >= 0)
++		return index;
++	for (i = 0; i < ctx->num_stas; i++)
++		for (j = 0; j < ctx->sta_array[i]->n_addrs; j++)
++			if (memcmp(ctx->sta_array[i]->addrs[j].addr,
++				   address, 6) == 0)
++				return i;
++	return -1;
++}
++
++static int association_init(struct wmediumd *ctx)
++{
++	int i;
++
++	if (ctx->association_owners)
++		return 0;
++	ctx->association_owners = malloc((size_t)ctx->num_stas *
++					 sizeof(*ctx->association_owners));
++	ctx->association_frequencies = calloc((size_t)ctx->num_stas,
++					 sizeof(*ctx->association_frequencies));
++	ctx->association_flags = calloc((size_t)ctx->num_stas,
++					 sizeof(*ctx->association_flags));
++	if (!ctx->association_owners || !ctx->association_frequencies ||
++	    !ctx->association_flags) {
++		free(ctx->association_owners);
++		free(ctx->association_frequencies);
++		free(ctx->association_flags);
++		ctx->association_owners = NULL;
++		ctx->association_frequencies = NULL;
++		ctx->association_flags = NULL;
++		return -1;
++	}
++	for (i = 0; i < ctx->num_stas; i++)
++		ctx->association_owners[i] = -1;
++	return 0;
++}
++
++static void association_set(struct wmediumd *ctx, int station, int owner,
++			    uint32_t frequency_mhz, uint32_t flags)
++{
++	if (!ctx->association_owners || station < 0 || owner < 0 ||
++	    station >= ctx->num_stas || owner >= ctx->num_stas ||
++	    station == owner)
++		return;
++	ctx->association_owners[station] = owner;
++	ctx->association_frequencies[station] = frequency_mhz;
++	ctx->association_flags[station] = flags;
++}
++
++static void association_clear_pair(struct wmediumd *ctx, int source,
++				   int destination)
++{
++	if (!ctx->association_owners)
++		return;
++	if (source >= 0 && source < ctx->num_stas &&
++	    ctx->association_owners[source] == destination) {
++		ctx->association_owners[source] = -1;
++		ctx->association_frequencies[source] = 0;
++		ctx->association_flags[source] = 0;
++	}
++	if (destination >= 0 && destination < ctx->num_stas &&
++	    ctx->association_owners[destination] == source) {
++		ctx->association_owners[destination] = -1;
++		ctx->association_frequencies[destination] = 0;
++		ctx->association_flags[destination] = 0;
++	}
++}
++
++static uint16_t frame_le16(const uint8_t *bytes)
++{
++	return (uint16_t)bytes[0] | ((uint16_t)bytes[1] << 8);
++}
++
++/* Maintain an endpoint-owner map from protocol-positive evidence only.  An
++ * arbitrary active link is not association evidence: multicast, failed
++ * delivery, WDS traffic and ambiguous direction bits never mutate the map. */
++static void association_record_tx(struct wmediumd *ctx, struct frame *frame,
++				  struct station *destination, bool acked,
++				  bool no_ack)
++{
++	uint8_t type, subtype, direction;
++
++	if (!ctx->association_owners || !frame || !frame->sender ||
++	    !destination || no_ack || !acked || frame->data_len < 24 ||
++	    (frame->data[4] & 0x01))
++		return;
++	type = frame->data[0] & FCTL_FTYPE;
++	subtype = (frame->data[0] >> 4) & 0x0f;
++	if (type == FTYPE_MGMT) {
++		if ((subtype == IEEE80211_STYPE_ASSOC_RESP ||
++		     subtype == IEEE80211_STYPE_REASSOC_RESP) &&
++		    frame->data_len >= IEEE80211_ASSOC_STATUS_OFFSET + 2 &&
++		    frame_le16(frame->data + IEEE80211_ASSOC_STATUS_OFFSET) == 0) {
++			association_set(ctx, destination->index,
++				frame->sender->index, frame->freq,
++				WMDC_ASSOCIATION_FROM_RESPONSE);
++		} else if (subtype == IEEE80211_STYPE_DISASSOC ||
++			   subtype == IEEE80211_STYPE_DEAUTH) {
++			association_clear_pair(ctx, frame->sender->index,
++				destination->index);
++		}
++		return;
++	}
++	if (type != FTYPE_DATA)
++		return;
++	direction = frame->data[1] & (FCTL_TODS | FCTL_FROMDS);
++	if (direction == FCTL_TODS)
++		association_set(ctx, frame->sender->index, destination->index,
++			frame->freq, WMDC_ASSOCIATION_FROM_DATA);
++	else if (direction == FCTL_FROMDS)
++		association_set(ctx, destination->index, frame->sender->index,
++			frame->freq, WMDC_ASSOCIATION_FROM_DATA);
++}
++
+ static int send_response(int fd, uint16_t opcode, uint32_t status,
+ 			 uint64_t generation, const void *payload,
+ 			 uint32_t payload_len)
+@@ -435,6 +563,8 @@ static int send_info(struct wmd_control_client *client, uint16_t opcode)
+ 	if (client->telemetry)
+ 		capabilities |= WMDC_CAP_TELEMETRY | WMDC_CAP_PAGED_DUMPS |
+ 			WMDC_CAP_VIF_OWNERSHIP | WMDC_CAP_EVENT_RING;
++	if (ctx->association_owners)
++		capabilities |= WMDC_CAP_ASSOCIATION_OWNERSHIP;
+ 	struct wmdc_info info = {
+ 		.instance_hi = htobe64(ctx->control_instance_hi),
+ 		.instance_lo = htobe64(ctx->control_instance_lo),
+@@ -491,6 +621,7 @@ void wmd_telemetry_record_tx(struct wmediumd *ctx, struct frame *frame,
+ 	uint8_t type;
+ 	bool multicast;
+ 
++	association_record_tx(ctx, frame, destination, acked, no_ack);
+ 	if (!telemetry)
+ 		return;
+ 	telemetry->sequence++;
+@@ -869,6 +1000,36 @@ static int handle_get(struct wmd_control_client *client,
+ 			ctx->control_generation, &response, sizeof(response));
+ }
+ 
++static int handle_get_association(struct wmd_control_client *client,
++				  const uint8_t *payload,
++				  uint32_t payload_len)
++{
++	struct wmediumd *ctx = client->ctx;
++	const struct wmdc_association *request =
++		(const struct wmdc_association *)payload;
++	struct wmdc_association response = {};
++	int station, owner;
++
++	if (payload_len != sizeof(*request))
++		return send_response(client->loop.fd, WMDC_OP_GET_ASSOCIATION,
++			WMDC_ERR_LENGTH, ctx->control_generation, NULL, 0);
++	station = station_index_endpoint(ctx, request->endpoint);
++	if (station < 0)
++		return send_response(client->loop.fd, WMDC_OP_GET_ASSOCIATION,
++			WMDC_ERR_IDENTITY, ctx->control_generation, NULL, 0);
++	if (!ctx->association_owners ||
++	    (owner = ctx->association_owners[station]) < 0)
++		return send_response(client->loop.fd, WMDC_OP_GET_ASSOCIATION,
++			WMDC_ERR_UNKNOWN, ctx->control_generation, NULL, 0);
++	memcpy(response.endpoint, request->endpoint, 6);
++	memcpy(response.station, ctx->sta_array[station]->addr, 6);
++	memcpy(response.owner, ctx->sta_array[owner]->addr, 6);
++	response.frequency_mhz = htobe32(ctx->association_frequencies[station]);
++	response.flags = htobe32(ctx->association_flags[station]);
++	return send_response(client->loop.fd, WMDC_OP_GET_ASSOCIATION, WMDC_OK,
++		ctx->control_generation, &response, sizeof(response));
++}
++
+ static int handle_dump(struct wmd_control_client *client)
+ {
+ 	struct wmediumd *ctx = client->ctx;
+@@ -1488,6 +1649,10 @@ static void control_handler(struct usfstl_loop_entry *entry)
+ 			result = handle_event_dump(client, frame + sizeof(*header),
+ 				payload_len);
+ 		break;
++	case WMDC_OP_GET_ASSOCIATION:
++		result = handle_get_association(client,
++			frame + sizeof(*header), payload_len);
++		break;
+ 	default:
+ 		break;
+ 	}
+@@ -1551,6 +1716,7 @@ void wmd_control_start(struct wmediumd *ctx, const char *path)
+ 		desired_capacity : payload_capacity;
+ 	ctx->frequency_overrides = calloc(ctx->frequency_override_capacity,
+ 					  sizeof(*ctx->frequency_overrides));
++	association_init(ctx);
+ 	control_listener_start(ctx, path, false, false);
+ }
+ 
+@@ -1607,17 +1773,23 @@ void wmd_control_start_observer(struct wmediumd *ctx, const char *path)
+ 
+ int wmd_telemetry_selftest(void)
+ {
+-	struct wmediumd ctx = {.num_stas = 2};
++	struct wmediumd ctx = {.num_stas = 3};
+ 	struct station source = {.index = 0}, destination = {.index = 1};
+-	struct station *stations[] = {&source, &destination};
++	struct station alternate = {.index = 2};
++	struct station *stations[] = {&source, &destination, &alternate};
++	struct addr source_endpoint = {.addr = {0x02, 0, 0, 0, 0, 1}};
+ 	struct frame *frame;
+ 	uint8_t vif[6] = {0x02, 0, 0, 0, 0, 1};
+ 	int failures = 0;
+ 
+ 	source.addr[5] = 1;
++	source.addr[0] = 0x42;
++	source.n_addrs = 1;
++	source.addrs = &source_endpoint;
+ 	destination.addr[5] = 2;
++	alternate.addr[5] = 3;
+ 	ctx.sta_array = stations;
+-	if (wmd_telemetry_init(&ctx) < 0)
++	if (association_init(&ctx) < 0 || wmd_telemetry_init(&ctx) < 0)
+ 		return 1;
+ 	frame = calloc(1, sizeof(*frame) + 32);
+ 	if (!frame)
+@@ -1627,6 +1799,7 @@ int wmd_telemetry_selftest(void)
+ 	frame->data_len = 32;
+ 	frame->data[0] = FTYPE_DATA;
+ 	frame->data[4] = destination.addr[0];
++	frame->data[1] = FCTL_TODS;
+ 	wmd_telemetry_record_tx(&ctx, frame, &destination, IEEE80211_AC_BE,
+ 		2, 1, true, false, false, 30, 0.125, 400);
+ 	wmd_telemetry_record_rx(&ctx, frame, &destination,
+@@ -1646,7 +1819,36 @@ int wmd_telemetry_selftest(void)
+ 	    telemetry_count_vifs(ctx.telemetry) != 1 ||
+ 	    ctx.telemetry->event_count < 4)
+ 		failures++;
++	/* ACKed ToDS data reconstructs ownership after daemon restart.  An idle
++	 * client retains that positive association indefinitely; only a new
++	 * protocol-positive edge may replace it. */
++	if (ctx.association_owners[source.index] != destination.index ||
++	    ctx.association_flags[source.index] != WMDC_ASSOCIATION_FROM_DATA)
++		failures++;
++	if (station_index_endpoint(&ctx, source_endpoint.addr) != source.index)
++		failures++;
++	frame->sender = &alternate;
++	frame->data[0] = IEEE80211_STYPE_REASSOC_RESP << 4;
++	frame->data[1] = 0;
++	frame->data_len = 32;
++	frame->data[IEEE80211_ASSOC_STATUS_OFFSET] = 0;
++	frame->data[IEEE80211_ASSOC_STATUS_OFFSET + 1] = 0;
++	association_record_tx(&ctx, frame, &source, true, false);
++	if (ctx.association_owners[source.index] != alternate.index ||
++	    ctx.association_flags[source.index] !=
++		WMDC_ASSOCIATION_FROM_RESPONSE)
++		failures++;
++	/* A stale old AP's unacknowledged downlink cannot steal ownership. */
++	frame->sender = &destination;
++	frame->data[0] = FTYPE_DATA;
++	frame->data[1] = FCTL_FROMDS;
++	association_record_tx(&ctx, frame, &source, false, false);
++	if (ctx.association_owners[source.index] != alternate.index)
++		failures++;
+ 	free(frame);
++	free(ctx.association_owners);
++	free(ctx.association_frequencies);
++	free(ctx.association_flags);
+ 	free(ctx.telemetry->active_links);
+ 	free(ctx.telemetry->radio_frequencies);
+ 	free(ctx.telemetry->vifs);
+diff --git a/wmediumd/control.h b/wmediumd/control.h
+index dbfb7e2..fefa094 100644
+--- a/wmediumd/control.h
++++ b/wmediumd/control.h
+@@ -25,6 +25,7 @@ enum wmdc_opcode {
+ 	WMDC_OP_DUMP_ACTIVE_LINKS = 11,
+ 	WMDC_OP_DUMP_VIFS = 12,
+ 	WMDC_OP_DUMP_EVENTS = 13,
++	WMDC_OP_GET_ASSOCIATION = 14,
+ };
+ 
+ enum wmdc_status {
+@@ -37,6 +38,7 @@ enum wmdc_status {
+ 	WMDC_ERR_INTERNAL = 6,
+ 	WMDC_ERR_FREQUENCY = 7,
+ 	WMDC_ERR_READ_ONLY = 8,
++	WMDC_ERR_UNKNOWN = 9,
+ };
+ 
+ enum wmdc_capability {
+@@ -50,6 +52,7 @@ enum wmdc_capability {
+ 	WMDC_CAP_PAGED_DUMPS = 1U << 7,
+ 	WMDC_CAP_VIF_OWNERSHIP = 1U << 8,
+ 	WMDC_CAP_EVENT_RING = 1U << 9,
++	WMDC_CAP_ASSOCIATION_OWNERSHIP = 1U << 10,
+ };
+ 
+ #define WMDC_FREQUENCY_OVERRIDE (1U << 0)
+@@ -78,6 +81,20 @@ struct wmdc_frequency_link {
+ 	uint16_t flags;
+ } __attribute__((packed));
+ 
++#define WMDC_ASSOCIATION_FROM_RESPONSE (1U << 0)
++#define WMDC_ASSOCIATION_FROM_DATA (1U << 1)
++
++/* GET_ASSOCIATION accepts this structure with only endpoint populated.  The
++ * response echoes that VIF/MAC and returns both provisioned base radios. */
++struct wmdc_association {
++	uint8_t endpoint[6];
++	uint8_t station[6];
++	uint8_t owner[6];
++	uint8_t reserved[2];
++	uint32_t frequency_mhz;
++	uint32_t flags;
++} __attribute__((packed));
++
+ struct wmdc_info {
+ 	uint64_t instance_hi;
+ 	uint64_t instance_lo;
+diff --git a/wmediumd/wmediumd.h b/wmediumd/wmediumd.h
+index ec3d8b8..97334d8 100644
+--- a/wmediumd/wmediumd.h
++++ b/wmediumd/wmediumd.h
+@@ -239,6 +239,12 @@ struct wmediumd {
+ 	struct wmd_frequency_override *frequency_overrides;
+ 	size_t frequency_override_capacity;
+ 	size_t frequency_override_count;
++	/* Current station ownership learned only from successful 802.11
++	 * association completion or ACKed infrastructure data.  Entries contain
++	 * provisioned base-radio indices, never learned VIF/BSSID identities. */
++	int *association_owners;
++	u32 *association_frequencies;
++	u32 *association_flags;
+ 	struct wmd_telemetry *telemetry;
+ };
+ 

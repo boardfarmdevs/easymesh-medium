@@ -1,0 +1,97 @@
+From: Codex <codex@openai.com>
+Subject: [PATCH] wmediumd: resolve association queries through learned VIFs
+
+The association ledger is deliberately keyed by provisioned hwsim base-radio
+identities, while NL80211 station rows expose each client's live VIF MAC.  The
+medium already learns the exact VIF-to-base-radio mapping used for delivery,
+but GET_ASSOCIATION consulted only configured station aliases.  Immediately
+after a roam this returned IDENTITY for the HAL query and left the stale old-AP
+row visible until the inactivity fallback expired.
+
+Resolve an otherwise unknown endpoint through the bounded telemetry VIF table.
+Accept only a valid, unique provisioned owner; invalid or conflicting learned
+entries remain unknown.  Exercise the real learned-only identity, unknown, and
+ambiguous cases in the daemon self-test.
+
+Upstream-Status: Inappropriate [hwsim EasyMesh laboratory interface]
+---
+ wmediumd/control.c | 31 +++++++++++++++++++++++++++----
+ 1 file changed, 27 insertions(+), 4 deletions(-)
+
+diff --git a/wmediumd/control.c b/wmediumd/control.c
+--- a/wmediumd/control.c
++++ b/wmediumd/control.c
+@@ -402,7 +402,9 @@ static int station_index_endpoint(struct wmediumd *ctx,
+ 				  const uint8_t *address)
+ {
+ 	int index = station_index(ctx, address);
++	int learned = -1;
+ 	int i;
++	size_t k;
+ 	unsigned int j;
+ 
+ 	if (index >= 0)
+@@ -412,7 +414,20 @@ static int station_index_endpoint(struct wmediumd *ctx,
+ 			if (memcmp(ctx->sta_array[i]->addrs[j].addr,
+ 				   address, 6) == 0)
+ 				return i;
+-	return -1;
++	if (!ctx->telemetry)
++		return -1;
++	for (k = 0; k < ctx->telemetry->vif_capacity; k++) {
++		struct wmdt_vif_state *vif = &ctx->telemetry->vifs[k];
++
++		if (!vif->active || memcmp(vif->vif, address, 6) != 0)
++			continue;
++		if (vif->radio < 0 || vif->radio >= ctx->num_stas)
++			return -1;
++		if (learned >= 0 && learned != vif->radio)
++			return -1;
++		learned = vif->radio;
++	}
++	return learned;
+ }
+ 
+ static int association_init(struct wmediumd *ctx)
+@@ -1780,12 +1795,11 @@ int wmd_telemetry_selftest(void)
+ 	struct addr source_endpoint = {.addr = {0x02, 0, 0, 0, 0, 1}};
+ 	struct frame *frame;
+ 	uint8_t vif[6] = {0x02, 0, 0, 0, 0, 1};
++	uint8_t unknown_vif[6] = {0x02, 0, 0, 0, 0, 9};
+ 	int failures = 0;
+ 
+ 	source.addr[5] = 1;
+ 	source.addr[0] = 0x42;
+-	source.n_addrs = 1;
+-	source.addrs = &source_endpoint;
+ 	destination.addr[5] = 2;
+ 	alternate.addr[5] = 3;
+ 	ctx.sta_array = stations;
+@@ -1805,7 +1819,7 @@ int wmd_telemetry_selftest(void)
+ 	wmd_telemetry_record_rx(&ctx, frame, &destination,
+ 		WMD_TELEMETRY_RX_INJECTED, -61, 30, 0.125);
+ 	wmd_telemetry_frame_done(&ctx);
+-	wmd_telemetry_vif_update(&ctx, vif, &destination, 5180, true);
++	wmd_telemetry_vif_update(&ctx, vif, &source, 5180, true);
+ 	wmd_telemetry_generation(&ctx, 3, true, 2);
+ 	wmd_telemetry_netlink_rejection(&ctx, &source, &destination, 5180,
+ 		-EINVAL, true);
+@@ -1827,6 +1841,16 @@ int wmd_telemetry_selftest(void)
+ 		failures++;
+ 	if (station_index_endpoint(&ctx, source_endpoint.addr) != source.index)
+ 		failures++;
++	if (station_index_endpoint(&ctx, unknown_vif) != -1)
++		failures++;
++	/* Conflicting learned ownership must fail closed as ambiguous rather than
++	 * selecting whichever telemetry slot happens to be encountered first. */
++	ctx.telemetry->vifs[1].active = true;
++	memcpy(ctx.telemetry->vifs[1].vif, vif, sizeof(vif));
++	ctx.telemetry->vifs[1].radio = destination.index;
++	if (station_index_endpoint(&ctx, source_endpoint.addr) != -1)
++		failures++;
++	memset(&ctx.telemetry->vifs[1], 0, sizeof(ctx.telemetry->vifs[1]));
+ 	frame->sender = &alternate;
+ 	frame->data[0] = IEEE80211_STYPE_REASSOC_RESP << 4;
+ 	frame->data[1] = 0;
+-- 
+2.43.0
