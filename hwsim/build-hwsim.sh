@@ -1,8 +1,9 @@
 #!/bin/bash
 # build-hwsim.sh -- build a mac80211_hwsim.ko that lets wmediumd register at
 # channels > 1 (patch 0001), optionally with 6 GHz support and an opt-in
-# impaired in-kernel medium (patches 0003-0007). Userspace wmediumd remains
-# default; the rate-aware PER model is separately opt-in.
+# impaired in-kernel medium (patches 0003-0007), and keeps multichannel
+# userspace monitor ACKs channel-context safe (patch 0008). Userspace wmediumd
+# remains default; the rate-aware PER model is separately opt-in.
 #
 #   ./build-hwsim.sh            # build patched module -> ./build/mac80211_hwsim.ko
 #   ./build-hwsim.sh --6ghz     # also enable 6 GHz (kernel-generation dependent)
@@ -95,6 +96,7 @@ apply "$HERE/patches/0004-mac80211_hwsim-kernel-medium-link-matrix.patch"
 apply "$HERE/patches/0005-mac80211_hwsim-kernel-medium-rate-per.patch"
 apply "$HERE/patches/0006-mac80211_hwsim-kernel-medium-timing-observability.patch"
 apply "$HERE/patches/0007-mac80211_hwsim-allow-128-static-radios.patch"
+apply "$HERE/patches/0008-mac80211_hwsim-fix-multichannel-monitor-ack.patch"
 grep -q 'EXPERIMENTAL wmediumd' "$SRCDIR/mac80211_hwsim.c" \
     || { echo "patch 0001 did not apply -- check source version" >&2; exit 1; }
 

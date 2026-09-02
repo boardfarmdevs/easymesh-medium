@@ -11,6 +11,8 @@ HEADER = struct.Struct("!IHHIIQ")
 LINK = struct.Struct("!6s6shH")
 FREQUENCY_LINK = struct.Struct("!6s6sIhH")
 INFO = struct.Struct("!QQIIII")
+PAGE_REQUEST = struct.Struct("!QII")
+PAGE_HEADER = struct.Struct("!QQIIII")
 
 OP_HELLO = 1
 OP_STATUS = 2
@@ -22,6 +24,9 @@ OP_GET_FREQUENCY = 7
 OP_DUMP_FREQUENCIES = 8
 
 FREQUENCY_OVERRIDE = 1 << 0
+PAGE_MORE = 1 << 0
+PAGE_END = (1 << 32) - 1
+DEFAULT_PAGE_LIMIT = 128
 
 CAPABILITIES = {
     1 << 0: "radio_pair_snr",
@@ -30,6 +35,7 @@ CAPABILITIES = {
     1 << 3: "dump_links",
     1 << 4: "frequency_qualified_snr",
     1 << 5: "read_only",
+    1 << 11: "paged_link_dumps",
 }
 
 STATUS = {
@@ -77,6 +83,7 @@ class ControlClient:
         self.path = path
         self.socket: socket.socket | None = None
         self.instance_id: str | None = None
+        self.capabilities: frozenset[str] = frozenset()
 
     def __enter__(self):
         self.connect()
@@ -98,6 +105,7 @@ class ControlClient:
             self.close()
             raise
         self.instance_id = status.instance_id
+        self.capabilities = status.capabilities
         return status
 
     def close(self) -> None:
@@ -186,8 +194,46 @@ class ControlClient:
         return result
 
     def dump_links(self) -> tuple[int, list[dict]]:
-        generation, payload = self._request(OP_DUMP_LINKS)
+        if "paged_link_dumps" in self.capabilities:
+            generation, payload = self._dump_pages(OP_DUMP_LINKS, LINK.size)
+        else:
+            generation, payload = self._request(OP_DUMP_LINKS)
         return generation, self._decode_links(payload)
+
+    def _dump_pages(self, opcode: int, entry_size: int) -> tuple[int, bytes]:
+        cursor = 0
+        generation: int | None = None
+        total: int | None = None
+        result = bytearray()
+        for _ in range(4096):
+            current_generation, payload = self._request(
+                opcode, PAGE_REQUEST.pack(0, cursor, DEFAULT_PAGE_LIMIT)
+            )
+            if len(payload) < PAGE_HEADER.size:
+                raise ActuatorError(f"opcode {opcode} returned a short page")
+            _, _, page_total, next_cursor, flags, reserved = PAGE_HEADER.unpack_from(
+                payload
+            )
+            entries = payload[PAGE_HEADER.size:]
+            if reserved or flags & ~PAGE_MORE or len(entries) % entry_size:
+                raise ActuatorError(f"opcode {opcode} returned an invalid page")
+            if generation is None:
+                generation = current_generation
+                total = page_total
+            elif current_generation != generation or page_total != total:
+                raise ActuatorError(f"opcode {opcode} changed during paged dump")
+            result.extend(entries)
+            if next_cursor == PAGE_END:
+                if len(result) // entry_size != total:
+                    raise ActuatorError(
+                        f"opcode {opcode} returned {len(result) // entry_size} "
+                        f"entries, expected {total}"
+                    )
+                return generation, bytes(result)
+            if not flags & PAGE_MORE or next_cursor <= cursor:
+                raise ActuatorError(f"opcode {opcode} returned an invalid cursor")
+            cursor = next_cursor
+        raise ActuatorError(f"opcode {opcode} exceeded the page limit")
 
     def get_link(self, source: str, destination: str) -> tuple[int, int]:
         request = [{"source": source, "destination": destination, "value": 0}]
@@ -251,7 +297,12 @@ class ControlClient:
         return result
 
     def dump_frequency_links(self) -> tuple[int, list[dict]]:
-        generation, payload = self._request(OP_DUMP_FREQUENCIES)
+        if "paged_link_dumps" in self.capabilities:
+            generation, payload = self._dump_pages(
+                OP_DUMP_FREQUENCIES, FREQUENCY_LINK.size
+            )
+        else:
+            generation, payload = self._request(OP_DUMP_FREQUENCIES)
         return generation, self._decode_frequency_links(payload)
 
     def get_frequency_link(

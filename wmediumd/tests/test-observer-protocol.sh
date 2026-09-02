@@ -60,7 +60,7 @@ def request(opcode, payload=b"", generation=0):
 
 header, info = request(1)
 capabilities = struct.unpack_from("!I", info, 16)[0]
-for bit in (5, 6, 7, 8, 9, 10):
+for bit in (5, 6, 7, 8, 9, 10, 11):
     assert capabilities & (1 << bit), hex(capabilities)
 
 # The provisioned endpoint is known, but no association frame has traversed
@@ -78,6 +78,15 @@ assert header[4] == 8, header
 header, summary = request(9)
 assert header[4] == 0 and len(summary) == 248, (header, len(summary))
 
+for opcode, entry_size, expected in ((5, 16, 2), (8, 20, 0)):
+    header, body = request(opcode, PAGE.pack(0, 0, 128))
+    assert header[4] == 0, (opcode, header)
+    assert len(body) >= 32 and (len(body) - 32) % entry_size == 0
+    total, next_cursor, flags = struct.unpack_from("!III", body, 16)
+    assert total == expected and next_cursor == 0xFFFFFFFF and flags == 0, (
+        opcode, total, next_cursor, flags
+    )
+
 for opcode, entry_size in ((10, 136), (11, 164), (12, 24), (13, 44)):
     header, body = request(opcode, PAGE.pack(0, 0, 2))
     assert header[4] == 0, (opcode, header)
@@ -85,6 +94,6 @@ for opcode, entry_size in ((10, 136), (11, 164), (12, 24), (13, 44)):
 
 print(
     f"PASS observer protocol caps=0x{capabilities:x} "
-    f"summary={len(summary)} paged-dumps=4 association=unknown mutation=read-only"
+    f"summary={len(summary)} paged-dumps=6 association=unknown mutation=read-only"
 )
 PY

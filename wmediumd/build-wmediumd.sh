@@ -2,8 +2,8 @@
 # build-wmediumd.sh -- build the channels-aware (multichannel) wmediumd.
 #
 # Base: upstream wmediumd (github.com/bcopeland/wmediumd), the v0.3.1 line, which
-# already carries per-frame HWSIM_ATTR_FREQ. On top of it we apply
-# a seventeen-patch series: per-frequency interference and scheduling, learned VIF
+# already carries per-frame HWSIM_ATTR_FREQ on frames received from hwsim. On
+# top of it we apply a nineteen-patch series: per-frequency interference and scheduling, learned VIF
 # ownership, removal of hot-path file I/O, Linux 7 HT/VHT rate flags,
 # frequency-filtered multicast, a larger netlink receive buffer, the atomic
 # scenario-control socket, configured default-SNR handling, and evidence-based
@@ -14,9 +14,13 @@
 # a separate bounded host-only telemetry endpoint for wmediumd Console, and
 # indexed hot-path scenario/telemetry lookups, and protocol-positive station
 # association ownership for rejecting stale hwsim AP peer rows, and learned-VIF
-# resolution for association queries made with live NL80211 endpoint MACs.
+# resolution for association queries made with live NL80211 endpoint MACs, and
+# bounded paged pair/frequency dumps for 100-client observer snapshots, and
+# TX-status frequency return for channel-context-safe monitor ACKs.
 #
 #   ./build-wmediumd.sh          # clone (or reuse ./src), patch, build -> ./src/wmediumd/wmediumd
+#   ./build-wmediumd.sh --refresh-prebuilt
+#                                # also replace tracked ./wmediumd.patched
 #
 # A prebuilt binary proven on rev130 with Linux 7.0 is committed next to this
 # script as ./wmediumd.patched for a no-build fast path.
@@ -28,6 +32,16 @@ REPO=${WMEDIUMD_REPO:-https://github.com/bcopeland/wmediumd}
 # exact verified commit instead of depending on the moving default branch or a
 # tag that cannot be checked out.
 REF=${WMEDIUMD_REF:-717e5d7fcc23eecbc8e32bd897a8fd4b1e3ba640}
+REFRESH_PREBUILT=0
+case "${1:-}" in
+    '') ;;
+    --refresh-prebuilt) REFRESH_PREBUILT=1 ;;
+    -h|--help)
+        sed -n '1,30p' "$0"
+        exit 0
+        ;;
+    *) echo "usage: $0 [--refresh-prebuilt]" >&2; exit 2 ;;
+esac
 
 if [ ! -d "$SRC/.git" ]; then
     echo ">> cloning $REPO @ $REF"
@@ -72,3 +86,13 @@ echo ">> building"
 make -C "$SRC" -j"$(nproc)"
 echo ">> built $SRC/wmediumd/wmediumd"
 echo "   (self-test: sudo $SRC/wmediumd/wmediumd -T )"
+if [ "$REFRESH_PREBUILT" = 1 ]; then
+    "$SRC/wmediumd/wmediumd" -T
+    PREBUILT_TMP=$HERE/.wmediumd.patched.$$
+    trap 'rm -f -- "$PREBUILT_TMP"' EXIT
+    install -m 0755 "$SRC/wmediumd/wmediumd" "$PREBUILT_TMP"
+    mv -f "$PREBUILT_TMP" "$HERE/wmediumd.patched"
+    trap - EXIT
+    printf '>> refreshed %s sha256=%s\n' "$HERE/wmediumd.patched" \
+        "$(sha256sum "$HERE/wmediumd.patched" | awk '{print $1}')"
+fi

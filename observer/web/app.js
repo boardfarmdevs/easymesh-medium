@@ -10,6 +10,12 @@ function shortMac(mac) {
 }
 function stationIdentity(mac) { return (state.snapshot?.stations || []).find((station) => station.mac === mac); }
 function displayName(mac) { return stationIdentity(mac)?.label || shortMac(mac); }
+function visibleStations() { return WMediumdGraph.visibleStations(state.snapshot); }
+function visibleMACs() { return new Set(visibleStations().map((station) => station.mac)); }
+function visibleLinks(links) {
+  const visible = visibleMACs();
+  return (links || []).filter((link) => visible.has(link.source) && visible.has(link.destination));
+}
 function radioChannels(mac) {
   const seen = new Set();
   return (state.snapshot?.radio_frequencies || [])
@@ -42,7 +48,7 @@ function render(snapshot) {
   const rates = metrics.rates || {};
   $('frames-rate').textContent = metrics.available ? rate(rates.frames_per_second) : 'unavailable';
   $('bytes-rate').textContent = metrics.available ? bytes(rates.bytes_per_second) : 'unavailable';
-  $('active-count').textContent = metrics.available ? number(snapshot.active_links.filter(WMediumdGraph.hasObservedTraffic).length) : 'unavailable';
+  $('active-count').textContent = metrics.available ? number(visibleLinks(snapshot.active_links).filter(WMediumdGraph.hasObservedTraffic).length) : 'unavailable';
   $('delivery-count').textContent = metrics.available ? `${number(summary.rx_injected)} / ${number(summary.tx_no_ack)}` : 'unavailable';
   $('retry-count').textContent = metrics.available ? `${number(summary.retries)} / ${number(totalDrops(summary))}` : 'unavailable';
   $('queue-count').textContent = metrics.available ? `${number(summary.queue_depth)} / ${number(summary.queue_depth_max)}` : 'unavailable';
@@ -52,7 +58,7 @@ function render(snapshot) {
   renderCapabilities(daemon.capabilities);
   renderIdentityInventory(snapshot.identity_inventory || {});
   renderArtifacts(snapshot.artifacts);
-  renderSourceSelect(snapshot.stations);
+  renderSourceSelect(visibleStations());
   renderGraph(); renderTelemetry(summary); renderActiveLinks(); renderRadios(); renderVIFs(); renderEvents(); renderTable(); renderControls();
 }
 
@@ -133,9 +139,10 @@ function snrClass(value) { return value >= 40 ? 'strong' : value >= 20 ? 'medium
 
 function renderGraph() {
   const svg = $('graph'); svg.replaceChildren(); const snapshot = state.snapshot;
-  if (!snapshot || snapshot.stations.length === 0) return;
+  const stations = visibleStations();
+  if (!snapshot || stations.length === 0) return;
   const width = 1000, height = 560;
-  const positions = WMediumdGraph.layoutStations(snapshot.stations, state.selected, width, height);
+  const positions = WMediumdGraph.layoutStations(stations, state.selected, width, height);
   const mode = $('graph-mode').value;
   const selected = stationIdentity(state.selected);
   if (mode === 'association') {
@@ -153,17 +160,17 @@ function renderGraph() {
       $('graph-summary').textContent = `${displayName(state.selected)}: ${associations.length} currently associated client(s) · ${channels}.`;
     }
   } else if (mode === 'active') {
-    const links = snapshot.active_links.filter((item) => item.source === state.selected && WMediumdGraph.hasObservedTraffic(item));
+    const links = visibleLinks(snapshot.active_links).filter((item) => item.source === state.selected && WMediumdGraph.hasObservedTraffic(item));
     for (const link of links) drawEdge(svg, positions, link, link.multicast ? 'multicast' : snrClass(link.last_snr_db), `${link.band} ch ${link.channel} · ${link.frames} frames · SNR ${link.last_snr_db} dB · ${totalDrops(link)} drops`);
     $('graph-summary').textContent = `${displayName(state.selected)}: ${links.length} raw packet path(s). Multicast fan-out is medium delivery telemetry, not Wi-Fi association.`;
   } else {
-    for (const link of snapshot.pair_links.filter((item) => item.source === state.selected)) drawEdge(svg, positions, link, snrClass(link.snr_db), `${link.snr_db} dB configured pair state`);
-    for (const link of snapshot.frequency_overrides.filter((item) => item.source === state.selected)) drawEdge(svg, positions, link, 'override', `${link.snr_db} dB override at ${link.frequency_mhz} MHz (${link.band} ch ${link.channel})`);
+    for (const link of visibleLinks(snapshot.pair_links).filter((item) => item.source === state.selected)) drawEdge(svg, positions, link, snrClass(link.snr_db), `${link.snr_db} dB configured pair state`);
+    for (const link of visibleLinks(snapshot.frequency_overrides).filter((item) => item.source === state.selected)) drawEdge(svg, positions, link, 'override', `${link.snr_db} dB override at ${link.frequency_mhz} MHz (${link.band} ch ${link.channel})`);
     $('graph-summary').textContent = `${displayName(state.selected)}: configured potential RF paths, not current Wi-Fi associations.`;
   }
   const vifsByRadio = new Map();
   for (const vif of snapshot.vifs) { if (!vifsByRadio.has(vif.radio)) vifsByRadio.set(vif.radio, []); vifsByRadio.get(vif.radio).push(vif); }
-  for (const station of snapshot.stations) {
+  for (const station of stations) {
     const position = positions.get(station.mac); const group = document.createElementNS(svgNS, 'g'); group.setAttribute('class', `graph-node${station.mac === state.selected ? ' selected' : ''}`); group.setAttribute('transform', `translate(${position.x},${position.y})`);
     group.addEventListener('click', () => { state.selected = station.mac; $('source-select').value = station.mac; renderGraph(); renderTable(); });
     const circle = document.createElementNS(svgNS, 'circle'); circle.setAttribute('r', position.radius);
@@ -185,7 +192,7 @@ function drawEdge(svg, positions, link, edgeClass, description, visibleLabel = '
 }
 
 function renderActiveLinks() {
-  const body = $('active-body'); body.replaceChildren(); const links = (state.snapshot?.active_links || []).filter(WMediumdGraph.hasObservedTraffic); const needle = $('active-filter').value.trim().toLowerCase(); let matched = 0, rendered = 0;
+  const body = $('active-body'); body.replaceChildren(); const links = visibleLinks(state.snapshot?.active_links).filter(WMediumdGraph.hasObservedTraffic); const needle = $('active-filter').value.trim().toLowerCase(); let matched = 0, rendered = 0;
   for (const link of links) {
     if (needle && !`${link.source} ${link.destination} ${link.frequency_mhz} ${link.band}`.toLowerCase().includes(needle)) continue;
     matched += 1; if (rendered >= 800) continue;
@@ -202,25 +209,28 @@ function renderActiveLinks() {
 
 function renderRadios() {
   const body = $('radio-body'); body.replaceChildren();
+  const visible = visibleMACs();
   for (const radio of state.snapshot?.radio_frequencies || []) {
+    if (!visible.has(radio.radio)) continue;
     const tr = document.createElement('tr'); addCells(tr, [displayName(radio.radio), `${radio.band} / ch ${radio.channel} · ${radio.frequency_mhz} MHz`, `${number(radio.frames)} / ${bytes(radio.bytes)}`, `${number(radio.management_frames)} / ${number(radio.control_frames)} / ${number(radio.data_frames)} / ${number(radio.eapol_frames)}`, `${number(radio.unicast_frames)} / ${number(radio.multicast_frames)}`, `${number(radio.attempts)} / ${number(radio.retries)}`, `${number(radio.rx_injected)} / ${number(radio.drops)}`]); body.appendChild(tr);
   }
 }
 
 function renderVIFs() {
   const body = $('vif-body'); body.replaceChildren();
-  for (const vif of state.snapshot?.vifs || []) { const tr = document.createElement('tr'); addCells(tr, [vif.mac, `${displayName(vif.radio)} · ${vif.radio}`, `${vif.band} / ch ${vif.channel} · ${vif.frequency_mhz} MHz`]); body.appendChild(tr); }
+  const visible = visibleMACs();
+  for (const vif of state.snapshot?.vifs || []) { if (!visible.has(vif.radio)) continue; const tr = document.createElement('tr'); addCells(tr, [vif.mac, `${displayName(vif.radio)} · ${vif.radio}`, `${vif.band} / ch ${vif.channel} · ${vif.frequency_mhz} MHz`]); body.appendChild(tr); }
 }
 
 function renderEvents() {
-  const list = $('event-timeline'); list.replaceChildren(); const events = (state.snapshot?.events || []).slice(-30);
+  const list = $('event-timeline'); list.replaceChildren(); const visible = visibleMACs(); const events = (state.snapshot?.events || []).filter((event) => (!event.source || visible.has(event.source)) && (!event.destination || visible.has(event.destination))).slice(-30);
   for (const event of events.reverse()) { const item = document.createElement('li'); const title = document.createElement('strong'); title.textContent = `${event.sequence} · ${event.type}`; const detail = document.createElement('span'); detail.textContent = `t=${(Number(event.time_usec) / 1e6).toFixed(3)}s${event.source ? ` · ${displayName(event.source)}` : ''}${event.destination ? ` → ${displayName(event.destination)}` : ''}${event.frequency_mhz ? ` · ${event.band} ch ${event.channel}` : ''} · value ${event.value} · aux ${event.auxiliary}`; item.append(title, detail); list.appendChild(item); }
 }
 
 function renderTable() {
   const body = $('links-body'); body.replaceChildren(); if (!state.snapshot) return; const needle = $('link-filter').value.trim().toLowerCase(); const kind = $('kind-filter').value; const rows = [];
-  if (kind !== 'frequency') for (const link of state.snapshot.pair_links) rows.push({ kind: 'pair', ...link, band: 'all / fallback', channel: '—', frequency_mhz: '—' });
-  if (kind !== 'pair') for (const link of state.snapshot.frequency_overrides) rows.push({ kind: 'override', ...link });
+  if (kind !== 'frequency') for (const link of visibleLinks(state.snapshot.pair_links)) rows.push({ kind: 'pair', ...link, band: 'all / fallback', channel: '—', frequency_mhz: '—' });
+  if (kind !== 'pair') for (const link of visibleLinks(state.snapshot.frequency_overrides)) rows.push({ kind: 'override', ...link });
   rows.sort((a, b) => Number(b.source === state.selected) - Number(a.source === state.selected) || a.source.localeCompare(b.source) || a.destination.localeCompare(b.destination));
   let matched = 0, rendered = 0;
   for (const row of rows) { if (needle && !`${row.source} ${row.destination}`.includes(needle)) continue; matched += 1; if (rendered >= 800) continue; const tr = document.createElement('tr'); addCells(tr, [row.kind, row.source, row.destination, row.kind === 'override' ? `${row.band} / ch ${row.channel || '?'}` : row.band, row.frequency_mhz, `${row.snr_db} dB`]); body.appendChild(tr); rendered += 1; }

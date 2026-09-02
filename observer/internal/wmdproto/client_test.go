@@ -15,6 +15,15 @@ var testMACs = [][6]byte{
 	{0x42, 0, 0, 0, 3, 0},
 }
 
+func contains(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
 func TestReadOnlySnapshot(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "metrics.sock")
 	listener := listenUnixPacket(t, path)
@@ -81,7 +90,8 @@ func TestTelemetrySnapshotPagedGolden(t *testing.T) {
 	listener := listenUnixPacket(t, path)
 	defer listener.Close()
 	capabilities := capRadioPairSNR | capAtomicGenerations | capReadback | capDump |
-		capFrequencyQualifiedSNR | capReadOnly | capTelemetry | capPagedDumps | capVIFOwnership | capEventRing
+		capFrequencyQualifiedSNR | capReadOnly | capTelemetry | capPagedDumps |
+		capVIFOwnership | capEventRing | capPagedLinkDumps
 	go serveTelemetryConnection(t, listener, capabilities, 12)
 
 	client := NewClient(path)
@@ -91,6 +101,9 @@ func TestTelemetrySnapshotPagedGolden(t *testing.T) {
 	}
 	if !snapshot.PacketMetrics.Available || snapshot.PacketMetrics.Summary == nil {
 		t.Fatalf("telemetry not available: %+v", snapshot.PacketMetrics)
+	}
+	if !contains(snapshot.Daemon.Capabilities, "paged_link_dumps") {
+		t.Fatalf("paged link-dump capability missing: %v", snapshot.Daemon.Capabilities)
 	}
 	summary := snapshot.PacketMetrics.Summary
 	if summary.FramesSeen != 102 || summary.EventCapacity != 8 || summary.QueueDepth != 2 {
@@ -166,9 +179,34 @@ func serveTelemetryConnection(t *testing.T, listener *net.UnixListener, capabili
 		case opHello, opStatus:
 			payload = infoPayload(capabilities, 3)
 		case opDumpLinks:
-			payload = pairPayload()
+			if capabilities&capPagedLinkDumps == 0 {
+				payload = pairPayload()
+				break
+			}
+			if len(requestPayload) != pageRequestSize || binary.BigEndian.Uint64(requestPayload[0:8]) != 0 || binary.BigEndian.Uint32(requestPayload[12:16]) != 128 {
+				t.Errorf("bad pair page request %x", requestPayload)
+				return
+			}
+			pairs := pairPayload()
+			switch cursor := binary.BigEndian.Uint32(requestPayload[8:12]); cursor {
+			case 0:
+				payload = pagePayload(generation, 0, 6, 3, pageMore, pairs[:3*linkSize])
+			case 3:
+				payload = pagePayload(generation, 0, 6, pageEnd, 0, pairs[3*linkSize:])
+			default:
+				t.Errorf("unexpected pair cursor %d", cursor)
+				return
+			}
 		case opDumpFrequencies:
-			payload = frequencyPayload()
+			if capabilities&capPagedLinkDumps == 0 {
+				payload = frequencyPayload()
+				break
+			}
+			if len(requestPayload) != pageRequestSize || binary.BigEndian.Uint32(requestPayload[8:12]) != 0 {
+				t.Errorf("bad frequency page request %x", requestPayload)
+				return
+			}
+			payload = pagePayload(generation, 0, 1, pageEnd, 0, frequencyPayload())
 		case opTelemetrySummary:
 			payload = telemetrySummaryPayload(uint64(1000 + radioPage))
 		case opDumpRadioFrequencies:

@@ -1,0 +1,23 @@
+wmediumd: return frame frequency with TX status
+
+A multichannel mac80211_hwsim radio uses channel contexts, so its legacy
+single data->channel pointer may be NULL.  Return the original frame frequency
+with HWSIM_CMD_TX_INFO_FRAME so the kernel can emit an optional radiotap ACK on
+the correct channel without consulting that legacy pointer.
+
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -932,11 +932,12 @@ static void send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame)
+ 	    nla_put_u32(msg, HWSIM_ATTR_SIGNAL, frame->signal) ||
+ 	    nla_put(msg, HWSIM_ATTR_TX_INFO,
+ 		    frame->tx_rates_count * sizeof(struct hwsim_tx_rate),
+ 		    frame->tx_rates) ||
+-	    nla_put_u64(msg, HWSIM_ATTR_COOKIE, frame->cookie)) {
++	    nla_put_u64(msg, HWSIM_ATTR_COOKIE, frame->cookie) ||
++	    nla_put_u32(msg, HWSIM_ATTR_FREQ, frame->freq)) {
+ 		w_logf(ctx, LOG_ERR, "%s: Failed to fill a payload\n", __func__);
+ 		goto out;
+ 	}
+ 
+ 	if (ctx->ctrl)
+ 		usfstl_sched_ctrl_sync_to(ctx->ctrl);

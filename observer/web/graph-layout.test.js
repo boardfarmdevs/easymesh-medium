@@ -57,3 +57,19 @@ assert.deepEqual(graph.associationsForSelected(associationSnapshot, 'extender').
 assert.deepEqual(graph.associationsForSelected(associationSnapshot, 'iot').map((link) => link.destination), ['agent']);
 assert.equal(graph.hasObservedTraffic({ frames: 0, attempts: 0 }), false);
 assert.equal(graph.hasObservedTraffic({ frames: 0, drops_per: 1 }), true);
+
+const inventoryWithReserve = {
+  stations: [
+    { mac: 'agent', role: 'controller-agent' },
+    { mac: 'sta', role: 'wlan-client' },
+    { mac: 'reserve', label: 'Spare-39', role: 'spare' },
+  ],
+  active_links: [
+    { source: 'sta', destination: 'agent', frames: 1 },
+    { source: 'sta', destination: 'reserve', frames: 1 },
+  ],
+};
+assert.deepEqual(graph.visibleStations(inventoryWithReserve).map((station) => station.mac),
+  ['agent', 'sta']);
+assert.deepEqual(graph.currentAssociations(inventoryWithReserve)
+  .map((link) => [link.source, link.destination]), [['sta', 'agent']]);

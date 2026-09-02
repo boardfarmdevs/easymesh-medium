@@ -59,6 +59,7 @@ class ActuatorIntegrationTests(unittest.TestCase):
             self.assertEqual(status.num_stations, 3)
             self.assertIn("atomic_generations", status.capabilities)
             self.assertIn("frequency_qualified_snr", status.capabilities)
+            self.assertIn("paged_link_dumps", status.capabilities)
             generation, links = client.dump_links()
             self.assertEqual(generation, 0)
             self.assertEqual(len(links), 6)

@@ -1,0 +1,183 @@
+From 07694b7922cf50dd2a2c811af27e4a5c31e6e5f8 Mon Sep 17 00:00:00 2001
+From: Rob Vogelaar <revogelaar@gmail.com>
+Date: Tue, 1 Sep 2026 10:08:39 -0700
+Subject: [PATCH] wmediumd: page configured link dumps
+
+---
+ wmediumd/control.c | 112 ++++++++++++++++++++++++++++++++++++++++++++-
+ wmediumd/control.h |   1 +
+ 2 files changed, 112 insertions(+), 1 deletion(-)
+
+diff --git a/wmediumd/control.c b/wmediumd/control.c
+index cbec013..67b277a 100644
+--- a/wmediumd/control.c
++++ b/wmediumd/control.c
+@@ -565,7 +565,8 @@ static int send_info(struct wmd_control_client *client, uint16_t opcode)
+ {
+ 	struct wmediumd *ctx = client->ctx;
+ 	uint32_t capabilities = WMDC_CAP_RADIO_PAIR_SNR |
+-		WMDC_CAP_ATOMIC_GENERATIONS | WMDC_CAP_READBACK | WMDC_CAP_DUMP;
++		WMDC_CAP_ATOMIC_GENERATIONS | WMDC_CAP_READBACK | WMDC_CAP_DUMP |
++		WMDC_CAP_PAGED_LINK_DUMPS;
+ 	uint32_t max_updates = ctx->num_stas * ctx->num_stas;
+ 
+ 	if (ctx->frequency_overrides) {
+@@ -1045,6 +1046,16 @@ static int handle_get_association(struct wmd_control_client *client,
+ 		ctx->control_generation, &response, sizeof(response));
+ }
+ 
++static int telemetry_page_request(const uint8_t *payload, uint32_t payload_len,
++				  size_t entry_size, uint64_t *since,
++				  uint32_t *cursor, uint32_t *limit);
++static int send_telemetry_page(struct wmd_control_client *client,
++			       uint16_t opcode, uint64_t snapshot,
++			       uint64_t oldest_event, uint32_t total,
++			       uint32_t next_cursor, uint32_t flags,
++			       const void *entries, uint32_t count,
++			       size_t entry_size);
++
+ static int handle_dump(struct wmd_control_client *client)
+ {
+ 	struct wmediumd *ctx = client->ctx;
+@@ -1074,6 +1085,51 @@ static int handle_dump(struct wmd_control_client *client)
+ 	return result;
+ }
+ 
++static int handle_dump_paged(struct wmd_control_client *client,
++			     const uint8_t *payload, uint32_t payload_len)
++{
++	struct wmediumd *ctx = client->ctx;
++	struct wmdc_link *links;
++	uint64_t since;
++	uint32_t cursor, limit, count = 0, matched = 0;
++	uint32_t total, next = WMDC_PAGE_END;
++	int i, j, status, result;
++
++	status = telemetry_page_request(payload, payload_len, sizeof(*links),
++		&since, &cursor, &limit);
++	total = ctx->num_stas > 0 ?
++		(uint32_t)ctx->num_stas * (uint32_t)(ctx->num_stas - 1) : 0;
++	if (status != WMDC_OK || since || cursor > total)
++		return send_response(client->loop.fd, WMDC_OP_DUMP_LINKS,
++			status == WMDC_OK ? WMDC_ERR_VALUE : status,
++			ctx->control_generation, NULL, 0);
++	links = calloc(limit, sizeof(*links));
++	if (!links)
++		return send_response(client->loop.fd, WMDC_OP_DUMP_LINKS,
++			WMDC_ERR_INTERNAL, ctx->control_generation, NULL, 0);
++	for (i = 0; i < ctx->num_stas && count < limit; i++) {
++		for (j = 0; j < ctx->num_stas && count < limit; j++) {
++			if (i == j)
++				continue;
++			if (matched++ < cursor)
++				continue;
++			memcpy(links[count].source, ctx->sta_array[i]->addr, 6);
++			memcpy(links[count].destination, ctx->sta_array[j]->addr, 6);
++			links[count].snr_db = htobe16((uint16_t)
++				ctx->snr_matrix[i * ctx->num_stas + j]);
++			count++;
++		}
++	}
++	if (cursor + count < total)
++		next = cursor + count;
++	result = send_telemetry_page(client, WMDC_OP_DUMP_LINKS,
++		ctx->control_generation, 0, total, next,
++		next == WMDC_PAGE_END ? 0 : WMDC_PAGE_MORE,
++		links, count, sizeof(*links));
++	free(links);
++	return result;
++}
++
+ static int handle_frequency_apply(struct wmd_control_client *client,
+ 				  const struct wmdc_header *request,
+ 				  const uint8_t *payload, uint32_t payload_len)
+@@ -1191,6 +1247,54 @@ static int handle_frequency_dump(struct wmd_control_client *client)
+ 	return result;
+ }
+ 
++static int handle_frequency_dump_paged(struct wmd_control_client *client,
++				       const uint8_t *payload,
++				       uint32_t payload_len)
++{
++	struct wmediumd *ctx = client->ctx;
++	struct wmdc_frequency_link *links;
++	uint64_t since;
++	uint32_t cursor, limit, total = 0, count = 0, matched = 0;
++	uint32_t next = WMDC_PAGE_END;
++	size_t i;
++	int status, result;
++
++	status = telemetry_page_request(payload, payload_len, sizeof(*links),
++		&since, &cursor, &limit);
++	for (i = 0; i < ctx->frequency_override_capacity; i++)
++		if (ctx->frequency_overrides[i].active)
++			total++;
++	if (status != WMDC_OK || since || cursor > total)
++		return send_response(client->loop.fd, WMDC_OP_DUMP_FREQUENCIES,
++			status == WMDC_OK ? WMDC_ERR_VALUE : status,
++			ctx->control_generation, NULL, 0);
++	links = calloc(limit, sizeof(*links));
++	if (!links)
++		return send_response(client->loop.fd, WMDC_OP_DUMP_FREQUENCIES,
++			WMDC_ERR_INTERNAL, ctx->control_generation, NULL, 0);
++	for (i = 0; i < ctx->frequency_override_capacity && count < limit; i++) {
++		struct wmd_frequency_override *entry = &ctx->frequency_overrides[i];
++
++		if (!entry->active || matched++ < cursor)
++			continue;
++		memcpy(links[count].source, ctx->sta_array[entry->source]->addr, 6);
++		memcpy(links[count].destination,
++		       ctx->sta_array[entry->destination]->addr, 6);
++		links[count].frequency_mhz = htobe32(entry->frequency_mhz);
++		links[count].snr_db = htobe16((uint16_t)entry->snr_db);
++		links[count].flags = htobe16(WMDC_FREQUENCY_OVERRIDE);
++		count++;
++	}
++	if (cursor + count < total)
++		next = cursor + count;
++	result = send_telemetry_page(client, WMDC_OP_DUMP_FREQUENCIES,
++		ctx->control_generation, 0, total, next,
++		next == WMDC_PAGE_END ? 0 : WMDC_PAGE_MORE,
++		links, count, sizeof(*links));
++	free(links);
++	return result;
++}
++
+ static uint64_t telemetry_oldest_event_sequence(const struct wmd_telemetry *telemetry)
+ {
+ 	uint32_t oldest;
+@@ -1624,6 +1728,9 @@ static void control_handler(struct usfstl_loop_entry *entry)
+ 	case WMDC_OP_DUMP_LINKS:
+ 		if (payload_len == 0)
+ 			result = handle_dump(client);
++		else
++			result = handle_dump_paged(client,
++				frame + sizeof(*header), payload_len);
+ 		break;
+ 	case WMDC_OP_APPLY_FREQUENCY:
+ 		result = client->read_only ?
+@@ -1639,6 +1746,9 @@ static void control_handler(struct usfstl_loop_entry *entry)
+ 	case WMDC_OP_DUMP_FREQUENCIES:
+ 		if (payload_len == 0)
+ 			result = handle_frequency_dump(client);
++		else
++			result = handle_frequency_dump_paged(client,
++				frame + sizeof(*header), payload_len);
+ 		break;
+ 	case WMDC_OP_TELEMETRY_SUMMARY:
+ 		if (client->telemetry)
+diff --git a/wmediumd/control.h b/wmediumd/control.h
+index fefa094..73f52bf 100644
+--- a/wmediumd/control.h
++++ b/wmediumd/control.h
+@@ -53,6 +53,7 @@ enum wmdc_capability {
+ 	WMDC_CAP_VIF_OWNERSHIP = 1U << 8,
+ 	WMDC_CAP_EVENT_RING = 1U << 9,
+ 	WMDC_CAP_ASSOCIATION_OWNERSHIP = 1U << 10,
++	WMDC_CAP_PAGED_LINK_DUMPS = 1U << 11,
+ };
+ 
+ #define WMDC_FREQUENCY_OVERRIDE (1U << 0)
+-- 
+2.53.0
+

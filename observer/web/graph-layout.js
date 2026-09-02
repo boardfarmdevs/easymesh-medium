@@ -11,6 +11,14 @@
     return clientRoles.has(station?.role);
   }
 
+  function isVisibleStation(station) {
+    return station?.role !== 'spare';
+  }
+
+  function visibleStations(snapshot) {
+    return (snapshot?.stations || []).filter(isVisibleStation);
+  }
+
   function hasObservedTraffic(link) {
     return Number(link?.frames || 0) > 0
       || Number(link?.attempts || 0) > 0
@@ -36,7 +44,7 @@
   // downlink records prevents multicast receiver candidates from appearing as
   // topology edges and makes the same edge visible from either endpoint.
   function currentAssociations(snapshot) {
-    const stations = new Map((snapshot?.stations || []).map((station) => [station.mac, station]));
+    const stations = new Map(visibleStations(snapshot).map((station) => [station.mac, station]));
     const newestByClient = new Map();
     for (const link of snapshot?.active_links || []) {
       if (link.multicast || !hasObservedTraffic(link)) continue;
@@ -190,9 +198,11 @@
     edgePath,
     edgeRoute,
     hasObservedTraffic,
+    isVisibleStation,
     labelFontSize,
     layoutStations,
     nodeRadius,
     quadraticCollisionFree,
+    visibleStations,
   };
 }));

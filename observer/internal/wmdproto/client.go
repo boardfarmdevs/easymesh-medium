@@ -56,6 +56,7 @@ const (
 	capPagedDumps            = uint32(1 << 7)
 	capVIFOwnership          = uint32(1 << 8)
 	capEventRing             = uint32(1 << 9)
+	capPagedLinkDumps        = uint32(1 << 11)
 
 	pageMore = uint32(1 << 0)
 	pageGap  = uint32(1 << 1)
@@ -81,6 +82,7 @@ var capabilityNames = []struct {
 	{capPagedDumps, "paged_dumps"},
 	{capVIFOwnership, "vif_ownership"},
 	{capEventRing, "event_ring"},
+	{capPagedLinkDumps, "paged_link_dumps"},
 }
 
 type Client struct {
@@ -168,7 +170,14 @@ func (c *Client) snapshotOnce(ctx context.Context) (model.Snapshot, string, uint
 		return model.Snapshot{}, "", 0, nil, fmt.Errorf("endpoint is not a compatible read-only wmediumd endpoint (capabilities 0x%x)", hello.Capabilities)
 	}
 
-	linkGeneration, linkPayload, err := request(conn, opDumpLinks, 0, nil)
+	var linkGeneration uint64
+	var linkPayload []byte
+	if hello.Capabilities&capPagedLinkDumps != 0 {
+		linkPayload, _, err = requestPages(conn, opDumpLinks, hello.Generation, 0, linkSize)
+		linkGeneration = hello.Generation
+	} else {
+		linkGeneration, linkPayload, err = request(conn, opDumpLinks, 0, nil)
+	}
 	if err != nil {
 		return model.Snapshot{}, "", 0, nil, err
 	}
@@ -182,7 +191,15 @@ func (c *Client) snapshotOnce(ctx context.Context) (model.Snapshot, string, uint
 
 	var frequencyLinks []model.FrequencyLink
 	if hello.Capabilities&capFrequencyQualifiedSNR != 0 {
-		frequencyGeneration, payload, requestErr := request(conn, opDumpFrequencies, 0, nil)
+		var frequencyGeneration uint64
+		var payload []byte
+		var requestErr error
+		if hello.Capabilities&capPagedLinkDumps != 0 {
+			payload, _, requestErr = requestPages(conn, opDumpFrequencies, hello.Generation, 0, freqLinkSize)
+			frequencyGeneration = hello.Generation
+		} else {
+			frequencyGeneration, payload, requestErr = request(conn, opDumpFrequencies, 0, nil)
+		}
 		if requestErr != nil {
 			return model.Snapshot{}, "", 0, nil, requestErr
 		}

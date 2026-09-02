@@ -1,0 +1,50 @@
+mac80211_hwsim: use TX frequency for multichannel monitor ACKs
+
+When channels > 1, mac80211 uses channel contexts and data->channel can be
+NULL.  The userspace TX-status path nevertheless passed data->channel to the
+radiotap ACK monitor helper unconditionally.  If the hwsim monitor interface
+was running, the helper dereferenced the NULL channel and left nl80211 callers
+blocked after the kernel oops.
+
+Accept the frequency returned with the TX status, resolve it through the
+radio's wiphy, and only emit the optional monitor ACK when a channel is known.
+Older userspace remains safe through the guarded data->channel fallback.
+
+--- a/drivers/net/wireless/virtual/mac80211_hwsim.c
++++ b/drivers/net/wireless/virtual/mac80211_hwsim.c
+@@ -6681,6 +6681,7 @@ static int hwsim_tx_info_frame_received_nl(struct sk_buff *skb_2,
+ 	unsigned int hwsim_flags;
+ 	int i;
+ 	unsigned long flags;
++	struct ieee80211_channel *ack_channel;
+ 	bool found = false;
+ 
+ 	if (!info->attrs[HWSIM_ATTR_ADDR_TRANSMITTER] ||
+@@ -6698,6 +6699,12 @@ static int hwsim_tx_info_frame_received_nl(struct sk_buff *skb_2,
+ 	if (!data2)
+ 		goto out;
+ 
++	ack_channel = data2->channel;
++	if (info->attrs[HWSIM_ATTR_FREQ])
++		ack_channel = ieee80211_get_channel(
++			data2->hw->wiphy,
++			nla_get_u32(info->attrs[HWSIM_ATTR_FREQ]));
++
+ 	if (!hwsim_virtio_enabled) {
+ 		if (hwsim_net_get_netgroup(genl_info_net(info)) !=
+ 		    data2->netgroup)
+@@ -6747,9 +6755,11 @@ static int hwsim_tx_info_frame_received_nl(struct sk_buff *skb_2,
+ 	if (!(hwsim_flags & HWSIM_TX_CTL_NO_ACK) &&
+ 	   (hwsim_flags & HWSIM_TX_STAT_ACK)) {
+ 		if (skb->len >= 16) {
+-			hdr = (struct ieee80211_hdr *) skb->data;
+-			mac80211_hwsim_monitor_ack(data2->channel,
+-						   hdr->addr2);
++			if (ack_channel) {
++				hdr = (struct ieee80211_hdr *) skb->data;
++				mac80211_hwsim_monitor_ack(ack_channel,
++							   hdr->addr2);
++			}
+ 		}
+ 		txi->flags |= IEEE80211_TX_STAT_ACK;
+ 	}
