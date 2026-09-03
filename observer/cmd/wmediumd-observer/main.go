@@ -105,6 +105,10 @@ func collect(ctx context.Context, client *wmdproto.Client, inspector *artifacts.
 		}
 		snapshot.Artifacts = inspector.Inspect()
 		identityLoader.Apply(&snapshot)
+		if err := client.ResolveAssociations(ctx, &snapshot); err != nil {
+			store.UpdateError(err)
+			return
+		}
 		store.Update(snapshot)
 	}
 	collectOnce()

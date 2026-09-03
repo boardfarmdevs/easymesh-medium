@@ -55,6 +55,15 @@ assert.deepEqual(associations.map((link) => [link.source, link.destination, link
 ]);
 assert.deepEqual(graph.associationsForSelected(associationSnapshot, 'extender').map((link) => link.source), ['sta']);
 assert.deepEqual(graph.associationsForSelected(associationSnapshot, 'iot').map((link) => link.destination), ['agent']);
+
+const authoritativeSnapshot = {
+  stations: associationSnapshot.stations,
+  associations: [{ station: 'sta', owner: 'extender', frequency_mhz: 5180, band: '5GHz', channel: 36, evidence: 'infrastructure data' }],
+  active_links: [{ source: 'extender', destination: 'sta', frequency_mhz: 5180, multicast: true, frames: 500, last_seen_usec: 90, last_snr_db: 35 }],
+};
+assert.deepEqual(graph.currentAssociations(authoritativeSnapshot).map((link) => [link.source, link.destination, link.authoritative, link.last_snr_db]), [
+  ['sta', 'extender', true, 35],
+]);
 assert.equal(graph.hasObservedTraffic({ frames: 0, attempts: 0 }), false);
 assert.equal(graph.hasObservedTraffic({ frames: 0, drops_per: 1 }), true);
 

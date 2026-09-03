@@ -2,6 +2,9 @@
 set -euo pipefail
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+repo=$(cd "$script_dir/../../.." && pwd)
+# shellcheck source=../../tests/lib/observer-status.sh
+source "$repo/gen/tests/lib/observer-status.sh"
 client_container=${1:-wlan-client}
 api_url=${EM_CLIENTS_API:-http://127.0.0.1:8888/api/v1/clients}
 output_root=${WMD_RUN_ROOT:-/tmp/wmdcfg-runs}
@@ -32,6 +35,8 @@ for command in curl jq lxc python3 timeout; do
 done
 
 cd "$script_dir"
+status_section "Live client RCPI monitor"
+status_action "Discovering $client_container and its current serving BSSID."
 python3 -m wmdcfg.cli inventory -o "$inventory_file"
 
 client_mac=$(jq -r --arg container "$client_container" '
@@ -66,6 +71,7 @@ python3 -m wmdcfg.cli compile scenarios/client-rcpi-monitor.wmd \
     --bind "client=$client_container" \
     --bind "ap=$serving_ap" \
     -o "$plan_file"
+status_note "$client_container is served by $serving_ap ($serving_bssid)."
 
 # hwsim updates the observed signal when frames cross the RF link. Start a
 # small traffic stream before checking RCPI so an otherwise idle client gets a
@@ -75,7 +81,7 @@ lxc exec "$client_container" -- ping -I wlan0 -c 1 -W 2 "$traffic_target" \
 timeout 150 lxc exec "$client_container" -- \
     ping -I wlan0 -i 0.2 "$traffic_target" >/dev/null 2>&1 &
 traffic_pid=$!
-sleep 6
+status_wait_seconds 6 "generating traffic and waiting for the first metrics-reporting interval"
 
 initial_rcpi=$(curl -fsS "$api_url" | jq -r --arg mac "$client_mac" '
     first(.clients[]
@@ -88,7 +94,7 @@ if [[ "$initial_rcpi" -le 0 ]]; then
 fi
 
 echo "client=$client_container mac=$client_mac serving_ap=$serving_ap bssid=$serving_bssid"
-echo "Open Network Topology or Connected Clients in the WebUI; signal refreshes every two seconds."
+status_note "Open Network Topology or Connected Clients; signal refreshes every two seconds."
 printf 'time\tclient\tbssid\trcpi\trssi_dbm\n'
 
 sample_api() {
@@ -109,8 +115,10 @@ sample_api() {
 sample_api &
 sampler_pid=$!
 
+status_action "Running the SNR gradient; watch RCPI/RSSI fall and then recover."
 python3 -m wmdcfg.cli run "$plan_file" --output-root "$output_root"
 
 # Keep traffic and API sampling alive for one more five-second reporting period
 # so the restored baseline is visible before the script exits.
-sleep 6
+status_wait_seconds 6 "showing the restored baseline for one final reporting interval"
+status_pass "RCPI monitor scenario completed and restored the medium."

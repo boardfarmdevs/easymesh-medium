@@ -90,7 +90,7 @@ function renderTelemetry(summary) {
     ['Off-channel / CCA / interference', `${number(summary.drops_offchannel)} / ${number(summary.drops_cca)} / ${number(summary.drops_interference)}`],
     ['PER / no receiver', `${number(summary.drops_per)} / ${number(summary.drops_no_receiver)}`],
     ['Netlink EINVAL / other', `${number(summary.netlink_clone_einval)} / ${number(summary.netlink_other_errors)}`],
-    ['Link evictions / event overruns', `${number(summary.active_link_evictions)} / ${number(summary.event_overruns)}`],
+    ['Link evictions / event-ring overwrites', `${number(summary.active_link_evictions)} / ${number(summary.event_overruns)}`],
     ['Queue delay last / max', `${number(summary.queue_delay_usec_last)} / ${number(summary.queue_delay_usec_max)} µs`]
   ]);
 }
@@ -151,10 +151,10 @@ function renderGraph() {
       drawEdge(svg, positions, link, 'association', `${displayName(link.source)} ↔ ${displayName(link.destination)} · ${link.band} ch ${link.channel} · SNR ${link.last_snr_db} dB`, `${link.band} · ch ${link.channel}`);
     }
     if (associations.length === 0) {
-      $('graph-summary').textContent = `${displayName(state.selected)}: no current client association has been observed in non-multicast traffic.`;
+      $('graph-summary').textContent = `${displayName(state.selected)}: no current client association is reported.`;
     } else if (selected && ['wlan-client', 'iot-client'].includes(selected.role)) {
-      const link = associations[0];
-      $('graph-summary').textContent = `${displayName(link.source)} ↔ ${displayName(link.destination)} · ${link.band} ch ${link.channel} · ${link.frequency_mhz} MHz · SNR ${link.last_snr_db} dB.`;
+      const link = associations[0]; const signal = Number.isFinite(Number(link.last_snr_db)) ? ` · SNR ${link.last_snr_db} dB` : '';
+      $('graph-summary').textContent = `${displayName(link.source)} ↔ ${displayName(link.destination)} · ${link.band} ch ${link.channel} · ${link.frequency_mhz} MHz${signal}${link.evidence ? ` · ${link.evidence}` : ''}.`;
     } else {
       const channels = [...new Set(associations.map((link) => `${link.band} ch ${link.channel}`))].join(', ');
       $('graph-summary').textContent = `${displayName(state.selected)}: ${associations.length} currently associated client(s) · ${channels}.`;

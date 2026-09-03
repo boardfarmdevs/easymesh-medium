@@ -5,8 +5,11 @@ import (
 	"encoding/binary"
 	"net"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/gen/wmediumd/observer/internal/model"
 )
 
 var testMACs = [][6]byte{
@@ -145,6 +148,97 @@ func TestGoldenDecoderSizes(t *testing.T) {
 	}
 	if _, err := decodeEvents(make([]byte, eventSize-1)); err == nil {
 		t.Fatal("short event accepted")
+	}
+	if _, err := decodeAssociation(make([]byte, associationSize-1)); err == nil {
+		t.Fatal("short association accepted")
+	}
+}
+
+func TestResolveAuthoritativeAssociations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "observer.sock")
+	listener := listenUnixPacket(t, path)
+	defer listener.Close()
+	go serveAssociationConnection(t, listener, 17)
+
+	client := NewClient(path)
+	snapshot := model.Snapshot{
+		Daemon: model.Daemon{
+			InstanceID:   "0123456789abcdeffedcba9876543210",
+			Generation:   17,
+			Capabilities: []string{"association_ownership"},
+		},
+		Stations: []model.Station{
+			{MAC: "42:00:00:00:01:00", Role: "wlan-client"},
+			{MAC: "42:00:00:00:02:00", Role: "iot-client"},
+			{MAC: "42:00:00:00:03:00", Role: "extender"},
+		},
+	}
+	if err := client.ResolveAssociations(context.Background(), &snapshot); err != nil {
+		t.Fatalf("ResolveAssociations: %v", err)
+	}
+	if len(snapshot.Associations) != 1 {
+		t.Fatalf("associations = %d, want 1: %+v", len(snapshot.Associations), snapshot.Associations)
+	}
+	association := snapshot.Associations[0]
+	if association.Station != "42:00:00:00:01:00" || association.Owner != "42:00:00:00:03:00" ||
+		association.FrequencyMHz != 5180 || association.Band != "5GHz" || association.Channel != 36 ||
+		association.Evidence != "association response and data" {
+		t.Fatalf("association decoded incorrectly: %+v", association)
+	}
+}
+
+func TestEventRingOverwriteIsInformationalWithoutHistoryGap(t *testing.T) {
+	state, reasons := assessHealth(model.TelemetrySummary{EventOverruns: 42}, false)
+	if state != "ok" || len(reasons) != 1 || !strings.Contains(reasons[0], "observer reports no gap") {
+		t.Fatalf("ring overwrite incorrectly classified: state=%s reasons=%v", state, reasons)
+	}
+	state, _ = assessHealth(model.TelemetrySummary{EventOverruns: 42}, true)
+	if state != "degraded" {
+		t.Fatalf("actual history gap classified as %s, want degraded", state)
+	}
+}
+
+func serveAssociationConnection(t *testing.T, listener *net.UnixListener, generation uint64) {
+	t.Helper()
+	conn, err := listener.AcceptUnix()
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	for {
+		frame := make([]byte, maxFrame)
+		n, readErr := conn.Read(frame)
+		if readErr != nil {
+			return
+		}
+		opcode := binary.BigEndian.Uint16(frame[6:8])
+		if opcode == opHello {
+			if _, err := conn.Write(responseFrame(opcode, generation, infoPayload(capReadOnly|capAssociationOwnership, 3))); err != nil {
+				return
+			}
+			continue
+		}
+		if opcode != opGetAssociation || n != headerSize+associationSize {
+			t.Errorf("unexpected association request opcode=%d length=%d", opcode, n)
+			return
+		}
+		endpoint := frame[headerSize : headerSize+6]
+		if endpoint[4] == 2 {
+			if _, err := conn.Write(responseFrameStatus(opcode, generation, 9, nil)); err != nil {
+				return
+			}
+			continue
+		}
+		payload := make([]byte, associationSize)
+		copy(payload[0:6], endpoint)
+		copy(payload[6:12], testMACs[0][:])
+		copy(payload[12:18], testMACs[2][:])
+		binary.BigEndian.PutUint32(payload[20:24], 5180)
+		binary.BigEndian.PutUint32(payload[24:28], 3)
+		if _, err := conn.Write(responseFrame(opcode, generation, payload)); err != nil {
+			return
+		}
 	}
 }
 

@@ -45,6 +45,27 @@
   // topology edges and makes the same edge visible from either endpoint.
   function currentAssociations(snapshot) {
     const stations = new Map(visibleStations(snapshot).map((station) => [station.mac, station]));
+    if (Array.isArray(snapshot?.associations)) {
+      return snapshot.associations.map((association) => {
+        const candidates = (snapshot?.active_links || []).filter((link) =>
+          Number(link.frequency_mhz || 0) === Number(association.frequency_mhz || 0)
+          && ((link.source === association.station && link.destination === association.owner)
+            || (link.destination === association.station && link.source === association.owner)));
+        const observed = candidates.reduce((current, candidate) => newerLink(candidate, current) ? candidate : current, null);
+        return {
+          ...(observed || {}),
+          source: association.station,
+          destination: association.owner,
+          frequency_mhz: association.frequency_mhz,
+          band: association.band,
+          channel: association.channel,
+          evidence: association.evidence,
+          association: true,
+          authoritative: true,
+        };
+      }).filter((link) => stations.has(link.source) && stations.has(link.destination))
+        .sort((left, right) => left.source.localeCompare(right.source));
+    }
     const newestByClient = new Map();
     for (const link of snapshot?.active_links || []) {
       if (link.multicast || !hasObservedTraffic(link)) continue;

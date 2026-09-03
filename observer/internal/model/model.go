@@ -160,6 +160,19 @@ type ActiveLink struct {
 	LastAccessCategory uint8  `json:"last_access_category"`
 }
 
+// Association is protocol-positive station ownership reported by wmediumd.
+// Station and Owner are provisioned base-radio identities, not transient VIFs.
+type Association struct {
+	Endpoint     string `json:"endpoint"`
+	Station      string `json:"station"`
+	Owner        string `json:"owner"`
+	FrequencyMHz uint32 `json:"frequency_mhz"`
+	Band         string `json:"band"`
+	Channel      int    `json:"channel"`
+	Flags        uint32 `json:"flags"`
+	Evidence     string `json:"evidence"`
+}
+
 func (l ActiveLink) TotalDrops() uint64 {
 	return l.DropsOffChannel + l.DropsCCA + l.DropsInterference + l.DropsPER + l.DropsNoReceiver
 }
@@ -221,6 +234,7 @@ type Snapshot struct {
 	PacketMetrics      PacketMetrics     `json:"packet_metrics"`
 	RadioFrequencies   []RadioFrequency  `json:"radio_frequencies"`
 	ActiveLinks        []ActiveLink      `json:"active_links"`
+	Associations       []Association     `json:"associations"`
 	VIFs               []VIF             `json:"vifs"`
 	Events             []TelemetryEvent  `json:"events"`
 	Health             Health            `json:"health"`

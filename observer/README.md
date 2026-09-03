@@ -14,13 +14,15 @@ The Console shows:
   generated inventory (the service never queries LXD itself);
 - lifetime and windowed frame/byte/type, EAPOL, unicast/multicast, retry,
   delivery, drop and netlink counters;
-- current client-to-infrastructure associations inferred from the freshest
-  observed non-multicast packet path, with band and channel;
+- current client-to-infrastructure associations reported by wmediumd's
+  protocol-positive ownership ledger, with band, channel and evidence source;
+  older daemons fall back to the freshest observed non-multicast packet path;
 - radio/frequency activity and learned VIF-to-radio ownership;
 - raw active source/destination/frequency packet paths with signal, SNR, PER
   and outcome counters, kept as a separate diagnostic view because multicast
   receiver candidates are medium fan-out, not EasyMesh associations;
-- a bounded event timeline and explicit event-ring gap indication;
+- a bounded event timeline, informational ring-wrap accounting and an explicit
+  warning only when the observer actually misses event history;
 - queue depth/delay and factual health warnings; and
 - startup-config and running-binary SHA-256 identities. The root launcher
   publishes a PID-qualified hash manifest in `/run`; this keeps the hardened
@@ -255,5 +257,8 @@ Example pair batch:
 ```
 
 The full pair matrix is potential medium state, not proof of an association.
-Use `active_links` for traffic wmediumd has actually processed, and use the
-EasyMesh UI/event stream to interpret association and steering state.
+`active_links` records traffic wmediumd has processed, including multicast
+fan-out and stale peers, so it is also not authoritative ownership. Patched
+daemons expose `associations`, learned only from ACKed successful association
+responses or valid ACKed infrastructure data. The Console uses that ledger for
+green topology edges and uses active-link counters only to enrich those edges.

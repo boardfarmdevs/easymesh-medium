@@ -29,6 +29,7 @@ const (
 	activeLinkSize       = 164
 	vifSize              = 24
 	eventSize            = 44
+	associationSize      = 28
 	pageEnd              = ^uint32(0)
 	defaultPageLimit     = uint32(128)
 
@@ -45,6 +46,7 @@ const (
 	opDumpActiveLinks      = uint16(11)
 	opDumpVIFs             = uint16(12)
 	opDumpEvents           = uint16(13)
+	opGetAssociation       = uint16(14)
 
 	capRadioPairSNR          = uint32(1 << 0)
 	capAtomicGenerations     = uint32(1 << 1)
@@ -56,6 +58,7 @@ const (
 	capPagedDumps            = uint32(1 << 7)
 	capVIFOwnership          = uint32(1 << 8)
 	capEventRing             = uint32(1 << 9)
+	capAssociationOwnership  = uint32(1 << 10)
 	capPagedLinkDumps        = uint32(1 << 11)
 
 	pageMore = uint32(1 << 0)
@@ -65,7 +68,7 @@ const (
 var statusNames = map[uint32]string{
 	0: "ok", 1: "protocol", 2: "length", 3: "generation",
 	4: "identity", 5: "value", 6: "internal", 7: "frequency",
-	8: "read-only",
+	8: "read-only", 9: "unknown",
 }
 
 var capabilityNames = []struct {
@@ -82,6 +85,7 @@ var capabilityNames = []struct {
 	{capPagedDumps, "paged_dumps"},
 	{capVIFOwnership, "vif_ownership"},
 	{capEventRing, "event_ring"},
+	{capAssociationOwnership, "association_ownership"},
 	{capPagedLinkDumps, "paged_link_dumps"},
 }
 
@@ -147,6 +151,64 @@ func (c *Client) Snapshot(ctx context.Context) (model.Snapshot, error) {
 		}
 	}
 	return model.Snapshot{}, fmt.Errorf("read wmediumd snapshot from %s: %w", c.Path, last)
+}
+
+// ResolveAssociations reads wmediumd's protocol-positive ownership ledger for
+// the client identities already enriched by the inventory loader. Unsupported
+// older daemons retain the browser's legacy packet-path fallback.
+func (c *Client) ResolveAssociations(ctx context.Context, snapshot *model.Snapshot) error {
+	if snapshot == nil || !containsString(snapshot.Daemon.Capabilities, "association_ownership") {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	conn, err := dial(ctx, c.Path, c.Timeout)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	hello, err := requestInfo(conn, opHello)
+	if err != nil {
+		return err
+	}
+	if hello.InstanceID != snapshot.Daemon.InstanceID || hello.Generation != snapshot.Daemon.Generation {
+		return errGenerationChanged
+	}
+	if hello.Capabilities&capAssociationOwnership == 0 {
+		return fmt.Errorf("association ownership disappeared during snapshot")
+	}
+	snapshot.Associations = make([]model.Association, 0)
+	for _, station := range snapshot.Stations {
+		if station.Role != "wlan-client" && station.Role != "iot-client" {
+			continue
+		}
+		address, parseErr := net.ParseMAC(station.MAC)
+		if parseErr != nil || len(address) != 6 {
+			return fmt.Errorf("invalid client base-radio identity %q", station.MAC)
+		}
+		requestPayload := make([]byte, associationSize)
+		copy(requestPayload[0:6], address)
+		generation, response, requestErr := request(conn, opGetAssociation, hello.Generation, requestPayload)
+		if requestErr != nil {
+			var protocolErr *ProtocolError
+			if errors.As(requestErr, &protocolErr) && (protocolErr.Status == 4 || protocolErr.Status == 9) {
+				continue
+			}
+			return requestErr
+		}
+		if generation != hello.Generation {
+			return errGenerationChanged
+		}
+		association, decodeErr := decodeAssociation(response)
+		if decodeErr != nil {
+			return decodeErr
+		}
+		snapshot.Associations = append(snapshot.Associations, association)
+	}
+	sort.Slice(snapshot.Associations, func(i, j int) bool {
+		return snapshot.Associations[i].Station < snapshot.Associations[j].Station
+	})
+	return nil
 }
 
 var errGenerationChanged = errors.New("control generation changed during snapshot")
@@ -309,33 +371,7 @@ func (c *Client) snapshotOnce(ctx context.Context) (model.Snapshot, string, uint
 			latestEvent = events[len(events)-1].Sequence
 		}
 		gap := historyGap
-		reasons := make([]string, 0, 3)
-		state := "ok"
-		if gap {
-			state = "degraded"
-			reasons = append(reasons, "event history gap occurred after observer startup")
-		}
-		if finalSummary.EventOverruns > 0 {
-			if state == "ok" || state == "busy" {
-				state = "degraded"
-			}
-			reasons = append(reasons, "daemon event ring has overwritten older records")
-		}
-		if finalSummary.QueueDepth > 0 {
-			if state == "ok" {
-				state = "busy"
-			}
-			reasons = append(reasons, fmt.Sprintf("queue currently contains %d frame(s)", finalSummary.QueueDepth))
-		}
-		if finalSummary.NetlinkOtherErrors > 0 {
-			if state == "ok" || state == "busy" {
-				state = "degraded"
-			}
-			reasons = append(reasons, "non-EINVAL netlink errors have been observed")
-		}
-		if len(reasons) == 0 {
-			reasons = []string{"no current queue or event-integrity warning"}
-		}
+		state, reasons := assessHealth(finalSummary, gap)
 		oldest := eventPage.OldestEventSequence
 		if oldest == 0 {
 			oldest = radioPage.OldestEventSequence
@@ -620,6 +656,28 @@ func decodeActiveLinks(payload []byte) ([]model.ActiveLink, error) {
 	return result, nil
 }
 
+func decodeAssociation(payload []byte) (model.Association, error) {
+	if len(payload) != associationSize {
+		return model.Association{}, fmt.Errorf("invalid association payload length %d", len(payload))
+	}
+	frequency := binary.BigEndian.Uint32(payload[20:24])
+	flags := binary.BigEndian.Uint32(payload[24:28])
+	band, channel := model.BandAndChannel(frequency)
+	evidence := "unknown"
+	if flags&1 != 0 && flags&2 != 0 {
+		evidence = "association response and data"
+	} else if flags&1 != 0 {
+		evidence = "association response"
+	} else if flags&2 != 0 {
+		evidence = "infrastructure data"
+	}
+	return model.Association{
+		Endpoint: macText(payload[0:6]), Station: macText(payload[6:12]),
+		Owner: macText(payload[12:18]), FrequencyMHz: frequency,
+		Band: band, Channel: channel, Flags: flags, Evidence: evidence,
+	}, nil
+}
+
 func decodeVIFs(payload []byte) ([]model.VIF, error) {
 	if len(payload)%vifSize != 0 {
 		return nil, fmt.Errorf("invalid VIF payload length %d", len(payload))
@@ -707,6 +765,39 @@ func capabilityList(mask uint32) []string {
 		}
 	}
 	return result
+}
+func containsString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+func assessHealth(summary model.TelemetrySummary, eventHistoryGap bool) (string, []string) {
+	state := "ok"
+	reasons := make([]string, 0, 3)
+	if eventHistoryGap {
+		state = "degraded"
+		reasons = append(reasons, "event history gap occurred after observer startup")
+	}
+	if summary.EventOverruns > 0 && !eventHistoryGap {
+		reasons = append(reasons, fmt.Sprintf("bounded daemon event history has overwritten %d older record(s); observer reports no gap", summary.EventOverruns))
+	}
+	if summary.QueueDepth > 0 {
+		if state == "ok" {
+			state = "busy"
+		}
+		reasons = append(reasons, fmt.Sprintf("queue currently contains %d frame(s)", summary.QueueDepth))
+	}
+	if summary.NetlinkOtherErrors > 0 {
+		state = "degraded"
+		reasons = append(reasons, "non-EINVAL netlink errors have been observed")
+	}
+	if len(reasons) == 0 {
+		reasons = []string{"no current queue or event-integrity warning"}
+	}
+	return state, reasons
 }
 func max64(a, b uint64) uint64 {
 	if a > b {
