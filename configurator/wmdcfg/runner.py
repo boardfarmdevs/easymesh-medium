@@ -6,6 +6,7 @@ import os
 import signal
 import time
 from pathlib import Path
+from typing import Callable
 
 from .actuator import ActuatorError, ControlClient
 from .kernel_actuator import KernelMediumClient
@@ -34,15 +35,60 @@ class Runner:
         backend: str = "userspace",
         kernel_root: str = "/sys/kernel/debug/ieee80211",
         noise_floor_dbm: int = -91,
+        run_id: str | None = None,
+        event_callback: Callable[[dict], None] | None = None,
+        clock_interval_ms: int = 250,
     ):
         self.plan = plan
         self.socket_path = socket_path
         timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        self.run_dir = output_root / f"{timestamp}-{plan['scenario']}-{os.getpid()}"
+        self.run_id = run_id or f"{timestamp}-{plan['scenario']}-{os.getpid()}"
+        self.run_dir = output_root / self.run_id
         self.stop_requested = False
         self.backend = backend
         self.kernel_root = kernel_root
         self.noise_floor_dbm = noise_floor_dbm
+        self.event_callback = event_callback
+        self.clock_interval_ms = max(100, int(clock_interval_ms))
+        self._event_sequence = 0
+
+    def _emit(self, kind: str, world_time_ms: int, **payload) -> None:
+        """Publish one typed event to an optional live observer.
+
+        The callback is deliberately synchronous: the runner remains the
+        authority for ordering, and a consumer never sees a generation before
+        it has actually been applied and read back.
+        """
+        if self.event_callback is None:
+            return
+        self._event_sequence += 1
+        self.event_callback(
+            {
+                "schema": "easymesh.room-demo.event.v1",
+                "run_id": self.run_id,
+                "sequence": self._event_sequence,
+                "recorded_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+                "world_time_ms": max(0, int(world_time_ms)),
+                "kind": kind,
+                "payload": payload,
+            }
+        )
+
+    def _wait_until(self, deadline: float, execution_started: float) -> None:
+        """Wait on the monotonic scenario clock while publishing live ticks."""
+        interval = self.clock_interval_ms / 1000
+        while True:
+            now = time.monotonic()
+            remaining = deadline - now
+            if remaining <= 0:
+                break
+            if self.stop_requested:
+                raise InterruptedError("run interrupted")
+            world_time_ms = min(
+                self.plan["duration_ms"], round((now - execution_started) * 1000)
+            )
+            self._emit("scenario.clock", world_time_ms)
+            time.sleep(min(remaining, interval))
 
     def _client(self):
         if self.backend == "userspace":
@@ -109,7 +155,9 @@ class Runner:
                 )
 
     def execute(self) -> Path:
-        self.run_dir.mkdir(parents=True, exist_ok=False)
+        # A higher-level conductor may create this unique directory first so
+        # preflight events and immutable inputs are retained before RF changes.
+        self.run_dir.mkdir(parents=True, exist_ok=True)
         (self.run_dir / "event-plan.json").write_text(
             json.dumps(self.plan, indent=2, sort_keys=True) + "\n"
         )
@@ -194,18 +242,26 @@ class Runner:
                 initial_health = mesh_health(expected_agents, expected_clients)
                 _append(health_log, {"event": "preflight", **initial_health})
                 self._require_healthy(initial_health, "preflight")
+                self._emit("runner.preflight", 0, health=initial_health)
                 execution_started = time.monotonic()
+                self._emit(
+                    "scenario.started",
+                    0,
+                    scenario=self.plan["scenario"],
+                    duration_ms=self.plan["duration_ms"],
+                    tick_ms=self.plan.get("tick_ms"),
+                )
                 generation = status.generation
                 try:
                     for event in self.plan["events"]:
                         deadline = execution_started + event["time_ms"] / 1000
-                        while True:
-                            remaining = deadline - time.monotonic()
-                            if remaining <= 0:
-                                break
-                            if self.stop_requested:
-                                raise InterruptedError("run interrupted")
-                            time.sleep(min(remaining, 0.1))
+                        self._wait_until(deadline, execution_started)
+                        if event.get("marks"):
+                            self._emit(
+                                "scenario.mark",
+                                event["time_ms"],
+                                marks=event["marks"],
+                            )
                         if not event["updates"]:
                             _append(event_log, {"event": "mark", **event})
                             continue
@@ -259,13 +315,26 @@ class Runner:
                                 "observation": snapshot(self.plan),
                             },
                         )
+                        self._emit(
+                            "scenario.generation",
+                            event["time_ms"],
+                            plan_generation=event["generation"],
+                            daemon_generation=generation,
+                            updates=applied,
+                        )
                     end_deadline = execution_started + self.plan["duration_ms"] / 1000
-                    while time.monotonic() < end_deadline:
-                        if self.stop_requested:
-                            raise InterruptedError("run interrupted")
-                        time.sleep(min(end_deadline - time.monotonic(), 0.1))
+                    self._wait_until(end_deadline, execution_started)
                 finally:
                     if restore_updates:
+                        current_world_time = (
+                            min(
+                                self.plan["duration_ms"],
+                                round((time.monotonic() - execution_started) * 1000),
+                            )
+                            if execution_started is not None
+                            else 0
+                        )
+                        self._emit("rf.restore.started", current_world_time)
                         generation, _ = self._apply_generation(
                             client,
                             generation,
@@ -293,11 +362,22 @@ class Runner:
                             {"event": "restore", "daemon_generation": generation,
                              "verified": restored, "updates": restore_updates},
                         )
+                        self._emit(
+                            "rf.restore.completed",
+                            current_world_time,
+                            daemon_generation=generation,
+                            verified=restored,
+                        )
                         if not restored:
                             raise ActuatorError("baseline restoration readback failed")
                 final_health = mesh_health(expected_agents, expected_clients)
                 _append(health_log, {"event": "postflight", **final_health})
                 self._require_healthy(final_health, "postflight")
+                self._emit(
+                    "runner.postflight",
+                    self.plan["duration_ms"],
+                    health=final_health,
+                )
                 outcome = "passed"
         except Exception as error:
             outcome = "failed"
@@ -320,5 +400,20 @@ class Runner:
             }
             (self.run_dir / "summary.json").write_text(
                 json.dumps(summary, indent=2, sort_keys=True) + "\n"
+            )
+            self._emit(
+                "scenario.completed",
+                (
+                    min(
+                        self.plan["duration_ms"],
+                        round((time.monotonic() - execution_started) * 1000),
+                    )
+                    if execution_started is not None
+                    else 0
+                ),
+                outcome=outcome,
+                restored=restored,
+                error=error_text,
+                run_directory=str(self.run_dir),
             )
         return self.run_dir

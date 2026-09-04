@@ -339,7 +339,11 @@ def compile_world(layout: dict[str, Any], mobility: dict[str, Any]) -> dict[str,
         "generations": generations,
     }
     result["golden_sha256"] = _hash(result)
-    return result
+    # Keep the serialized artifact byte-stable across jq/Python versions.
+    # Some serializers preserve an exact float as ``5.0`` while others emit
+    # the equivalent JSON number as ``5``.  Hashing already normalizes this
+    # distinction; return the same canonical numeric shape to the writer.
+    return _normalize_numbers(result)
 
 
 def verify_world_plan(plan: dict[str, Any]) -> None:

@@ -165,6 +165,33 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(FakeControlClient.last.matrix[(SOURCE, DESTINATION)], 40)
         self.assertGreaterEqual(FakeControlClient.last.generation, 3)
 
+    def test_live_events_follow_applied_state_and_restoration(self):
+        runner, _ = self._execute(False)
+        events = []
+        runner.event_callback = events.append
+        runner.clock_interval_ms = 100
+        runner.execute()
+        kinds = [item["kind"] for item in events]
+        self.assertEqual(
+            kinds,
+            [
+                "runner.preflight",
+                "scenario.started",
+                "scenario.generation",
+                "rf.restore.started",
+                "rf.restore.completed",
+                "runner.postflight",
+                "scenario.completed",
+            ],
+        )
+        self.assertEqual(
+            [item["sequence"] for item in events],
+            list(range(1, len(events) + 1)),
+        )
+        generation = next(item for item in events if item["kind"] == "scenario.generation")
+        self.assertEqual(generation["payload"]["updates"][0]["value"], 10)
+        self.assertTrue(events[-1]["payload"]["restored"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -18,6 +18,37 @@ Link colours use the selected band's SNR: red is weak, amber is intermediate,
 and green is strong. The renderer is a visualization of a compiled world; it
 does not modify or execute the scenario.
 
+## Interactive world viewer
+
+The browser viewer in `viewer/index.html` animates every checked-in golden
+world at its real scenario rate. It interpolates station movement between
+generations, colours each station's strongest serving link by SNR on the
+selected band, draws movement trails, and can show the simulated backhaul.
+Clicking a node lists its current peers with distance, wall loss, and
+bidirectional SNR for 2.4, 5, and 6 GHz.
+
+The public viewer is published as a static site from the repository's
+`gh-pages` branch:
+
+<https://boardfarmdevs.github.io/meta-cmf-bananapi-vcpe/viewer/>
+
+Select a world in the sidebar or address one directly, for example:
+
+<https://boardfarmdevs.github.io/meta-cmf-bananapi-vcpe/viewer/?world=home-a-slow-walk-ten>
+
+For local use, serve the `worlds/` directory over HTTP so the viewer can fetch
+the golden JSON files:
+
+```sh
+cd gen/wmediumd/configurator/worlds
+python3 -m http.server 8000
+```
+
+Then open <http://localhost:8000/viewer/>. Drag to orbit, shift-drag to pan,
+use the wheel to zoom, press space to play or pause, and click a node to inspect
+its links. Opening `index.html` directly also works with the file picker. The
+viewer loads three.js from cdnjs and therefore needs network access.
+
 ## Install the renderer dependencies
 
 Run this once in a Python virtual environment:

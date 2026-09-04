@@ -1,0 +1,30 @@
+{
+  "schema": "wmdcfg.mobility.v1",
+  "name": "private-client-room-walk",
+  "tags": ["immersive-demo", "hero-client", "clients-20", "private-ssid"],
+  "duration_ms": 240000,
+  "tick_ms": 5000,
+  "seed": 1904,
+  "nodes": [
+    {
+      "role": "sta_mobile_01",
+      "path": [
+        {"time_ms": 0, "position": [3, 2]},
+        {"time_ms": 30000, "position": [3, 2]},
+        {"time_ms": 90000, "position": [9, 3]},
+        {"time_ms": 140000, "position": [13, 6]},
+        {"time_ms": 180000, "position": [17, 10]},
+        {"time_ms": 240000, "position": [18, 12]}
+      ]
+    },
+    {"role": "sta_mobile_02", "position": [19, 3]},
+    {"role": "sta_mobile_03", "position": [2, 13]},
+    {"role": "sta_mobile_04", "position": [18, 13]},
+    {"role": "sta_mobile_05", "position": [3, 5]},
+    {"role": "sta_mobile_06", "position": [17, 9]},
+    {"role": "sta_mobile_07", "position": [6, 1]},
+    {"role": "sta_mobile_08", "position": [14, 13]},
+    {"role": "sta_mobile_09", "position": [9, 6]},
+    {"role": "sta_mobile_10", "position": [11, 8]}
+  ]
+}

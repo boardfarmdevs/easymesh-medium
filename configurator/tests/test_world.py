@@ -61,6 +61,7 @@ class WorldTests(unittest.TestCase):
         verify_world_plan(first)
         self.assertEqual(first["counts"], {"agents": 2, "stations": 1})
         self.assertEqual(first["generations"][1]["positions"]["sta_01"], [5.0, 2.0])
+        self.assertIsInstance(first["generations"][1]["positions"]["sta_01"][0], int)
         self.assertFalse(first["generations"][2]["present"]["sta_01"])
 
     def test_wall_crossing_applies_exact_loss(self):
