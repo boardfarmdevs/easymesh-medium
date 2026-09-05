@@ -25,12 +25,21 @@ world at its real scenario rate. It interpolates station movement between
 generations, colours each station's strongest serving link by SNR on the
 selected band, draws movement trails, and can show the simulated backhaul.
 Clicking a node lists its current peers with distance, wall loss, and
-bidirectional SNR for 2.4, 5, and 6 GHz.
+bidirectional SNR for 2.4, 5, and 6 GHz. Its preview-only Interact mode can
+drag a client, move it to a clicked destination at a selected speed, show
+crossed walls and predicted links, or preview disappearance. These operations
+are local visualization overrides and do not change wmediumd.
 
 The public viewer is published as a static site from the repository's
 `gh-pages` branch:
 
 <https://boardfarmdevs.github.io/meta-cmf-bananapi-vcpe/viewer/>
+
+The room-focused, explicitly disconnected sandbox starts directly in
+interactive mode. It calculates the same browser-side geometry previews but
+cannot change a live lab:
+
+<https://boardfarmdevs.github.io/meta-cmf-bananapi-vcpe/viewer/?mode=no-connect&world=home-a-private-client-room-walk>
 
 Select a world in the sidebar or address one directly, for example:
 
@@ -44,10 +53,12 @@ cd gen/wmediumd/configurator/worlds
 python3 -m http.server 8000
 ```
 
-Then open <http://localhost:8000/viewer/>. Drag to orbit, shift-drag to pan,
-use the wheel to zoom, press space to play or pause, and click a node to inspect
-its links. Opening `index.html` directly also works with the file picker. The
-viewer loads three.js from cdnjs and therefore needs network access.
+Then open <http://localhost:8000/viewer/>. In Camera mode, drag to orbit,
+shift-drag to pan, use the wheel to zoom, press space to play or pause, and
+click a node to inspect its links. Select Interact to drag a client, or
+right-click it to choose destination movement and presence controls. Opening
+`index.html` directly also works with the file picker. Three.js is bundled, so
+the viewer does not require a public CDN.
 
 ## Install the renderer dependencies
 

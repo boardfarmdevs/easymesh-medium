@@ -2,16 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 from pathlib import Path
-import random
 import re
 from typing import Any
 
+from .geometry import BANDS, directed_link, point, position_at_time
 from .model import ScenarioError
 
 
-BANDS = ("2.4", "5", "6")
 KINDS = {"station", "fronthaul_ap"}
 
 
@@ -35,32 +33,6 @@ def _canonical(value: Any) -> bytes:
 
 def _hash(value: Any) -> str:
     return hashlib.sha256(_canonical(value)).hexdigest()
-
-
-def _point(value: Any, label: str) -> tuple[float, float]:
-    if not isinstance(value, list) or len(value) != 2:
-        raise ScenarioError(f"{label} must be [x, y]")
-    point = (float(value[0]), float(value[1]))
-    if not all(math.isfinite(item) for item in point):
-        raise ScenarioError(f"{label} must contain finite coordinates")
-    return point
-
-
-def _orientation(a, b, c) -> float:
-    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
-
-
-def _segments_cross(a, b, c, d) -> bool:
-    # Proper crossings are sufficient for the pseudo-world wall model. Nodes
-    # placed exactly on a wall are rejected by review rather than assigned an
-    # ambiguous half-wall loss.
-    ab_c = _orientation(a, b, c)
-    ab_d = _orientation(a, b, d)
-    cd_a = _orientation(c, d, a)
-    cd_b = _orientation(c, d, b)
-    return (ab_c > 0 > ab_d or ab_d > 0 > ab_c) and (
-        cd_a > 0 > cd_b or cd_b > 0 > cd_a
-    )
 
 
 def _validate_layout(layout: dict[str, Any]) -> None:
@@ -96,15 +68,15 @@ def _validate_layout(layout: dict[str, Any]) -> None:
         roles.add(role)
         if node.get("kind") not in KINDS:
             raise ScenarioError(f"role {role} has unsupported kind {node.get('kind')!r}")
-        x, y = _point(node.get("position"), f"role {role} position")
+        x, y = point(node.get("position"), f"role {role} position")
         if not (0 <= x <= width and 0 <= y <= height):
             raise ScenarioError(f"role {role} lies outside the world")
 
     if not any(node.get("kind") == "fronthaul_ap" for node in layout.get("nodes", [])):
         raise ScenarioError("layout defines no agents")
     for index, wall in enumerate(layout.get("walls", [])):
-        start = _point(wall.get("start"), f"wall {index} start")
-        end = _point(wall.get("end"), f"wall {index} end")
+        start = point(wall.get("start"), f"wall {index} start")
+        end = point(wall.get("end"), f"wall {index} end")
         if start == end:
             raise ScenarioError(f"wall {index} has zero length")
         if not all(0 <= point[0] <= width and 0 <= point[1] <= height for point in (start, end)):
@@ -139,7 +111,7 @@ def _validate_mobility(mobility: dict[str, Any]) -> None:
             times = []
             for waypoint in path:
                 time_ms = int(waypoint.get("time_ms", -1))
-                _point(waypoint.get("position"), f"role {role} waypoint")
+                point(waypoint.get("position"), f"role {role} waypoint")
                 times.append(time_ms)
             if times != sorted(set(times)) or times[0] != 0 or times[-1] > duration:
                 raise ScenarioError(
@@ -148,7 +120,7 @@ def _validate_mobility(mobility: dict[str, Any]) -> None:
         elif "position" not in node:
             raise ScenarioError(f"role {role} requires position or path")
         else:
-            _point(node["position"], f"role {role} position")
+            point(node["position"], f"role {role} position")
         intervals = node.get("presence", [[0, duration]])
         previous_end = -1
         for interval in intervals:
@@ -181,92 +153,11 @@ def _merge_nodes(layout: dict[str, Any], mobility: dict[str, Any]) -> list[dict[
     return [nodes[role] for role in sorted(nodes)]
 
 
-def _position(node: dict[str, Any], time_ms: int) -> tuple[float, float]:
-    path = node.get("path")
-    if not path:
-        return _point(node["position"], f"role {node['role']} position")
-    if time_ms <= int(path[0]["time_ms"]):
-        return _point(path[0]["position"], "waypoint")
-    for left, right in zip(path, path[1:]):
-        start = int(left["time_ms"])
-        end = int(right["time_ms"])
-        if start <= time_ms <= end:
-            a = _point(left["position"], "waypoint")
-            b = _point(right["position"], "waypoint")
-            fraction = (time_ms - start) / (end - start)
-            return (a[0] + (b[0] - a[0]) * fraction, a[1] + (b[1] - a[1]) * fraction)
-    return _point(path[-1]["position"], "waypoint")
-
-
 def _present(node: dict[str, Any], time_ms: int, duration_ms: int) -> bool:
     return any(
         int(start) <= time_ms < int(end)
         for start, end in node.get("presence", [[0, duration_ms]])
     )
-
-
-def _wall_loss(a, b, walls: list[dict[str, Any]]) -> float:
-    result = 0.0
-    for wall in walls:
-        if _segments_cross(a, b, _point(wall["start"], "wall"), _point(wall["end"], "wall")):
-            result += float(wall["loss_db"])
-    return result
-
-
-def _shadow(seed: int, time_ms: int, source: str, destination: str, band: str, sigma: float) -> float:
-    if sigma == 0:
-        return 0.0
-    pair = sorted((source, destination))
-    material = f"{seed}:{time_ms}:{pair[0]}:{pair[1]}:{band}".encode()
-    local_seed = int.from_bytes(hashlib.sha256(material).digest()[:8], "big")
-    return random.Random(local_seed).gauss(0, sigma)
-
-
-def _link(
-    source: dict[str, Any],
-    destination: dict[str, Any],
-    positions: dict[str, tuple[float, float]],
-    present: dict[str, bool],
-    layout: dict[str, Any],
-    mobility: dict[str, Any],
-    time_ms: int,
-    link_class: str,
-) -> dict[str, Any]:
-    propagation = layout["propagation"]
-    a = positions[source["role"]]
-    b = positions[destination["role"]]
-    distance = math.dist(a, b)
-    wall_loss = _wall_loss(a, b, layout.get("walls", []))
-    minimum = int(propagation.get("minimum_snr_db", -20))
-    maximum = int(propagation.get("maximum_snr_db", 60))
-    reference_distance = float(propagation["reference_distance_m"])
-    exponent = float(propagation["path_loss_exponent"])
-    sigma = float(propagation.get("shadowing_stddev_db", 0))
-    seed = int(mobility.get("seed", 0))
-    values = {}
-    for band in BANDS:
-        if not present[source["role"]] or not present[destination["role"]]:
-            value = minimum
-        else:
-            path_loss = 10 * exponent * math.log10(max(distance, reference_distance) / reference_distance)
-            source_gain = float((source.get("tx_gain_db_by_band") or {}).get(band, 0))
-            value = round(
-                float(propagation["reference_snr_db_by_band"][band])
-                - path_loss
-                - wall_loss
-                + source_gain
-                + _shadow(seed, time_ms, source["role"], destination["role"], band, sigma)
-            )
-            value = max(minimum, min(maximum, value))
-        values[band] = value
-    return {
-        "link_class": link_class,
-        "source_role": source["role"],
-        "destination_role": destination["role"],
-        "distance_m": round(distance, 3),
-        "wall_loss_db": wall_loss,
-        "snr_db_by_band": values,
-    }
 
 
 def compile_world(layout: dict[str, Any], mobility: dict[str, Any]) -> dict[str, Any]:
@@ -284,7 +175,7 @@ def compile_world(layout: dict[str, Any], mobility: dict[str, Any]) -> dict[str,
 
     generations = []
     for time_ms in range(0, duration, tick):
-        positions = {item["role"]: _position(item, time_ms) for item in nodes}
+        positions = {item["role"]: position_at_time(item, time_ms) for item in nodes}
         for role, (x, y) in positions.items():
             if not (0 <= x <= width and 0 <= y <= height):
                 raise ScenarioError(f"role {role} leaves the world at {time_ms}ms")
@@ -293,18 +184,18 @@ def compile_world(layout: dict[str, Any], mobility: dict[str, Any]) -> dict[str,
         for station in stations:
             for agent in agents:
                 links.append(
-                    _link(station, agent, positions, presence, layout, mobility, time_ms, "fronthaul")
+                    directed_link(station, agent, positions, presence, layout, mobility, time_ms, "fronthaul")
                 )
                 links.append(
-                    _link(agent, station, positions, presence, layout, mobility, time_ms, "fronthaul")
+                    directed_link(agent, station, positions, presence, layout, mobility, time_ms, "fronthaul")
                 )
         for index, left in enumerate(agents):
             for right in agents[index + 1 :]:
                 links.append(
-                    _link(left, right, positions, presence, layout, mobility, time_ms, "backhaul")
+                    directed_link(left, right, positions, presence, layout, mobility, time_ms, "backhaul")
                 )
                 links.append(
-                    _link(right, left, positions, presence, layout, mobility, time_ms, "backhaul")
+                    directed_link(right, left, positions, presence, layout, mobility, time_ms, "backhaul")
                 )
         generations.append(
             {

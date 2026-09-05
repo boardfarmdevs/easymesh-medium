@@ -33,6 +33,13 @@
     background: #faf8f3;
   }
   h1 { font-size: 17px; margin: 0 0 2px; font-weight: 600; }
+  .manual-link { display: inline-block; margin: 8px 0; color: var(--extender); font-weight: 600; }
+  #viewerManual { width: min(1160px, calc(100vw - 28px)); height: calc(100dvh - 28px); max-height: 960px; padding: 0; border: 1px solid var(--rule); border-radius: 10px; color: var(--ink); background: #faf8f3; }
+  #viewerManual::backdrop { background: rgba(24, 24, 30, .6); }
+  #viewerManual[open] { display: flex; flex-direction: column; }
+  #viewerManual header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--rule); }
+  #viewerManual header a { color: var(--extender); }
+  #viewerManual iframe { width: 100%; flex: 1; min-height: 0; border: 0; }
   .sub { color: var(--muted); font-size: 12px; margin-bottom: 18px; }
   label.field { display: block; margin: 12px 0 4px; font-size: 12px; color: var(--muted); }
   select, input[type=file] { width: 100%; font: inherit; padding: 5px 6px; border: 1px solid var(--rule); border-radius: 4px; background: #fff; color: var(--ink); }
@@ -90,10 +97,45 @@
   .line-key { display:inline-block; width:24px; height:0; vertical-align:4px; margin-right:5px; border-top:3px solid #05a9cf; }
   .line-key.dashed { border-top:2px dashed #777; }
   .line-key.target { border-color:#f0ad00; }
+  .line-key.backhaul { border-color:#2468a8; border-top-width:4px; }
+  .interaction-card { border-color: #b9a4ca; background: #fbf8ff; }
+  .preview-badge { display: inline-block; padding: 2px 7px; border-radius: 999px; background: #6f3e8e; color: #fff; font-size: 10px; font-weight: 750; letter-spacing: .05em; }
+  .preview-badge.live-rf { background: #176b48; }
+  .preview-badge.observer { background: #8a6220; }
+  .interaction-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
+  .interaction-actions button { padding: 4px 7px; }
+  #interactionSummary { margin-top: 7px; font-size: 12px; }
+  #interactionSummary b { color: #5d3278; }
+  #interactionHelp { margin-top: 6px; color: var(--muted); font-size: 11px; }
+  .speed-row { display: grid; grid-template-columns: 1fr 108px; gap: 8px; align-items: center; margin-top: 8px; }
+  .speed-row select { width: 100%; }
   main { position: relative; overflow: hidden; }
   canvas { display: block; }
   #hint { position: absolute; right: 12px; bottom: 10px; font-size: 11px; color: var(--muted); }
   #err { position: absolute; left: 50%; top: 40%; transform: translate(-50%,-50%); max-width: 480px; background: #fff; border: 1px solid var(--rule); padding: 16px 20px; display: none; }
+  #spatialHud {
+    position: absolute; display: none; pointer-events: none; z-index: 20;
+    top: 14px; right: 14px; left: auto; width: 264px;
+    max-width: calc(100% - 28px); max-height: calc(100% - 48px);
+    overflow-y: auto; padding: 8px 10px; border-radius: 7px;
+    color: #fff; background: rgba(38, 31, 43, .92); box-shadow: 0 4px 18px rgba(0,0,0,.22);
+    font-size: 11px; line-height: 1.35;
+  }
+  #spatialHud .hud-title { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 700; }
+  #spatialHud .hud-grid { display: grid; grid-template-columns: 1fr auto; gap: 1px 8px; margin-top: 5px; }
+  #spatialHud .hud-grid b { text-align: right; font-variant-numeric: tabular-nums; }
+  #spatialHud .candidate { margin-top: 4px; color: #dfcfeb; overflow-wrap: anywhere; }
+  #roleMenu {
+    position: absolute; display: none; z-index: 30; min-width: 172px;
+    border: 1px solid #94869c; border-radius: 6px; background: #fff;
+    box-shadow: 0 5px 22px rgba(0,0,0,.22); padding: 5px;
+  }
+  #roleMenu strong { display: block; padding: 4px 7px 5px; font-size: 12px; }
+  #roleMenu button { display: block; width: 100%; border: 0; text-align: left; padding: 5px 7px; }
+  #roleMenu button:hover { background: #eee7f3; }
+  main.interact canvas { cursor: crosshair; }
+  main.interact.dragging canvas { cursor: grabbing; }
+  main.awaiting-destination canvas { cursor: copy; }
   @media (max-width: 760px) {
     body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
     aside { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 45vh; }
@@ -103,6 +145,7 @@
 <body>
 <aside>
   <h1 id="viewerTitle">wmediumd world viewer</h1>
+  <a class="manual-link" id="openManual" href="manual.html" aria-haspopup="dialog">Manual &amp; Help</a>
   <div class="sub" id="worldmeta">Loading…</div>
   <div id="liveStatus" role="status" aria-live="polite"></div>
   <div class="sub" id="liveRun"></div>
@@ -142,9 +185,37 @@
 
   <div style="margin-top:12px">
     <label class="check"><input type="checkbox" id="showLinks" checked> Strongest simulated link per station</label>
-    <label class="check"><input type="checkbox" id="showBackhaul"> Backhaul links</label>
+    <label class="check"><input type="checkbox" id="showBackhaul" checked> Actual mesh backhaul</label>
     <label class="check"><input type="checkbox" id="showTrails" checked> Mobile trails up to now</label>
     <label class="check"><input type="checkbox" id="showSta" checked> Station names</label>
+  </div>
+
+  <div class="card interaction-card" id="interactionCard">
+    <h2>Interactive room <span class="preview-badge" id="interactionBadge">PREVIEW ONLY</span></h2>
+    <div class="seg" role="group" aria-label="pointer mode">
+      <button id="cameraMode" aria-pressed="true">Camera</button>
+      <button id="interactMode">Interact</button>
+    </div>
+    <div class="speed-row">
+      <span>Destination speed</span>
+      <select id="moveSpeed" aria-label="destination movement speed">
+        <option value="0.6">0.6 m/s stroll</option>
+        <option value="1.4" selected>1.4 m/s walk</option>
+        <option value="3">3.0 m/s run</option>
+      </select>
+    </div>
+    <div id="interactionSummary">Select <b>Interact</b>, then drag a client or extender.</div>
+    <div class="interaction-actions">
+      <button id="moveSelected" disabled>Move to…</button>
+      <button id="presenceSelected" disabled>Disappear</button>
+      <button id="pauseMovement" disabled>Pause walk</button>
+      <button id="cancelMovement" disabled>Cancel walk</button>
+      <button id="resetSelected" disabled>Reset role</button>
+      <button id="resetAll">Reset all</button>
+      <button id="recordInteraction">Start recording</button>
+      <button id="downloadRecording" disabled>Download world</button>
+    </div>
+    <div id="interactionHelp">Drag clients or any mesh node; right-click for movement controls. Client and extender RF-presence controls remain available, while the co-located controller/agent stays present. Static-world changes remain a browser preview.</div>
   </div>
 
   <hr>
@@ -162,16 +233,33 @@
     Links: red weak → amber → green strong. Absent roles are shown hollow.<br>
     <span class="line-key dashed"></span>scenario-best
     <span class="line-key"></span>actual association
-    <span class="line-key target"></span>optimizer target<br>
+    <span class="line-key target"></span>optimizer target
+    <span class="line-key backhaul"></span>actual backhaul<br>
     Labels: <b>gw</b> gateway, <b>e1</b> extender_1, <b>m01</b> sta_mobile_01, <b>s01</b> sta_static_01.
   </div>
 </aside>
 <main>
   <div id="hint">drag to orbit · wheel to zoom · shift-drag to pan · space plays</div>
+  <div id="spatialHud"></div>
+  <div id="roleMenu">
+    <strong id="roleMenuTitle">Client</strong>
+    <button data-role-action="move">Move to destination…</button>
+    <button data-role-action="presence">Disappear</button>
+    <button data-role-action="reset">Reset role</button>
+  </div>
   <div id="err"></div>
 </main>
 
+<dialog id="viewerManual" aria-labelledby="manualTitle">
+  <header>
+    <strong id="manualTitle">Room viewer manual</strong>
+    <div class="row"><a href="manual.html" target="_blank" rel="noopener">Open separately</a><button id="closeManual" type="button" autofocus>Close</button></div>
+  </header>
+  <iframe id="manualFrame" title="Searchable room viewer manual"></iframe>
+</dialog>
+<script src="manual-dialog.js"></script>
 <script src="vendor/three.min.js"></script>
+<script src="interaction-model.js"></script>
 <script>
 (function () {
   'use strict';
@@ -193,6 +281,8 @@
   const $ = (s) => document.querySelector(s);
   const err = (msg) => { const e = $('#err'); e.style.display = 'block'; e.textContent = msg; };
   if (typeof THREE === 'undefined') { err('The bundled three.js renderer failed to load.'); return; }
+  if (typeof RoomInteractionModel === 'undefined') { err('The interactive room model failed to load.'); return; }
+  const interactionModel = RoomInteractionModel;
 
   // ---- state ---------------------------------------------------------------
   let world = null;          // parsed world plan
@@ -202,7 +292,9 @@
   let selected = null;       // role name
   let world3d = null;        // three objects for the current world
   const requestedMode = new URLSearchParams(location.search).get('mode');
-  const liveMode = requestedMode === 'live';
+  const noConnectMode = requestedMode === 'no-connect';
+  const interactiveLiveMode = requestedMode === 'interactive';
+  const liveMode = requestedMode === 'live' || interactiveLiveMode;
   const replayMode = requestedMode === 'replay';
   let liveSource = null;
   let liveTerminal = false;
@@ -211,6 +303,35 @@
   let storyState = 'Waiting for the conductor…';
   let recentEvents = [], replayEvents = [], replayIndex = 0, replayAppliedTime = -1;
   let actionPulseUntil = 0;
+  const interaction = {
+    mode: 'camera',
+    overrides: {},
+    previewPositions: {},
+    drag: null,
+    movement: null,
+    awaitingDestination: null,
+    menuRole: null,
+    hudRole: null,
+    apiEnabled: false,
+    presenceRoles: [],
+    movableRoles: [],
+    leaseToken: null,
+    leaseOwner: null,
+    leaseTimer: null,
+    revision: 0,
+    initialRoles: {},
+    clientSequence: 0,
+    acknowledgedSequence: 0,
+    requestChain: Promise.resolve(),
+    pendingPosition: null,
+    positionTimer: null,
+    lastPositionSentAt: 0,
+    recording: {active: false, export_ready: false},
+    operatorToken: new URLSearchParams(location.hash.slice(1)).get('operator'),
+  };
+  if (interaction.operatorToken) {
+    history.replaceState(null, '', location.pathname + location.search);
+  }
   if (liveMode || replayMode) document.body.classList.add('live-presentation');
 
   // ---- scene ---------------------------------------------------------------
@@ -236,8 +357,46 @@
   (function bindOrbit() {
     let drag = null;
     const el = renderer.domElement;
-    el.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY, moved: false, pan: e.shiftKey || e.button === 2 }; el.setPointerCapture(e.pointerId); });
+    el.addEventListener('pointerdown', async (e) => {
+      hideRoleMenu();
+      if (e.button !== 0) return;
+      if (interaction.mode === 'interact') {
+        if (interaction.awaitingDestination) {
+          const point = floorPoint(e);
+          if (point) startDestinationMovement(interaction.awaitingDestination, point);
+          return;
+        }
+        const role = pickedRole(e);
+        if (role && canMoveRole(role)) {
+          if (interactiveLiveMode && interaction.movement) {
+            await controlMovement('cancel');
+          }
+          selected = role;
+          interaction.hudRole = role;
+          interaction.drag = {
+            role,
+            pointerId: e.pointerId,
+            start: effectivePosition(role, frameAt(tMs)).slice(),
+          };
+          interaction.movement = null;
+          main.classList.add('dragging');
+          el.setPointerCapture(e.pointerId);
+          update();
+          return;
+        }
+      }
+      drag = { x: e.clientX, y: e.clientY, moved: false, pan: e.shiftKey || e.button === 2 };
+      el.setPointerCapture(e.pointerId);
+    });
     el.addEventListener('pointermove', (e) => {
+      if (interaction.drag) {
+        const point = floorPoint(e);
+        if (point) {
+          setPreviewPosition(interaction.drag.role, point);
+          update();
+        }
+        return;
+      }
       if (!drag) return;
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
       if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
@@ -251,9 +410,32 @@
       }
       drag.x = e.clientX; drag.y = e.clientY; placeCamera();
     });
-    el.addEventListener('pointerup', (e) => { if (drag && !drag.moved) pick(e); drag = null; });
+    el.addEventListener('pointerup', (e) => {
+      if (interaction.drag) {
+        const role = interaction.drag.role;
+        const point = (
+          interaction.previewPositions[role] ||
+          effectivePosition(role, frameAt(tMs))
+        ).slice();
+        interaction.drag = null;
+        main.classList.remove('dragging');
+        schedulePosition(role, point, true);
+        update();
+        return;
+      }
+      if (drag && !drag.moved) pick(e);
+      drag = null;
+    });
     el.addEventListener('wheel', (e) => { e.preventDefault(); orbit.r = Math.min(90, Math.max(6, orbit.r * (1 + e.deltaY * 0.0012))); placeCamera(); }, { passive: false });
-    el.addEventListener('contextmenu', (e) => e.preventDefault());
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const role = pickedRole(e);
+      if (!role || !canControlRole(role)) { hideRoleMenu(); return; }
+      selected = role;
+      interaction.hudRole = canMoveRole(role) ? role : null;
+      showRoleMenu(role, e.clientX, e.clientY);
+      update();
+    });
   })();
 
   function resize() {
@@ -290,12 +472,283 @@
     if (!b || !fr.n.present[role] || !fr.g.present[role]) return a;
     return [a[0] + (b[0] - a[0]) * fr.f, a[1] + (b[1] - a[1]) * fr.f];
   }
+  function effectivePosition(role, fr) {
+    const override = interaction.overrides[role];
+    return override && override.position ? override.position : posAt(role, fr);
+  }
+  function effectivePresent(role, g) {
+    const override = interaction.overrides[role];
+    return override && typeof override.present === 'boolean' ? override.present : !!g.present[role];
+  }
+  function canInteractWith(role) {
+    return !!world && world.roles[role] === 'station';
+  }
+  function canChangePresence(role) {
+    if (!world || !role) return false;
+    if (canInteractWith(role)) return true;
+    if (interactiveLiveMode) {
+      return interaction.presenceRoles.includes(role);
+    }
+    return world.roles[role] === 'fronthaul_ap' && role !== 'gateway';
+  }
+  function canMoveRole(role) {
+    if (!world || !role) return false;
+    if (interactiveLiveMode) return interaction.movableRoles.includes(role);
+    return canInteractWith(role) || world.roles[role] === 'fronthaul_ap';
+  }
+  function canControlRole(role) {
+    return canMoveRole(role) || canChangePresence(role);
+  }
+  function setPositionOverride(role, point) {
+    const previous = interaction.overrides[role] || {};
+    interaction.overrides[role] = Object.assign({}, previous, {
+      position: interactionModel.clampPosition(world, point),
+    });
+    interaction.hudRole = role;
+  }
+  function setPreviewPosition(role, point) {
+    interaction.previewPositions[role] = interactionModel.clampPosition(world, point);
+    interaction.hudRole = role;
+  }
+  function setPresenceOverride(role, present) {
+    const previous = interaction.overrides[role] || {};
+    interaction.overrides[role] = Object.assign({}, previous, {present: !!present});
+    interaction.hudRole = role;
+  }
+  function resetRoleOverride(role) {
+    delete interaction.overrides[role];
+    delete interaction.previewPositions[role];
+    if (interaction.movement && interaction.movement.role === role) interaction.movement = null;
+    if (interaction.awaitingDestination === role) {
+      interaction.awaitingDestination = null;
+      main.classList.remove('awaiting-destination');
+    }
+  }
+  function interactionMessage(message, failed = false) {
+    $('#interactionSummary').innerHTML = '<b>' + (failed ? 'Control error' : 'Interactive RF') + '</b> · ' + esc(message);
+  }
+  function newCommandId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+      return window.crypto.randomUUID();
+    }
+    return 'browser-' + Date.now().toString(36) + '-' +
+      Math.random().toString(36).slice(2) + '-' + (++interaction.clientSequence);
+  }
+  async function apiJson(url, options = {}) {
+    const request = Object.assign({cache: 'no-store'}, options);
+    request.headers = Object.assign(
+      {'Content-Type': 'application/json'}, options.headers || {});
+    if (request.method && request.method !== 'GET' && interaction.operatorToken) {
+      request.headers.Authorization = 'Bearer ' + interaction.operatorToken;
+    }
+    const response = await fetch(url, request);
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(body.message || response.status + ' ' + response.statusText);
+      error.status = response.status;
+      error.code = body.error;
+      throw error;
+    }
+    return body;
+  }
+  function applyInteractionSnapshot(snapshot) {
+    interaction.apiEnabled = !!snapshot.enabled;
+    interaction.presenceRoles = (snapshot.presence_roles || []).slice();
+    interaction.movableRoles = (snapshot.movable_roles || []).slice();
+    interaction.revision = Number(snapshot.revision || 0);
+    if (!Object.keys(interaction.initialRoles).length) {
+      interaction.initialRoles = JSON.parse(JSON.stringify(snapshot.roles || {}));
+    }
+    if (interactiveLiveMode) {
+      for (const [role, state] of Object.entries(snapshot.roles || {})) {
+        if (!canControlRole(role)) continue;
+        interaction.overrides[role] = {
+          position: state.position.slice(), present: !!state.present,
+        };
+        const preview = interaction.previewPositions[role];
+        if (!interaction.drag && preview &&
+            Math.hypot(preview[0] - state.position[0], preview[1] - state.position[1]) < 0.001) {
+          delete interaction.previewPositions[role];
+        }
+      }
+      const active = (snapshot.movements || []).find(
+        (item) => item.status === 'running' || item.status === 'paused');
+      interaction.movement = active || null;
+      interaction.recording = snapshot.recording || interaction.recording;
+    }
+    const badge = $('#interactionBadge');
+    badge.textContent = interaction.apiEnabled ? 'LIVE RF' : 'OBSERVER';
+    badge.classList.toggle('live-rf', interaction.apiEnabled);
+    badge.classList.toggle('observer', !interaction.apiEnabled);
+    $('#interactionHelp').textContent = interaction.apiEnabled
+      ? 'Select Interact to acquire control. Client movement and extender fronthaul outages atomically change wmediumd; closing the session restores its exact baseline.'
+      : 'Another browser may observe accepted movements, but live control is unavailable.';
+  }
+  async function refreshInteractionSnapshot() {
+    if (!interactiveLiveMode) return;
+    const snapshot = await apiJson('/api/demo/interactions');
+    applyInteractionSnapshot(snapshot);
+    update();
+  }
+  async function acquireInteractionLease() {
+    if (!interactiveLiveMode || !interaction.apiEnabled) return true;
+    if (interaction.leaseToken) return true;
+    if (!interaction.operatorToken) {
+      const supplied = window.prompt('Operator capability');
+      if (!supplied) {
+        interactionMessage('operator capability is required for live control', true);
+        return false;
+      }
+      interaction.operatorToken = supplied.trim();
+    }
+    const owner = interaction.leaseOwner ||
+      ('browser-' + Math.random().toString(36).slice(2, 10));
+    try {
+      const lease = await apiJson('/api/demo/interactions/lease', {
+        method: 'POST', body: JSON.stringify({owner, command_id: newCommandId()}),
+      });
+      interaction.leaseOwner = owner;
+      interaction.leaseToken = lease.token;
+      interaction.revision = Number(lease.revision);
+      clearInterval(interaction.leaseTimer);
+      interaction.leaseTimer = setInterval(async () => {
+        if (!interaction.leaseToken) return;
+        try {
+          const renewed = await apiJson('/api/demo/interactions/lease', {
+            method: 'POST', body: JSON.stringify({
+              token: interaction.leaseToken, command_id: newCommandId(),
+            }),
+          });
+          interaction.revision = Math.max(interaction.revision, Number(renewed.revision));
+        } catch (error) {
+          interaction.leaseToken = null;
+          clearInterval(interaction.leaseTimer);
+          interactionMessage(error.message, true);
+          setInteractionMode('camera');
+        }
+      }, Math.max(5000, Number(lease.lease_seconds || 30) * 500));
+      interactionMessage('control acquired by ' + owner);
+      return true;
+    } catch (error) {
+      interactionMessage(error.message, true);
+      return false;
+    }
+  }
+  function sendControl(url, method, payload) {
+    if (!interactiveLiveMode || !interaction.leaseToken) return Promise.resolve(null);
+    const sequence = ++interaction.clientSequence;
+    interaction.requestChain = interaction.requestChain.then(async () => {
+      const expectedRevision = interaction.revision;
+      const body = Object.assign({}, payload, {
+        token: interaction.leaseToken,
+        expected_revision: expectedRevision,
+        client_sequence: sequence,
+        command_id: newCommandId(),
+      });
+      try {
+        const accepted = await apiJson(url, {
+          method,
+          body: JSON.stringify(body),
+          headers: {'If-Match': '"world-revision-' + expectedRevision + '"'},
+        });
+        interaction.revision = Math.max(
+          interaction.revision, Number(accepted.revision));
+        interaction.acknowledgedSequence = Math.max(
+          interaction.acknowledgedSequence, Number(accepted.client_sequence || sequence));
+        return accepted;
+      } catch (error) {
+        if (error.code === 'stale_revision') await refreshInteractionSnapshot();
+        interactionMessage(error.message, true);
+        throw error;
+      }
+    }).catch(() => null);
+    return interaction.requestChain;
+  }
+  function sendMutation(operation, role, payload) {
+    return sendControl(
+      '/api/demo/roles/' + encodeURIComponent(role) + '/' + operation,
+      'PUT', payload);
+  }
+  function flushPosition() {
+    const pending = interaction.pendingPosition;
+    interaction.pendingPosition = null;
+    interaction.positionTimer = null;
+    if (!pending) return;
+    interaction.lastPositionSentAt = performance.now();
+    sendMutation('position', pending.role, {
+      position: pending.position, final: pending.final,
+    }).then((accepted) => {
+      if (accepted) {
+        setPositionOverride(pending.role, accepted.position);
+      }
+      delete interaction.previewPositions[pending.role];
+      update();
+    });
+  }
+  function schedulePosition(role, point, final) {
+    if (!interactiveLiveMode || !interaction.leaseToken) return;
+    // Dragging is a browser-local geometry preview.  The default live-room
+    // contract makes exactly one authoritative RF request at pointer-up.
+    // Destination movement remains server-timed; a future expert live-drag
+    // option may use this coalescer at a deliberately low cadence.
+    interaction.pendingPosition = {role, position: point.slice(), final: !!final};
+    const elapsed = performance.now() - interaction.lastPositionSentAt;
+    if (final || elapsed >= 200) {
+      clearTimeout(interaction.positionTimer);
+      flushPosition();
+    } else if (!interaction.positionTimer) {
+      interaction.positionTimer = setTimeout(flushPosition, 200 - elapsed);
+    }
+  }
+  async function releaseInteractionLease() {
+    const token = interaction.leaseToken;
+    interaction.leaseToken = null;
+    clearInterval(interaction.leaseTimer);
+    if (!token) return;
+    try {
+      await apiJson('/api/demo/interactions/lease', {
+        method: 'DELETE',
+        body: JSON.stringify({token, command_id: newCommandId()}),
+        keepalive: true,
+      });
+    } catch (_error) { /* expiration provides the same safe freeze semantics */ }
+  }
+  function predictedFor(role, point, g, positions = null) {
+    return interactionModel.predictLinks(
+      world, g, role, point, band, positions).filter(
+      (item) => effectivePresent(item.role, g));
+  }
+  function predictedMeshFor(role, point, g, positions = null) {
+    return interactionModel.predictMeshLinks(
+      world, g, role, point, band, positions).filter(
+      (item) => effectivePresent(item.role, g));
+  }
   // Strongest present AP->station link on the band, per station (downlink).
-  function bestServing(g) {
+  function bestServing(g, positions = null) {
     const best = {};
+    if (positions) {
+      for (const role of Object.keys(world.roles || {})) {
+        if (!canInteractWith(role) || !effectivePresent(role, g) || !positions[role]) continue;
+        const links = predictedFor(role, positions[role], g, positions);
+        if (!links.length) continue;
+        const strongest = links[0];
+        best[role] = {
+          ap: strongest.role,
+          snr: strongest.snr_db,
+          link: {
+            link_class: 'fronthaul', source_role: strongest.role,
+            destination_role: role, distance_m: strongest.distance_m,
+            wall_loss_db: strongest.wall_loss_db,
+            snr_db_by_band: {[band]: strongest.snr_db}, preview: true,
+          },
+        };
+      }
+      return best;
+    }
     for (const l of g.links) {
       if (l.link_class !== 'fronthaul' || !isAp(l.source_role)) continue;
-      if (!g.present[l.source_role] || !g.present[l.destination_role]) continue;
+      if (!effectivePresent(l.source_role, g) || !effectivePresent(l.destination_role, g)) continue;
+      if (interaction.overrides[l.destination_role] && positions) continue;
       const s = l.snr_db_by_band[band];
       if (!best[l.destination_role] || s > best[l.destination_role].snr) best[l.destination_role] = { ap: l.source_role, snr: s, link: l };
     }
@@ -348,6 +801,40 @@
     sprite.scale.set(height * rendered.aspect, height, 1);
     sprite.userData.labelText = text;
   }
+  function makeSignalGauge() {
+    const group = new THREE.Group();
+    const bars = [];
+    for (let index = 0; index < 10; index++) {
+      const bar = new THREE.Mesh(
+        new THREE.BoxGeometry(0.09, 0.065, 0.055),
+        new THREE.MeshBasicMaterial({
+          color: 0xaaa69d, transparent: true, opacity: 0.28, depthTest: false,
+        }));
+      bar.position.y = 0.10 + index * 0.082;
+      bar.renderOrder = 11;
+      group.add(bar);
+      bars.push(bar);
+    }
+    return {group, bars};
+  }
+  function signalLevel(observed, predicted) {
+    if (observed && Number.isFinite(Number(observed.rssi_dbm))) {
+      return Math.max(1, Math.min(10,
+        Math.round((Number(observed.rssi_dbm) + 90) / 5) + 1));
+    }
+    if (predicted && Number.isFinite(Number(predicted.snr))) {
+      return Math.max(1, Math.min(10,
+        Math.round((Number(predicted.snr) + 10) / 6) + 1));
+    }
+    return 0;
+  }
+  function updateSignalGauge(node, level) {
+    for (let index = 0; index < node.gauge.bars.length; index++) {
+      const active = index < level;
+      node.gauge.bars[index].material.color.copy(snrColor(index * 6 - 5, 0, 50));
+      node.gauge.bars[index].material.opacity = active ? 0.98 : 0.20;
+    }
+  }
   // Text lying flat on the floor, aligned with a wall, on the side away from its normal.
   function makeFloorText(text, x0, y0, x1, y1, height) {
     const t = textTexture(text, { fg: '#5c5344', font: '600 40px system-ui, sans-serif', pad: 6 });
@@ -381,9 +868,8 @@
   function buildWorld() {
     clearWorld();
     const root = new THREE.Group();
-    const allPos = world.generations.flatMap((g) => Object.values(g.positions));
-    const W = Math.max(20, Math.ceil(Math.max(...allPos.map((p) => p[0])) + 1));
-    const H = Math.max(14, Math.ceil(Math.max(...allPos.map((p) => p[1])) + 1));
+    const size = interactionModel.roomSize(world);
+    const W = size.width, H = size.height;
 
     // floor + grid
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshLambertMaterial({ color: COL.floor }));
@@ -394,6 +880,7 @@
     root.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(gridPts), new THREE.LineBasicMaterial({ color: COL.grid })));
 
     // walls
+    const walls = [];
     for (const w of world.walls || []) {
       const [x0, y0] = w.start, [x1, y1] = w.end;
       const len = Math.hypot(x1 - x0, y1 - y0);
@@ -401,7 +888,8 @@
         new THREE.MeshLambertMaterial({ color: COL.wall, transparent: true, opacity: 0.55 }));
       m.position.copy(P((x0 + x1) / 2, (y0 + y1) / 2, WALL_H / 2));
       m.rotation.y = -Math.atan2(y1 - y0, x1 - x0);
-      root.add(m);
+      m.userData.wall = w;
+      root.add(m); walls.push(m);
       const ft = makeFloorText(w.name + '  ' + w.loss_db + ' dB', x0, y0, x1, y1, 0.5);
       if (ft) root.add(ft);
     }
@@ -428,8 +916,61 @@
       tag.position.y = ap ? h + 0.95 : h + 0.42;   // sits directly on the head
       tag.userData.sta = !ap;
       grp.add(tag);
+      let gauge = null, ghost = null;
+      if (!ap) {
+        gauge = makeSignalGauge();
+        gauge.group.position.x = 0.36;
+        grp.add(gauge.group);
+        ghost = new THREE.Group();
+        const ghostBody = new THREE.Mesh(
+          new THREE.SphereGeometry(0.30, 16, 12),
+          new THREE.MeshBasicMaterial({
+            color: 0x6f3e8e, transparent: true, opacity: 0.34,
+            depthTest: false, wireframe: true,
+          }));
+        ghostBody.position.y = STA_H;
+        ghostBody.renderOrder = 12;
+        ghost.add(ghostBody);
+        const ghostRing = new THREE.Mesh(
+          new THREE.RingGeometry(0.32, 0.48, 32),
+          new THREE.MeshBasicMaterial({
+            color: 0x6f3e8e, transparent: true, opacity: 0.58,
+            side: THREE.DoubleSide, depthTest: false,
+          }));
+        ghostRing.rotation.x = -Math.PI / 2;
+        ghostRing.position.y = 0.02;
+        ghostRing.renderOrder = 12;
+        ghost.add(ghostRing);
+        ghost.visible = false;
+        root.add(ghost);
+      } else {
+        ghost = new THREE.Group();
+        const ghostBody = new THREE.Mesh(
+          new THREE.ConeGeometry(0.58, 0.88, 4),
+          new THREE.MeshBasicMaterial({
+            color: role === 'gateway' ? COL.gateway : 0x6f3e8e,
+            transparent: true, opacity: 0.34,
+            depthTest: false, wireframe: true,
+          }));
+        ghostBody.position.y = AP_H + 0.44;
+        ghostBody.renderOrder = 12;
+        ghost.add(ghostBody);
+        const ghostRing = new THREE.Mesh(
+          new THREE.RingGeometry(0.52, 0.72, 32),
+          new THREE.MeshBasicMaterial({
+            color: role === 'gateway' ? COL.gateway : 0x6f3e8e,
+            transparent: true, opacity: 0.62,
+            side: THREE.DoubleSide, depthTest: false,
+          }));
+        ghostRing.rotation.x = -Math.PI / 2;
+        ghostRing.position.y = 0.02;
+        ghostRing.renderOrder = 12;
+        ghost.add(ghostRing);
+        ghost.visible = false;
+        root.add(ghost);
+      }
       root.add(grp);
-      nodes[role] = { grp, post, head, ring, tag, color, ap, h };
+      nodes[role] = { grp, post, head, ring, tag, gauge, ghost, color, ap, h };
     }
 
     // link and trail buffers (rebuilt each frame)
@@ -445,12 +986,30 @@
       new THREE.BufferGeometry(),
       new THREE.LineDashedMaterial({ color: 0xf0ad00, dashSize: 0.48, gapSize: 0.18, transparent: true, opacity: 0.95 })
     );
-    const backhaul = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.45 }));
+    const backhaul = new THREE.LineSegments(
+      new THREE.BufferGeometry(),
+      new THREE.LineBasicMaterial({ color: 0x2468a8, transparent: true, opacity: 0.88 })
+    );
     const trails = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: COL.mobile, transparent: true, opacity: 0.45 }));
-    root.add(links, actual, target, backhaul, trails);
+    const preview = new THREE.LineSegments(
+      new THREE.BufferGeometry(),
+      new THREE.LineBasicMaterial({vertexColors: true, transparent: true, opacity: 0.95, depthTest: false}));
+    preview.renderOrder = 8;
+    const movePath = new THREE.LineSegments(
+      new THREE.BufferGeometry(),
+      new THREE.LineDashedMaterial({color: 0x6f3e8e, dashSize: 0.35, gapSize: 0.16, transparent: true, opacity: 0.9, depthTest: false}));
+    movePath.renderOrder = 8;
+    const destination = new THREE.Mesh(
+      new THREE.RingGeometry(0.28, 0.42, 28),
+      new THREE.MeshBasicMaterial({color: 0x6f3e8e, side: THREE.DoubleSide, depthTest: false}));
+    destination.rotation.x = -Math.PI / 2;
+    destination.position.y = 0.025;
+    destination.visible = false;
+    destination.renderOrder = 9;
+    root.add(links, actual, target, backhaul, trails, preview, movePath, destination);
 
     scene.add(root);
-    world3d = { root, nodes, pickables, links, actual, target, backhaul, trails, W, H };
+    world3d = { root, nodes, pickables, walls, links, actual, target, backhaul, trails, preview, movePath, destination, W, H };
     orbit.target.set(W / 2, 0, -H / 2); orbit.r = Math.max(W, H) * 1.5; placeCamera();
   }
 
@@ -469,6 +1028,9 @@
     return match ? 'extender_' + match[1] : null;
   }
   function heroRole() { return networkState && networkState.hero && networkState.hero.role; }
+  function optimizerSubjectRole() {
+    return optimizerState && optimizerState.subject_role || heroRole();
+  }
   function targetRole() {
     const decision = optimizerState && optimizerState.decision;
     if (!decision || !decision.target_bssid) return null;
@@ -479,19 +1041,29 @@
     if (!world3d) return;
     const fr = frameAt(tMs), g = fr.g;
     const { nodes } = world3d;
-    const best = bestServing(g);
     const pos = {};
+    const visualPos = {};
     const showSta = $('#showSta').checked;
 
     for (const role in nodes) {
+      pos[role] = effectivePosition(role, fr);
+      visualPos[role] = interaction.previewPositions[role] || pos[role];
+    }
+    const best = bestServing(g, pos);
+
+    for (const role in nodes) {
       const n = nodes[role];
-      const present = !!g.present[role];
-      const p = posAt(role, fr); pos[role] = p;
+      const present = effectivePresent(role, g);
+      const p = pos[role];
       n.grp.position.copy(P(p[0], p[1], 0));
       n.grp.visible = true;
       const mat = n.head.material;
       const observed = networkState && (networkState.clients || []).find((item) => item.role === role);
-      if (!n.ap && observed) {
+      if (n.ap) {
+        const meshNode = observedMeshNode(role);
+        setSpriteLabel(n.tag, meshNode && meshNode.name
+          ? meshNode.name : displayRole(role), '#' + new THREE.Color(n.color).getHexString());
+      } else if (observed) {
         const suffix = observed.sta_mac.split(':')[4];
         const label = role === heroRole() ? 'Private-Laptop'
           : (observed.cohort === 'iot' ? 'iot-' : 'sta-') + suffix;
@@ -502,14 +1074,33 @@
       if (!present) { mat.color.setHex(COL.absent); mat.transparent = true; mat.opacity = 0.35; n.post.material.color.setHex(COL.absent); }
       else {
         mat.transparent = false; mat.opacity = 1;
-        n.post.material.color.setHex(observed && observed.cohort === 'iot' ? 0x256f3f
-          : observed && observed.cohort === 'private' ? 0x225ca8 : n.color);
-        if (!n.ap && best[role]) mat.color.copy(snrColor(best[role].snr)); else mat.color.setHex(n.color);
+        const identity = observed && observed.cohort === 'iot' ? 0x256f3f
+          : observed && observed.cohort === 'private' ? 0x225ca8 : n.color;
+        n.post.material.color.setHex(identity);
+        mat.color.setHex(identity);
+      }
+      if (n.ghost) {
+        n.ghost.visible = !!interaction.previewPositions[role] && present &&
+          (n.ap || showSta);
+        if (n.ghost.visible) {
+          const preview = interaction.previewPositions[role];
+          n.ghost.position.copy(P(preview[0], preview[1], 0));
+        }
+      }
+      if (n.gauge) {
+        n.gauge.group.visible = present && showSta;
+        updateSignalGauge(n, signalLevel(observed, best[role]));
+        const serving = observed && observed.connected_role
+          ? observed.connected_role : best[role] && best[role].ap;
+        const peer = serving && pos[serving];
+        // Put the meter on the side opposite the serving RF line.
+        n.gauge.group.position.x = peer && peer[0] >= pos[role][0] ? -0.36 : 0.36;
       }
       const hero = role === heroRole();
-      n.ring.visible = role === selected || hero;
-      n.ring.material.color.setHex(hero ? 0xf0ad00 : n.color);
-      const pulsing = hero && performance.now() < actionPulseUntil;
+      const optimizerSubject = role === optimizerSubjectRole();
+      n.ring.visible = role === selected || hero || optimizerSubject;
+      n.ring.material.color.setHex(optimizerSubject ? 0xf0ad00 : n.color);
+      const pulsing = optimizerSubject && performance.now() < actionPulseUntil;
       const pulse = pulsing ? 1 + 0.22 * Math.sin(performance.now() / 90) : 1;
       n.ring.scale.set(pulse, pulse, pulse);
     }
@@ -537,31 +1128,43 @@
 
     // The optimizer target is visible before and during an action, never
     // confused with either the model-best or the current association.
-    const tpTarget = [], target = targetRole(), hero = heroRole();
-    if (target && hero && pos[target] && pos[hero]) {
-      const a = pos[target], b = pos[hero];
+    const tpTarget = [], target = targetRole(), subject = optimizerSubjectRole();
+    if (target && subject && pos[target] && pos[subject]) {
+      const a = pos[target], b = pos[subject];
       tpTarget.push(a[0], AP_H + 0.24, -a[1], b[0], STA_H + 0.24, -b[1]);
     }
     setSegments(world3d.target, tpTarget);
     world3d.target.material.opacity = performance.now() < actionPulseUntil
       ? 0.58 + 0.4 * Math.abs(Math.sin(performance.now() / 120)) : 0.88;
 
-    // backhaul (undirected, stronger direction)
-    const bp = [], bc = [];
+    // The live room uses the exact parent/child graph reported by the
+    // controller.  The geometric all-AP graph is only an offline-world
+    // fallback and is never presented as actual live mesh topology.
+    const bp = [];
     if ($('#showBackhaul').checked) {
-      const seen = {};
-      for (const l of g.links) {
-        if (l.link_class !== 'backhaul' || !g.present[l.source_role] || !g.present[l.destination_role]) continue;
-        const key = [l.source_role, l.destination_role].sort().join('|');
-        const s = l.snr_db_by_band[band];
-        if (!(key in seen) || s > seen[key].s) seen[key] = { l, s };
-      }
-      for (const key in seen) {
-        const { l, s } = seen[key], a = pos[l.source_role], b = pos[l.destination_role], c = snrColor(s);
-        bp.push(a[0], AP_H, -a[1], b[0], AP_H, -b[1]); bc.push(c.r, c.g, c.b, c.r, c.g, c.b);
+      const mesh = networkState && networkState.mesh;
+      if (mesh && mesh.available) {
+        for (const edge of mesh.backhaul_edges || []) {
+          const a = pos[edge.parent_role], b = pos[edge.child_role];
+          if (!a || !b || !effectivePresent(edge.parent_role, g) ||
+              !effectivePresent(edge.child_role, g)) continue;
+          bp.push(a[0], AP_H, -a[1], b[0], AP_H, -b[1]);
+        }
+      } else if (!liveMode && !replayMode) {
+        const seen = {};
+        for (const l of g.links) {
+          if (l.link_class !== 'backhaul' || !g.present[l.source_role] || !g.present[l.destination_role]) continue;
+          const key = [l.source_role, l.destination_role].sort().join('|');
+          const s = l.snr_db_by_band[band];
+          if (!(key in seen) || s > seen[key].s) seen[key] = { l, s };
+        }
+        for (const key in seen) {
+          const l = seen[key].l, a = pos[l.source_role], b = pos[l.destination_role];
+          bp.push(a[0], AP_H, -a[1], b[0], AP_H, -b[1]);
+        }
       }
     }
-    setSegments(world3d.backhaul, bp, bc);
+    setSegments(world3d.backhaul, bp);
 
     // trails up to now
     const tp = [];
@@ -581,10 +1184,235 @@
     }
     setSegments(world3d.trails, tp);
 
+    renderInteractionOverlays(g, visualPos, best);
+
     $('#tnow').textContent = (tMs / 1000).toFixed(1) + ' s';
     $('#scrub').value = Math.round(tMs / world.duration_ms * 1000);
-    renderInspector(g, best);
+    renderInspector(g, best, visualPos);
+    renderInteractionControls(g, visualPos, best);
     renderLivePanels();
+  }
+
+  function observedClient(role) {
+    return networkState && (networkState.clients || []).find((item) => item.role === role);
+  }
+  function observedMeshNode(role) {
+    const mesh = networkState && networkState.mesh;
+    return mesh && (mesh.nodes || []).find((item) => item.role === role);
+  }
+  function actualBackhaulFor(role) {
+    const mesh = networkState && networkState.mesh;
+    return mesh && (mesh.backhaul_edges || []).find((item) => item.child_role === role);
+  }
+  function displayRole(role) {
+    if (!role) return 'none';
+    const meshNode = observedMeshNode(role);
+    if (meshNode && meshNode.name) return meshNode.name;
+    if (role === 'gateway') return 'Agent-1';
+    if (role.startsWith('extender_')) return 'Extender-' + role.slice(9);
+    const observed = observedClient(role);
+    if (observed && observed.sta_mac) {
+      const suffix = observed.sta_mac.split(':')[4];
+      return (observed.cohort === 'iot' ? 'iot-' : 'sta-') + suffix;
+    }
+    return shortRole(role);
+  }
+  function associatedRole(role, g) {
+    const observed = observedClient(role);
+    if (observed && observed.connected_role) return observed.connected_role;
+    let strongest = null;
+    for (const link of g.links || []) {
+      if (link.link_class !== 'fronthaul' || link.destination_role !== role || !isAp(link.source_role)) continue;
+      const snr = Number(link.snr_db_by_band && link.snr_db_by_band[band]);
+      if (!strongest || snr > strongest.snr) strongest = {role: link.source_role, snr};
+    }
+    return strongest && strongest.role;
+  }
+  function wallNames(link) {
+    return link && link.walls && link.walls.length
+      ? link.walls.map((wall) => wall.name).join(', ') : 'none';
+  }
+  function rolePreview(role, g, pos) {
+    if (!role || !canMoveRole(role) || !pos[role]) return null;
+    if (isAp(role)) {
+      const peers = predictedMeshFor(role, pos[role], g, pos);
+      return {
+        role, point: pos[role], ap: true, candidates: peers,
+        strongest: peers[0] || null, associated: null, associatedRole: null,
+      };
+    }
+    const candidates = predictedFor(role, pos[role], g, pos);
+    const associated = associatedRole(role, g);
+    return {
+      role,
+      point: pos[role],
+      candidates,
+      strongest: candidates[0] || null,
+      associated: candidates.find((item) => item.role === associated) || null,
+      associatedRole: associated,
+    };
+  }
+  function renderInteractionOverlays(g, pos) {
+    const role = interaction.hudRole || (canMoveRole(selected) ? selected : null);
+    const previewActive = interaction.mode === 'interact' ||
+      !!interaction.overrides[role] || !!interaction.previewPositions[role];
+    const preview = previewActive ? rolePreview(role, g, pos) : null;
+    const points = [], colors = [];
+    const highlightedWalls = new Set();
+    for (const wall of world3d.walls) {
+      wall.material.color.setHex(COL.wall);
+      wall.material.opacity = 0.55;
+    }
+    if (preview && effectivePresent(role, g)) {
+      const links = [];
+      if (preview.ap) {
+        for (const item of preview.candidates) {
+          links.push({item, color: new THREE.Color(0x6f3e8e)});
+        }
+      } else if (preview.strongest) {
+        links.push({item: preview.strongest, color: new THREE.Color(0x6f3e8e)});
+      }
+      if (!preview.ap && preview.associated && preview.strongest &&
+          preview.associated.role !== preview.strongest.role) {
+        links.push({item: preview.associated, color: new THREE.Color(0x05a9cf)});
+      }
+      for (const entry of links) {
+        const peer = pos[entry.item.role];
+        if (!peer) continue;
+        const previewHeight = preview.ap ? AP_H : STA_H;
+        points.push(peer[0], AP_H + 0.34, -peer[1],
+          preview.point[0], previewHeight + 0.34, -preview.point[1]);
+        colors.push(entry.color.r, entry.color.g, entry.color.b, entry.color.r, entry.color.g, entry.color.b);
+        for (const wall of entry.item.walls) highlightedWalls.add(wall.name);
+      }
+      for (const wall of world3d.walls) {
+        if (highlightedWalls.has(wall.userData.wall.name)) {
+          wall.material.color.setHex(0xf0ad00);
+          wall.material.opacity = 0.82;
+        }
+      }
+    }
+    setSegments(world3d.preview, points, colors);
+
+    const movement = interaction.movement;
+    const path = [];
+    if (movement && pos[movement.role]) {
+      path.push(pos[movement.role][0], 0.05, -pos[movement.role][1],
+        movement.destination[0], 0.05, -movement.destination[1]);
+      world3d.destination.position.copy(P(movement.destination[0], movement.destination[1], 0.025));
+      world3d.destination.visible = true;
+    } else {
+      world3d.destination.visible = false;
+    }
+    setSegments(world3d.movePath, path);
+  }
+
+  function renderInteractionControls(g, pos) {
+    const role = interaction.hudRole || (canMoveRole(selected) ? selected : null);
+    const preview = rolePreview(role, g, pos);
+    const selectedUsable = !!preview;
+    $('#moveSelected').disabled = !selectedUsable;
+    $('#presenceSelected').disabled = !selectedUsable || !canChangePresence(role);
+    $('#resetSelected').disabled = !selectedUsable || !roleIsModified(role);
+    const activeMovement = interaction.movement &&
+      ['running', 'paused'].includes(interaction.movement.status)
+      ? interaction.movement : null;
+    $('#pauseMovement').disabled = !interactiveLiveMode || !activeMovement;
+    $('#cancelMovement').disabled = !interactiveLiveMode || !activeMovement;
+    $('#pauseMovement').textContent = activeMovement && activeMovement.status === 'paused'
+      ? 'Resume walk' : 'Pause walk';
+    $('#recordInteraction').disabled = !interactiveLiveMode || !interaction.apiEnabled;
+    $('#recordInteraction').textContent = interaction.recording.active
+      ? 'Stop recording' : 'Start recording';
+    $('#downloadRecording').disabled = !interactiveLiveMode ||
+      !interaction.recording.export_ready;
+    if (!preview) {
+      $('#interactionSummary').innerHTML = interaction.mode === 'interact'
+        ? 'Click or drag a <b>client or extender</b> in the room.'
+        : 'Select <b>Interact</b>, then drag a client or extender.';
+      $('#spatialHud').style.display = 'none';
+      return;
+    }
+    const present = effectivePresent(role, g);
+    $('#presenceSelected').textContent = role === 'gateway'
+      ? 'Presence protected'
+      : preview.ap
+      ? (present ? 'Disable fronthaul' : 'Restore fronthaul')
+      : (present ? 'Disappear' : 'Reappear');
+    const override = interaction.overrides[role];
+    const localPreview = interaction.previewPositions[role];
+    const movement = activeMovement && activeMovement.role === role
+      ? interaction.movement : null;
+    let state = present
+      ? (interactiveLiveMode ? (roleIsModified(role) ? 'live moved' : 'live position')
+        : (override ? 'preview moved' : 'scenario position'))
+      : (interactiveLiveMode ? 'RF absent' : 'RF absent preview');
+    if (localPreview) {
+      state = interaction.drag ? 'preview · release to apply RF' : 'applying RF…';
+    }
+    if (movement) state = (movement.status === 'paused' ? 'paused' : 'moving') +
+      ' · ' + movement.speed_mps.toFixed(1) + ' m/s';
+    if (interaction.awaitingDestination === role) state = 'click a destination';
+    $('#interactionSummary').innerHTML = '<b>' + esc(displayRole(role)) + '</b> · ' + esc(state);
+
+    const base = posAt(role, frameAt(tMs));
+    const moved = Math.hypot(preview.point[0] - base[0], preview.point[1] - base[1]);
+    const measured = observedClient(role) || {};
+    const age = measured.metric_age_seconds != null ? measured.metric_age_seconds
+      : measured.age_s != null ? measured.age_s : measured.sample_age_s;
+    const strongest = preview.strongest;
+    const associated = preview.associated;
+    let movementRow = '';
+    if (movement) {
+      const remaining = movement.remaining_m != null ? Number(movement.remaining_m) : Math.hypot(
+        movement.destination[0] - preview.point[0], movement.destination[1] - preview.point[1]);
+      movementRow = '<span>Destination</span><b>' + remaining.toFixed(1) + ' m · ' +
+        Math.ceil(remaining / movement.speed_mps) + ' s</b>';
+    }
+    const hud = $('#spatialHud');
+    if (preview.ap) {
+      const actualBackhaul = actualBackhaulFor(role) || {};
+      const servingClients = (networkState && networkState.clients || []).filter(
+        (item) => item.connected_role === role).length;
+      const peer = strongest;
+      const actualParent = role === 'gateway'
+        ? 'co-located controller'
+        : actualBackhaul.parent_role
+        ? displayRole(actualBackhaul.parent_role) : 'not reported';
+      const actualBand = actualBackhaul.band || actualBackhaul.band_name || '';
+      const actualChannel = actualBackhaul.channel || actualBackhaul.channel_number;
+      const actualLink = [actualParent];
+      if (actualBand) actualLink.push(actualBand + (String(actualBand).includes('GHz') ? '' : ' GHz'));
+      if (actualChannel != null) actualLink.push('ch ' + actualChannel);
+      hud.innerHTML = '<div class="hud-title"><span>' + esc(displayRole(role)) + '</span><span>mesh node</span></div>' +
+        '<div class="hud-grid"><span>Position</span><b>' + preview.point[0].toFixed(1) + ', ' + preview.point[1].toFixed(1) + ' m</b>' +
+        '<span>Moved</span><b>' + moved.toFixed(1) + ' m</b>' + movementRow +
+        '<span>Fronthaul</span><b>' + (present ? 'available' : 'disabled') + '</b>' +
+        '<span>Serving clients</span><b>' + servingClients + '</b>' +
+        '<span>Actual parent</span><b>' + esc(actualLink.join(' · ')) + '</b>' +
+        '<span>Modeled mesh peer</span><b>' + esc(peer ? displayRole(peer.role) : 'none') + '</b>' +
+        '<span>Distance / walls</span><b>' + (peer ? peer.distance_m.toFixed(1) + ' m / ' + peer.wall_count : 'N/A') + '</b>' +
+        '<span>Wall loss</span><b>' + (peer ? peer.wall_loss_db.toFixed(1) + ' dB' : 'N/A') + '</b>' +
+        '<span>Predicted mesh SNR</span><b>' + (peer ? peer.snr_db + ' dB at ' + esc(band) + ' GHz' : 'N/A') + '</b></div>' +
+        '<div class="candidate">Moving this extender updates every three-band client link and mesh-peer link in one RF generation.<br>Modeled mesh peers: ' +
+        preview.candidates.slice(0, 4).map((item) => esc(displayRole(item.role)) + ' ' + item.snr_db + ' dB').join(' · ') + '</div>';
+      hud.style.display = interaction.mode === 'interact' ? 'block' : 'none';
+      return;
+    }
+    hud.innerHTML = '<div class="hud-title"><span>' + esc(displayRole(role)) + '</span><span>' + esc(band) + ' GHz</span></div>' +
+      '<div class="hud-grid"><span>Position</span><b>' + preview.point[0].toFixed(1) + ', ' + preview.point[1].toFixed(1) + ' m</b>' +
+      '<span>Moved</span><b>' + moved.toFixed(1) + ' m</b>' + movementRow +
+      '<span>Associated AP</span><b>' + esc(displayRole(preview.associatedRole)) + '</b>' +
+      '<span>Distance / walls</span><b>' + (associated ? associated.distance_m.toFixed(1) + ' m / ' + associated.wall_count : 'N/A') + '</b>' +
+      '<span>Wall loss</span><b>' + (associated ? associated.wall_loss_db.toFixed(1) + ' dB' : 'N/A') + '</b>' +
+      '<span>Predicted SNR</span><b>' + (associated ? associated.snr_db + ' dB' : 'N/A') + '</b>' +
+      '<span>Measured</span><b>' + (measured.rcpi == null ? 'N/A' : 'RCPI ' + esc(measured.rcpi)) + '</b>' +
+      '<span>Metric age</span><b>' + (age == null ? 'N/A' : Number(age).toFixed(1) + ' s') + '</b>' +
+      '<span>Strongest AP</span><b>' + esc(strongest ? displayRole(strongest.role) : 'none') + '</b>' +
+      '<span>Best path</span><b>' + (strongest ? strongest.distance_m.toFixed(1) + ' m / ' + strongest.wall_count + ' walls' : 'N/A') + '</b></div>' +
+      '<div class="candidate">Walls: ' + esc(associated ? wallNames(associated) : 'unknown') + '<br>Best candidates: ' +
+      preview.candidates.slice(0, 3).map((item) => esc(displayRole(item.role)) + ' ' + item.snr_db + ' dB').join(' · ') + '</div>';
+    hud.style.display = interaction.mode === 'interact' ? 'block' : 'none';
   }
 
   function esc(value) {
@@ -601,10 +1429,15 @@
     $('#storyText').textContent = storyState;
     if (networkState) {
       const h = healthState || {}, api = networkState.health || {}, cohorts = networkState.cohorts || {};
+      const mesh = networkState.mesh || {};
+      const backhaulCount = (mesh.backhaul_edges || []).length;
+      const multihop = (mesh.backhaul_edges || []).some((edge) => edge.parent_role !== 'gateway');
+      const shape = mesh.available ? (multihop ? 'multihop' : 'star') : 'waiting';
       $('#labMetrics').innerHTML =
         '<span>Mesh devices</span><b>' + esc(api.mesh_devices) + ' / 5</b>' +
         '<span>Clients</span><b>' + esc(api.clients) + ' / 20</b>' +
         '<span>Private / IoT</span><b>' + esc(cohorts.private) + ' / ' + esc(cohorts.iot) + '</b>' +
+        '<span>Actual topology</span><b>' + esc(shape) + ' · ' + esc(backhaulCount) + ' backhaul links</b>' +
         '<span>Model</span><b>' + esc(h.model_devices == null ? '—' : h.model_devices + '/' + h.model_radios + '/' + h.model_bsses + '/' + h.model_associated) + '</b>' +
         '<span>Health</span><b>' + (h.healthy == null ? 'observing' : h.healthy ? 'healthy' : 'degraded') + '</b>';
       const hero = networkState.hero;
@@ -620,7 +1453,17 @@
           (trafficState == null ? 'waiting' : trafficState.success ? 'pass' + (trafficState.rtt_ms == null ? '' : ' · ' + esc(trafficState.rtt_ms) + ' ms') : 'FAIL') + '</b></div>';
       }
     }
-    if (optimizerState) {
+    if (optimizerState && optimizerState.status === 'unavailable') {
+      $('#optimizerMetrics').innerHTML =
+        '<div><span class="phase">MEASUREMENTS UNAVAILABLE</span></div>' +
+        '<p><b>' + (optimizerState.automatic_actuation
+          ? 'Automatic steering paused' : 'Recommendations paused') + '</b></p>' +
+        '<div class="sub">Waiting for a complete fresh candidate snapshot. The room remains interactive.</div>' +
+        '<div class="metric-grid"><span>Retry backoff</span><b>' +
+          esc(optimizerState.retry_delay_seconds) + ' s</b>' +
+        '<span>Consecutive failures</span><b>' + esc(optimizerState.consecutive_failures) + '</b></div>' +
+        '<p class="sub" style="overflow-wrap:anywhere">' + esc(optimizerState.message) + '</p>';
+    } else if (optimizerState) {
       const d = optimizerState.decision || {}, state = optimizerState.policy_state || {};
       const target = targetRole();
       let phase = state.phase || (d.action === 'steer' ? 'eligible' : 'stable');
@@ -629,17 +1472,38 @@
         ? ' <span class="phase ' + (verificationState.success ? 'verified' : 'failed') + '">last action ' +
           (verificationState.success ? 'verified' : 'failed') + '</span>' : '';
       const scores = (optimizerState.candidates || []).slice().sort((a, b) => (b.rcpi || -1) - (a.rcpi || -1));
+      const automatic = !!optimizerState.automatic_actuation;
+      const used = Number(optimizerState.actions_used || 0);
+      const limit = Number(optimizerState.maximum_actions || 0);
+      const fleet = optimizerState.fleet || {};
+      const assisted = optimizerState.actuation_path === 'room_serialized_rf_assist_btm';
+      const stronger = Number(fleet.clients_with_stronger_ap || 0);
+      const checked = Number(fleet.clients_checked || 0);
+      const total = Number(fleet.clients_evaluated || 0);
       $('#optimizerMetrics').innerHTML =
         '<div><span class="phase ' + phaseClass(phase) + '">' + esc(phase) + '</span> ' +
-        '<span class="phase">' + esc(optimizerState.mode) + '</span>' + outcomeBadge + '</div>' +
+        '<span class="phase">' + esc(automatic ? 'AUTO BTM' : optimizerState.mode) + '</span>' + outcomeBadge + '</div>' +
         '<div class="policy-reason" style="margin-top:6px"><b>' + esc(d.reason || 'waiting') + '</b></div>' +
         '<div class="metric-grid"><span>Current</span><b>' + esc(d.current_rcpi == null ? 'N/A' : 'RCPI ' + d.current_rcpi) + '</b>' +
+        '<span>Current focus</span><b>' + esc(displayRole(optimizerState.subject_role)) + '</b>' +
         '<span>Best target</span><b>' + esc(target || 'none') + '</b>' +
         '<span>Target metric</span><b>' + esc(d.target_rcpi == null ? 'N/A' : 'RCPI ' + d.target_rcpi) + '</b>' +
         '<span>Hold</span><b>' + esc(Number(d.hold_seconds || 0).toFixed(1)) + ' s</b>' +
-        '<span>Action used</span><b>' + (actionState ? 'yes · limit reached' : 'no') + '</b>' +
-        '<span>Action window</span><b>' + (optimizerState.action_window_open ? 'open' : 'closed') + '</b></div>' +
-        (scores.length ? '<div class="sub" style="margin:6px 0 0">Measured: ' + scores.slice(0, 4).map((s) => esc(s.world_name || s.device_name) + ' ' + esc(s.rcpi)).join(' · ') + '</div>' : '');
+        '<span>Fleet check</span><b>' + esc(checked) + ' / ' + esc(total) + ' clients</b>' +
+        '<span>Stronger AP available</span><b>' + esc(stronger) + '</b>' +
+        '<span>Next measured batch</span><b>' + esc(optimizerState.action_batch_size || 0) +
+          ' / ' + esc(optimizerState.action_batch_limit || 1) + '</b>' +
+        '<span>Action budget</span><b>' + esc(used) + ' / ' + esc(limit || '—') + '</b>' +
+        '<span>Actuation path</span><b>' + (assisted
+          ? 'serialized RF assist + BTM' : 'BTM request') + '</b>' +
+        '<span>Automatic steering</span><b>' + (automatic
+          ? (used >= limit ? 'limit reached' : fleet.converged ? 'fleet converged' :
+            optimizerState.automatic_actuation_ready ? 'reconciling fleet' : 'waiting')
+          : 'recommend only') + '</b>' +
+        '<span>Action window</span><b>' + (optimizerState.action_window_kind === 'stable_interactive_environment'
+          ? 'interactive session' : optimizerState.action_window_open ? 'open' : 'closed') + '</b></div>' +
+        (scores.length ? '<div class="sub" style="margin:6px 0 0">Measured: ' + scores.slice(0, 4).map((s) =>
+          esc(s.role ? displayRole(s.role) : (s.device_name || s.world_name)) + ' ' + esc(s.rcpi)).join(' · ') + '</div>' : '');
     }
     $('#eventRibbon').innerHTML = recentEvents.slice(-7).reverse().map((item) =>
       '<div class="event-row"><span class="event-time">' + (item.world_time_ms / 1000).toFixed(1) + 's</span><span>' + esc(item.label) + '</span></div>'
@@ -647,28 +1511,61 @@
   }
 
   // ---- inspector -----------------------------------------------------------
-  function renderInspector(g, best) {
+  function renderInspector(g, best, positions) {
     const box = $('#inspector');
     if (!selected) { box.innerHTML = '<h2>Selected node</h2><div class="empty">Click a station or agent to list its links at the current generation.</div>'; return; }
-    const present = g.present[selected];
-    const rows = g.links.filter((l) => l.source_role === selected || l.destination_role === selected)
+    const present = effectivePresent(selected, g);
+    let rows = g.links.filter((l) => l.source_role === selected || l.destination_role === selected)
       .map((l) => {
         const peer = l.source_role === selected ? l.destination_role : l.source_role;
         const dir = l.source_role === selected ? '→' : '←';
         return { peer, dir, l };
       });
+    const previewed = (
+      !!interaction.overrides[selected] || !!interaction.previewPositions[selected]
+    ) && canInteractWith(selected);
+    if (previewed && positions[selected]) {
+      rows = predictedFor(selected, positions[selected], g).map((item) => ({
+        peer: item.role,
+        dir: '←',
+        l: {
+          link_class: 'fronthaul', distance_m: item.distance_m,
+          wall_loss_db: item.wall_loss_db,
+          snr_db_by_band: {'2.4': '—', '5': '—', '6': '—', [band]: item.snr_db},
+        },
+      }));
+    }
     // keep only present peers, group by peer, order by class then peer name
     const present_rows = rows.filter((r) => g.present[r.peer]).sort((a, b) => a.l.link_class.localeCompare(b.l.link_class) || a.peer.localeCompare(b.peer) || a.dir.localeCompare(b.dir));
     const bestAp = best[selected] && best[selected].ap;
     let html = '<h2>' + selected + ' <span style="font-weight:400;color:var(--muted)">' + world.roles[selected] + '</span></h2>';
-    html += '<div class="sub">generation t = ' + (g.time_ms / 1000).toFixed(1) + ' s' + (present ? '' : ' <span class="warn">absent</span>') + '</div>';
+    html += '<div class="sub">generation t = ' + (g.time_ms / 1000).toFixed(1) + ' s' +
+      (present ? '' : ' <span class="warn">absent</span>') +
+      (previewed ? ' <span class="preview-badge">PREVIEW</span>' : '') + '</div>';
+    const meshNode = observedMeshNode(selected);
+    const actualBackhaul = actualBackhaulFor(selected);
+    if (meshNode) {
+      html += '<div class="metric-grid" style="margin-top:6px"><span>Controller name</span><b>' +
+        esc(meshNode.name) + '</b>';
+      if (actualBackhaul) {
+        const signal = actualBackhaul.signal || {};
+        const strength = signal.rssi_dbm == null ? 'N/A' : signal.rssi_dbm + ' dBm';
+        html += '<span>Actual parent</span><b>' + esc(displayRole(actualBackhaul.parent_role)) +
+          '</b><span>Backhaul</span><b>' + esc(actualBackhaul.band || '?') + ' GHz · ch ' +
+          esc(actualBackhaul.channel == null ? '?' : actualBackhaul.channel) + ' · ' +
+          esc(strength) + '</b>';
+      }
+      html += '</div>';
+    }
     if (!present_rows.length) { html += '<div class="empty">No present links at this generation.</div>'; box.innerHTML = html; return; }
     html += '<table><thead><tr><th>peer</th><th></th><th>m</th><th>wall</th><th>2.4</th><th>5</th><th>6</th></tr></thead><tbody>';
     for (const r of present_rows) {
       const s = r.l.snr_db_by_band;
       const isBest = !isAp(selected) && r.peer === bestAp && r.dir === '←';
       html += '<tr' + (isBest ? ' class="best"' : '') + '><td>' + r.peer + '</td><td>' + r.dir + '</td><td>' + r.l.distance_m + '</td><td>' + r.l.wall_loss_db + '</td>'
-        + ['2.4', '5', '6'].map((b) => '<td class="snr" style="background:#' + snrColor(s[b]).getHexString() + '">' + s[b] + '</td>').join('') + '</tr>';
+        + ['2.4', '5', '6'].map((b) => Number.isFinite(Number(s[b]))
+          ? '<td class="snr" style="background:#' + snrColor(s[b]).getHexString() + '">' + s[b] + '</td>'
+          : '<td>—</td>').join('') + '</tr>';
     }
     html += '</tbody></table><div class="sub" style="margin-top:6px">← is the downlink into this node, → the uplink out of it. Bold row is the best serving link on ' + band + ' GHz.</div>';
     box.innerHTML = html;
@@ -676,19 +1573,62 @@
 
   // ---- picking -------------------------------------------------------------
   const ray = new THREE.Raycaster(); ray.params.Points = { threshold: 0.3 };
-  function pick(e) {
-    if (!world3d) return;
+  const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  function pointerCoordinates(e) {
     const r = renderer.domElement.getBoundingClientRect();
-    const m = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    return new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1,
+      -((e.clientY - r.top) / r.height) * 2 + 1);
+  }
+  function pickedRole(e) {
+    if (!world3d) return null;
+    const m = pointerCoordinates(e);
     ray.setFromCamera(m, camera);
     const hits = ray.intersectObjects(world3d.pickables, false);
-    selected = hits.length ? hits[0].object.userData.role : null;
+    return hits.length ? hits[0].object.userData.role : null;
+  }
+  function floorPoint(e) {
+    if (!world3d) return null;
+    ray.setFromCamera(pointerCoordinates(e), camera);
+    const hit = new THREE.Vector3();
+    if (!ray.ray.intersectPlane(floorPlane, hit)) return null;
+    return interactionModel.clampPosition(world, [hit.x, -hit.z]);
+  }
+  function pick(e) {
+    selected = pickedRole(e);
+    if (canMoveRole(selected)) interaction.hudRole = selected;
     update();
+  }
+  function showRoleMenu(role, clientX, clientY) {
+    const menu = $('#roleMenu'), rect = main.getBoundingClientRect();
+    interaction.menuRole = role;
+    $('#roleMenuTitle').textContent = displayRole(role);
+    const present = effectivePresent(role, frameAt(tMs).g);
+    const presenceAction = menu.querySelector('[data-role-action=presence]');
+    presenceAction.textContent = canInteractWith(role)
+      ? (present ? 'Disappear' : 'Reappear')
+      : (present ? 'Disable fronthaul' : 'Restore fronthaul');
+    presenceAction.style.display = canChangePresence(role) ? '' : 'none';
+    menu.querySelector('[data-role-action=move]').style.display =
+      canMoveRole(role) ? '' : 'none';
+    menu.querySelector('[data-role-action=reset]').style.display =
+      roleIsModified(role) ? '' : 'none';
+    menu.style.display = 'block';
+    const mw = menu.offsetWidth || 172, mh = menu.offsetHeight || 110;
+    menu.style.left = Math.max(5, Math.min(main.clientWidth - mw - 5, clientX - rect.left)) + 'px';
+    menu.style.top = Math.max(5, Math.min(main.clientHeight - mh - 5, clientY - rect.top)) + 'px';
+  }
+  function hideRoleMenu() {
+    $('#roleMenu').style.display = 'none';
+    interaction.menuRole = null;
   }
 
   // ---- loading -------------------------------------------------------------
   function loadWorld(w) {
     world = w; tMs = 0; selected = null; playing = false; $('#play').textContent = 'Play';
+    for (const role of Object.keys(interaction.overrides)) delete interaction.overrides[role];
+    for (const role of Object.keys(interaction.previewPositions)) delete interaction.previewPositions[role];
+    interaction.drag = interaction.movement = interaction.awaitingDestination = interaction.hudRole = null;
+    main.classList.remove('awaiting-destination', 'dragging');
     $('#worldmeta').textContent = w.name + ' — ' + w.counts.agents + ' agents, ' + w.counts.stations + ' stations, '
       + w.generations.length + ' generations every ' + (w.tick_ms / 1000) + ' s';
     $('#tmax').textContent = 'of ' + (w.duration_ms / 1000).toFixed(0) + ' s';
@@ -704,7 +1644,9 @@
       const res = await fetch(GOLDEN_DIR + name + '.world.json');
       if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
       loadWorld(await res.json());
-      history.replaceState(null, '', '?world=' + encodeURIComponent(name));
+      const params = new URLSearchParams(location.search);
+      params.set('world', name);
+      history.replaceState(null, '', '?' + params.toString());
     } catch (e) {
       err('Could not fetch ' + name + '.world.json (' + e.message + '). When opening this page from disk, use the file picker instead.');
     }
@@ -727,7 +1669,7 @@
   });
   function togglePlay() { if (liveMode) return; playing = !playing; $('#play').textContent = playing ? 'Pause' : 'Play'; lastTick = performance.now(); if (playing && world && tMs >= world.duration_ms) tMs = 0; }
   $('#play').addEventListener('click', togglePlay);
-  document.addEventListener('keydown', (e) => { if (e.code === 'Space' && !/INPUT|SELECT|BUTTON/.test(document.activeElement.tagName)) { e.preventDefault(); togglePlay(); } });
+  document.addEventListener('keydown', (e) => { if (!$('#viewerManual').open && e.code === 'Space' && !/INPUT|SELECT|BUTTON/.test(document.activeElement.tagName)) { e.preventDefault(); togglePlay(); } });
   document.querySelectorAll('[data-speed]').forEach((b) => b.addEventListener('click', () => {
     speed = +b.dataset.speed; document.querySelectorAll('[data-speed]').forEach((x) => x.setAttribute('aria-pressed', x === b));
   }));
@@ -735,6 +1677,226 @@
     band = b.dataset.band; document.querySelectorAll('[data-band]').forEach((x) => x.setAttribute('aria-pressed', x === b)); update();
   }));
   ['#showLinks', '#showBackhaul', '#showTrails', '#showSta'].forEach((id) => $(id).addEventListener('change', update));
+
+  function roleIsModified(role) {
+    const current = interaction.overrides[role];
+    const initial = interaction.initialRoles[role];
+    if (!current || !initial) return !!current;
+    return current.present !== initial.present ||
+      Math.abs(current.position[0] - initial.position[0]) > 0.001 ||
+      Math.abs(current.position[1] - initial.position[1]) > 0.001;
+  }
+  async function setInteractionMode(mode) {
+    if (mode === 'interact' && interactiveLiveMode &&
+        !interaction.leaseToken && !(await acquireInteractionLease())) {
+      mode = 'camera';
+    }
+    interaction.mode = mode;
+    interaction.drag = null;
+    if (mode !== 'interact') interaction.awaitingDestination = null;
+    main.classList.toggle('interact', mode === 'interact');
+    main.classList.toggle('awaiting-destination', !!interaction.awaitingDestination);
+    main.classList.remove('dragging');
+    $('#cameraMode').setAttribute('aria-pressed', mode === 'camera');
+    $('#interactMode').setAttribute('aria-pressed', mode === 'interact');
+    $('#hint').textContent = mode === 'interact'
+      ? 'drag a client or extender · right-click for controls · switch to Camera to orbit'
+      : (liveMode ? 'live runner clock · drag to orbit · wheel to zoom · shift-drag to pan'
+        : 'drag to orbit · wheel to zoom · shift-drag to pan · space plays');
+    update();
+  }
+  async function beginDestinationSelection(role) {
+    if (!canMoveRole(role)) return;
+    if (interactiveLiveMode && !interaction.leaseToken &&
+        !(await acquireInteractionLease())) return;
+    selected = role;
+    interaction.hudRole = role;
+    if (interactiveLiveMode && interaction.movement) {
+      await controlMovement('cancel');
+    } else {
+      interaction.movement = null;
+    }
+    interaction.awaitingDestination = role;
+    await setInteractionMode('interact');
+    main.classList.add('awaiting-destination');
+    $('#interactionSummary').innerHTML = '<b>' + esc(displayRole(role)) + '</b> · click its destination in the room';
+  }
+  async function startDestinationMovement(role, destination) {
+    const fr = frameAt(tMs);
+    const start = effectivePosition(role, fr).slice();
+    const target = interactionModel.clampPosition(world, destination);
+    const speedMps = Number($('#moveSpeed').value);
+    const durationMs = interactionModel.movementDurationMs(start, target, speedMps);
+    interaction.awaitingDestination = null;
+    main.classList.remove('awaiting-destination');
+    setPositionOverride(role, start);
+    if (interactiveLiveMode) {
+      const accepted = await sendControl(
+        '/api/demo/roles/' + encodeURIComponent(role) + '/move', 'POST',
+        {destination: target, speed_mps: speedMps});
+      if (accepted && accepted.movement) {
+        interaction.movement = accepted.movement;
+        interactionMessage(
+          displayRole(role) + ' walking ' + accepted.movement.distance_m.toFixed(1) +
+          ' m at ' + accepted.movement.speed_mps.toFixed(1) + ' m/s');
+      }
+      update();
+      return;
+    }
+    if (durationMs < 40) {
+      setPositionOverride(role, target);
+      schedulePosition(role, target, true);
+      interaction.movement = null;
+    } else {
+      interaction.movement = {
+        role, start, destination: target, speed_mps: speedMps,
+        duration_ms: durationMs, started_at: performance.now(),
+      };
+    }
+    update();
+  }
+  async function togglePresence(role) {
+    if (!canChangePresence(role)) return;
+    if (interactiveLiveMode && !interaction.leaseToken &&
+        !(await acquireInteractionLease())) return;
+    const present = effectivePresent(role, frameAt(tMs).g);
+    setPresenceOverride(role, !present);
+    sendMutation('presence', role, {present: !present});
+    if (present && interaction.movement && interaction.movement.role === role) interaction.movement = null;
+    update();
+  }
+  async function resetLiveRole(role) {
+    const initial = interaction.initialRoles[role];
+    if (!initial) { resetRoleOverride(role); return; }
+    if (canMoveRole(role)) setPositionOverride(role, initial.position);
+    setPresenceOverride(role, initial.present);
+    if (canMoveRole(role)) {
+      await sendMutation('position', role, {position: initial.position, final: true});
+    }
+    await sendMutation('presence', role, {present: initial.present});
+  }
+  async function resetAllInteractions() {
+    if (interactiveLiveMode) {
+      if (!interaction.leaseToken && !(await acquireInteractionLease())) return;
+      for (const role of Object.keys(interaction.initialRoles)) {
+        if (canControlRole(role) && roleIsModified(role)) await resetLiveRole(role);
+      }
+    } else {
+      for (const role of Object.keys(interaction.overrides)) delete interaction.overrides[role];
+    }
+    interaction.movement = null;
+    interaction.awaitingDestination = null;
+    main.classList.remove('awaiting-destination', 'dragging');
+    update();
+  }
+  function advanceMovement(now) {
+    const movement = interaction.movement;
+    if (!movement || interactiveLiveMode) return false;
+    const fraction = (now - movement.started_at) / movement.duration_ms;
+    setPositionOverride(movement.role,
+      interactionModel.interpolate(movement.start, movement.destination, fraction));
+    const point = effectivePosition(movement.role, frameAt(tMs)).slice();
+    schedulePosition(movement.role, point, fraction >= 1);
+    if (fraction >= 1) interaction.movement = null;
+    return true;
+  }
+
+  $('#cameraMode').addEventListener('click', () => setInteractionMode('camera'));
+  $('#interactMode').addEventListener('click', () => setInteractionMode('interact'));
+  $('#moveSelected').addEventListener('click', () => beginDestinationSelection(interaction.hudRole || selected));
+  $('#presenceSelected').addEventListener('click', () => togglePresence(interaction.hudRole || selected));
+  async function controlMovement(action) {
+    const movement = interaction.movement;
+    if (!movement || !interactiveLiveMode) return;
+    const method = action === 'cancel' ? 'DELETE' : 'POST';
+    const suffix = action === 'cancel' ? '' : '/' + action;
+    const accepted = await sendControl(
+      '/api/demo/movements/' + encodeURIComponent(movement.id) + suffix,
+      method, {});
+    if (!accepted || !accepted.movement) return;
+    interaction.movement = ['completed', 'cancelled', 'failed'].includes(
+      accepted.movement.status) ? null : accepted.movement;
+    update();
+  }
+  $('#pauseMovement').addEventListener('click', () => {
+    const action = interaction.movement && interaction.movement.status === 'paused'
+      ? 'resume' : 'pause';
+    controlMovement(action);
+  });
+  $('#cancelMovement').addEventListener('click', () => controlMovement('cancel'));
+  async function toggleRecording() {
+    if (!interactiveLiveMode || !interaction.apiEnabled) return;
+    if (!interaction.leaseToken && !(await acquireInteractionLease())) return;
+    if (interaction.recording.active) {
+      const stopped = await sendControl('/api/demo/recording/stop', 'POST', {});
+      if (stopped && stopped.recording) {
+        interaction.recording = stopped.recording;
+        interactionMessage(
+          'recorded ' + stopped.recording.keyframes + ' keyframes over ' +
+          (stopped.recording.duration_ms / 1000).toFixed(1) + ' seconds');
+      }
+    } else {
+      const fallback = 'interactive-room-' + new Date().toISOString()
+        .replace(/[-:]/g, '').replace(/\..*/, 'Z');
+      const name = window.prompt('Recording name', fallback);
+      if (name === null) return;
+      const started = await sendControl(
+        '/api/demo/recording/start', 'POST', {name});
+      if (started && started.recording) {
+        interaction.recording = started.recording;
+        interactionMessage('recording accepted room movements and presence changes');
+      }
+    }
+    update();
+  }
+  async function downloadRecording() {
+    const response = await fetch('/api/demo/recording/world', {cache: 'no-store'});
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      interactionMessage(body.message || 'recorded world is unavailable', true);
+      return;
+    }
+    const worldBlob = await response.blob();
+    const anchor = document.createElement('a');
+    const name = interaction.recording.name || 'interactive-room';
+    anchor.href = URL.createObjectURL(worldBlob);
+    anchor.download = name + '.world.json';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(anchor.href), 1000);
+  }
+  $('#recordInteraction').addEventListener('click', toggleRecording);
+  $('#downloadRecording').addEventListener('click', downloadRecording);
+  $('#resetSelected').addEventListener('click', () => {
+    const role = interaction.hudRole || selected;
+    if (role && interactiveLiveMode) resetLiveRole(role);
+    else if (role) resetRoleOverride(role);
+    update();
+  });
+  $('#resetAll').addEventListener('click', resetAllInteractions);
+  $('#roleMenu').addEventListener('click', (event) => {
+    const action = event.target.dataset.roleAction;
+    const role = interaction.menuRole;
+    if (!action || !role) return;
+    hideRoleMenu();
+    if (action === 'move') beginDestinationSelection(role);
+    else if (action === 'presence') togglePresence(role);
+    else if (action === 'reset') {
+      if (interactiveLiveMode) resetLiveRole(role);
+      else resetRoleOverride(role);
+      update();
+    }
+  });
+  document.addEventListener('keydown', (event) => {
+    if ($('#viewerManual').open) return;
+    if (event.key !== 'Escape') return;
+    hideRoleMenu();
+    interaction.awaitingDestination = null;
+    if (!interactiveLiveMode) interaction.movement = null;
+    main.classList.remove('awaiting-destination', 'dragging');
+    update();
+  });
 
   function setLiveStatus(state, detail = '') {
     const badge = $('#liveStatus');
@@ -753,10 +1915,47 @@
       const d = p.decision || {};
       return 'Policy: ' + (d.reason || 'evaluated');
     }
-    if (event.kind === 'optimizer.action') return p.phase === 'requested' ? 'BTM steer requested' : 'Steering request submitted';
+    if (event.kind === 'optimizer.measurement.waiting') {
+      return 'Optimizer waiting: ' + String(p.reason || 'fresh telemetry').replaceAll('_', ' ');
+    }
+    if (event.kind === 'optimizer.measurement.unavailable') {
+      return 'Candidate metrics unavailable; optimizer paused with ' + p.retry_delay_seconds + 's retry backoff';
+    }
+    if (event.kind === 'optimizer.environment.changed') return 'RF changed; optimizer hold restarted';
+    if (event.kind === 'rf.steering_assist.started') {
+      return 'Steering RF assist: ' + displayRole(p.station_role) + ' → ' + displayRole(p.target_ap_role);
+    }
+    if (event.kind === 'rf.steering_assist.completed') {
+      return p.room_matrix_restored ? 'Room RF matrix restored exactly' : 'Room RF restoration failed';
+    }
+    if (event.kind === 'optimizer.action') {
+      const batch = Number(p.batch_size || 1) > 1
+        ? ' (' + p.batch_index + '/' + p.batch_size + ')' : '';
+      return (p.phase === 'requested' ? 'BTM steer requested' : 'Steering request submitted') + batch;
+    }
+    if (event.kind === 'optimizer.batch.aborted') {
+      return 'Steering batch paused: ' + String(p.reason || 'remeasure').replaceAll('_', ' ');
+    }
     if (event.kind === 'optimizer.verification') return p.success ? 'Association and traffic verified' : 'Steering verification failed';
     if (event.kind === 'traffic.sample' && !p.success) return 'Hero traffic probe failed';
     if (event.kind === 'health.sample' && p.healthy === false) return 'Lab health degraded';
+    if (event.kind === 'room.position.committed') return displayRole(p.role) + ' RF position applied';
+    if (event.kind === 'room.presence.committed') {
+      const ap = world && world.roles[p.role] === 'fronthaul_ap';
+      return displayRole(p.role) + (ap
+        ? (p.present ? ' fronthaul restored' : ' fronthaul disabled')
+        : (p.present ? ' reappeared' : ' disappeared'));
+    }
+    if (event.kind === 'interaction.movement.started') return displayRole(p.movement.role) + ' started walking';
+    if (event.kind === 'interaction.movement.paused') return displayRole(p.movement.role) + ' walk paused';
+    if (event.kind === 'interaction.movement.resumed') return displayRole(p.movement.role) + ' walk resumed';
+    if (event.kind === 'interaction.movement.completed') return displayRole(p.movement.role) + ' reached its destination';
+    if (event.kind === 'interaction.movement.cancelled') return displayRole(p.movement.role) + ' walk cancelled';
+    if (event.kind === 'interaction.movement.failed') return displayRole(p.movement.role) + ' walk failed';
+    if (event.kind === 'interaction.recording.started') return 'Interaction recording started';
+    if (event.kind === 'interaction.recording.stopped') return 'Recorded world is ready';
+    if (event.kind === 'interaction.lease.acquired') return 'Interactive control acquired';
+    if (event.kind === 'interaction.lease.released' || event.kind === 'interaction.lease.expired') return 'Interactive control released';
     if (event.kind === 'worker.error') return (p.fatal ? 'ERROR' : 'Transient warning') + ': ' + p.worker;
     if (event.kind === 'rf.restore.started') return 'Restoring the original RF matrix';
     if (event.kind === 'rf.restore.completed') return p.verified ? 'RF baseline restored' : 'RF restoration failed';
@@ -766,16 +1965,57 @@
   function applyDemoEvent(event, advanceClock = true) {
     if (advanceClock) tMs = Math.max(0, Math.min(world.duration_ms, Number(event.world_time_ms) || 0));
     if (event.kind === 'network.snapshot') networkState = event.payload;
-    else if (event.kind === 'optimizer.evaluation') optimizerState = event.payload;
+    else if (event.kind === 'optimizer.evaluation' ||
+             event.kind === 'optimizer.measurement.unavailable') optimizerState = event.payload;
     else if (event.kind === 'traffic.sample') trafficState = event.payload;
     else if (event.kind === 'health.sample') healthState = event.payload;
     else if (event.kind === 'optimizer.action') {
       actionState = event.payload;
+      if (optimizerState && event.payload.actions_used != null) {
+        optimizerState.actions_used = event.payload.actions_used;
+      }
       actionPulseUntil = performance.now() + 5000;
     } else if (event.kind === 'optimizer.verification') {
       verificationState = event.payload;
       actionPulseUntil = performance.now() + 6000;
     } else if (event.kind === 'demo.mark') storyState = event.payload.label;
+    else if (event.kind === 'room.position.committed' ||
+             event.kind === 'room.presence.committed') {
+      const p = event.payload || {};
+      interaction.revision = Math.max(interaction.revision, Number(p.revision || 0));
+      if (canControlRole(p.role)) {
+        const locallyMoving = interaction.leaseToken &&
+          ((interaction.drag && interaction.drag.role === p.role) ||
+           (!interactiveLiveMode && interaction.movement &&
+            interaction.movement.role === p.role));
+        const prior = interaction.overrides[p.role] || {};
+        interaction.overrides[p.role] = Object.assign({}, prior, {
+          position: locallyMoving && prior.position ? prior.position : p.position.slice(),
+          present: !!p.present,
+        });
+        const preview = interaction.previewPositions[p.role];
+        if (!interaction.drag && preview &&
+            Math.hypot(preview[0] - p.position[0], preview[1] - p.position[1]) <= 0.04) {
+          delete interaction.previewPositions[p.role];
+        }
+      }
+    } else if (event.kind.startsWith('interaction.movement.')) {
+      const p = event.payload || {};
+      const movement = p.movement;
+      interaction.revision = Math.max(interaction.revision, Number(p.revision || 0));
+      if (movement) {
+        if (['running', 'paused'].includes(movement.status)) {
+          interaction.movement = movement;
+        } else if (interaction.movement && interaction.movement.id === movement.id) {
+          interaction.movement = null;
+        }
+      }
+    } else if (event.kind === 'interaction.recording.started' ||
+               event.kind === 'interaction.recording.stopped') {
+      interaction.recording = event.payload.recording;
+      interaction.revision = Math.max(
+        interaction.revision, Number(event.payload.revision || 0));
+    }
     const label = eventLabel(event);
     if (label) recentEvents.push({world_time_ms: event.world_time_ms, label});
     if (recentEvents.length > 30) recentEvents = recentEvents.slice(-30);
@@ -805,13 +2045,17 @@
     $('#scrub').disabled = true;
     $('#play').disabled = true;
     document.querySelectorAll('[data-speed]').forEach((button) => { button.disabled = true; });
-    $('#viewerTitle').textContent = 'EasyMesh immersive room demo';
-    $('#hint').textContent = 'live runner clock · drag to orbit · wheel to zoom · shift-drag to pan';
+    $('#viewerTitle').textContent = interactiveLiveMode
+      ? 'EasyMesh interactive room' : 'EasyMesh immersive room demo';
+    $('#hint').textContent = interactiveLiveMode
+      ? 'select Interact for live RF control · Camera orbits the room'
+      : 'live runner clock · drag to orbit · wheel to zoom · shift-drag to pan';
     try {
       const stateResponse = await fetch('/api/demo/current', { cache: 'no-store' });
       if (!stateResponse.ok) throw new Error(stateResponse.status + ' ' + stateResponse.statusText);
       const state = await stateResponse.json();
       await fetchWorldUrl(state.world_url);
+      if (interactiveLiveMode) await refreshInteractionSnapshot();
       applyLiveState(state);
       liveSource = new EventSource('/api/demo/events?after=' + encodeURIComponent(state.sequence));
       liveSource.onopen = () => {
@@ -834,6 +2078,7 @@
       err('Could not enter live mode: ' + e.message);
     }
   }
+  window.addEventListener('pagehide', () => { releaseInteractionLease(); });
   function applyReplayUntil(value) {
     if (value < replayAppliedTime) {
       resetEventState(); replayIndex = 0;
@@ -874,20 +2119,39 @@
   // ---- loop ----------------------------------------------------------------
   function loop(now) {
     requestAnimationFrame(loop);
+    const interactionChanged = world && advanceMovement(now);
     if (playing && world && !liveMode) {
       tMs += (now - lastTick) * speed;
       if (tMs >= world.duration_ms) { tMs = world.duration_ms; playing = false; $('#play').textContent = 'Play'; }
       if (replayMode) applyReplayUntil(tMs);
       update();
-    }
+    } else if (interactionChanged) update();
     lastTick = now;
     if (world3d) renderer.render(scene, camera);
   }
   resize(); placeCamera(); requestAnimationFrame(loop);
-  window.__scene = scene; window.__viewer = { loadWorld, update, frameAt: (t) => frameAt(t), bestServing: (g) => bestServing(g), setTime: (t) => { tMs = t; update(); }, select: (r) => { selected = r; update(); }, setBand: (b) => { band = b; update(); } };
+  window.__scene = scene; window.__viewer = {
+    loadWorld, update, frameAt: (t) => frameAt(t),
+    bestServing: (g) => bestServing(g),
+    setTime: (t) => { tMs = t; update(); },
+    select: (r) => { selected = r; interaction.hudRole = canMoveRole(r) ? r : null; update(); },
+    setBand: (b) => { band = b; update(); },
+    setInteractionMode,
+    setPreviewPosition: (role, point) => { setPositionOverride(role, point); update(); },
+    setPreviewPresence: (role, present) => { setPresenceOverride(role, present); update(); },
+    resetPreview: resetAllInteractions,
+  };
 
   const initial = new URLSearchParams(location.search).get('world');
   if (initial && GOLDEN.includes(initial)) sel.value = initial;
+  if (noConnectMode) {
+    $('#viewerTitle').textContent = 'EasyMesh room sandbox';
+    $('#interactionBadge').textContent = 'NO CONNECT';
+    $('#interactionHelp').textContent =
+      'Browser-only sandbox: movements preview room geometry and RF; no controller, optimizer, client or wmediumd is connected.';
+    setLiveStatus('ready', 'no controller or medium connection');
+    setInteractionMode('interact');
+  }
   if (liveMode) connectLive();
   else if (replayMode) connectReplay();
   else if (location.protocol === 'file:') $('#worldmeta').textContent = 'Opened from disk: pick a .world.json below.';

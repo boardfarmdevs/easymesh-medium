@@ -4,6 +4,7 @@ import unittest
 import json
 
 from wmdcfg.model import ScenarioError
+from wmdcfg.geometry import directed_link, quantize_position, wall_crossings
 from wmdcfg.parser import parse
 from wmdcfg.compiler import validate_scenario
 from wmdcfg.world import compile_world, export_wmd, verify_world_plan
@@ -54,6 +55,19 @@ def _mobility():
 
 
 class WorldTests(unittest.TestCase):
+    def test_public_geometry_is_quantized_directional_and_names_crossed_walls(self):
+        layout = _layout()
+        nodes = {item["role"]: item for item in layout["nodes"]}
+        positions = {role: tuple(item["position"]) for role, item in nodes.items()}
+        present = {role: True for role in nodes}
+        link = directed_link(
+            nodes["sta_01"], nodes["agent_2"], positions, present,
+            layout, {"seed": 0}, 0, "fronthaul",
+        )
+        self.assertEqual(link["wall_loss_db"], 5)
+        self.assertEqual(len(wall_crossings([2, 2], [9, 2], layout["walls"])), 1)
+        self.assertEqual(quantize_position([2.024, 2.026]), (2.0, 2.05))
+
     def test_compile_is_deterministic_and_tracks_geometry(self):
         first = compile_world(_layout(), _mobility())
         second = compile_world(_layout(), _mobility())

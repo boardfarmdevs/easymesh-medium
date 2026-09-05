@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>EasyMesh room viewer — operator manual</title>
+<style>
+  :root { color-scheme: light; --paper: #faf8f3; --ink: #2a2622; --muted: #655e57; --rule: #d9d2c5; --accent: #1f5f8b; }
+  * { box-sizing: border-box; }
+  html { scroll-padding-top: 20px; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.65 "Segoe UI", system-ui, sans-serif; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible, input:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+  header { padding: 26px 32px 18px; border-bottom: 1px solid var(--rule); background: #f0ece2; }
+  h1 { font-size: clamp(24px, 4vw, 34px); line-height: 1.2; margin: 5px 0 12px; }
+  .eyebrow { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  header p { max-width: 76ch; margin: 6px 0; }
+  .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 18px; }
+  input, button { font: inherit; color: inherit; padding: 8px 12px; border: 1px solid var(--rule); border-radius: 5px; background: #fff; }
+  input { width: min(100%, 330px); }
+  button { cursor: pointer; }
+  .layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); max-width: 1180px; margin: auto; }
+  nav { padding: 24px 20px; border-right: 1px solid var(--rule); position: sticky; top: 0; align-self: start; max-height: 100vh; overflow-y: auto; }
+  nav ol { padding-left: 22px; margin: 10px 0; }
+  nav li { padding: 4px 0; line-height: 1.4; }
+  nav a { text-decoration: none; font-size: 14px; }
+  main { min-width: 0; padding: 6px 32px 40px; }
+  section { padding: 20px 0; border-bottom: 1px solid var(--rule); }
+  section[hidden], nav li[hidden] { display: none; }
+  h2 { color: var(--accent); font-size: 23px; line-height: 1.3; margin: 0 0 14px; }
+  h3 { font-size: 18px; margin: 22px 0 6px; }
+  p { margin: 10px 0; }
+  li { margin: 5px 0; }
+  ul, ol { padding-left: 24px; }
+  .note { border-left: 4px solid var(--accent); padding: 10px 16px; background: #eaf1f5; }
+  .attention { border-left-color: #a56700; background: #faf0d8; }
+  .table-wrap { max-width: 100%; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 1.5; }
+  th, td { text-align: left; vertical-align: top; padding: 10px; border-bottom: 1px solid var(--rule); }
+  th { background: #f0ece2; }
+  code, kbd { font: .9em ui-monospace, "Cascadia Code", monospace; overflow-wrap: anywhere; }
+  code { background: #eee9df; padding: 1px 4px; border-radius: 3px; }
+  kbd { border: 1px solid #b8b0a2; border-radius: 3px; padding: 1px 5px; background: #fff; }
+  pre { background: #eee9df; padding: 16px; overflow: auto; font-size: 13px; line-height: 1.55; }
+  pre code { padding: 0; overflow-wrap: normal; }
+  .path { overflow-wrap: anywhere; }
+  #searchStatus { color: var(--muted); font-size: 13px; }
+  #noResults { padding: 24px 0; }
+  footer { color: var(--muted); padding: 20px 32px; font-size: 13px; border-top: 1px solid var(--rule); }
+  @media (max-width: 720px) { .layout { grid-template-columns: 1fr; } nav { position: static; max-height: none; border-right: 0; border-bottom: 1px solid var(--rule); } nav ol { columns: 2; column-gap: 28px; } header, main, footer { padding-left: 18px; padding-right: 18px; } }
+  @media (max-width: 420px) { nav ol { columns: 1; } }
+  @media print { body { background: #fff; font-size: 11pt; } header { background: #fff; padding: 0 0 16px; } .tools, nav, #noResults { display: none !important; } .layout { display: block; } main { padding: 0; } section[hidden] { display: block !important; } section { break-inside: auto; } h2, h3 { break-after: avoid; } pre, tr, .note { break-inside: avoid; } a { color: inherit; } footer { padding: 12px 0; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="eyebrow">EasyMesh research lab · viewer guide</div>
+  <h1>The interactive room manual</h1>
+  <p>Move clients and mesh nodes, inspect radio conditions, follow real associations, and understand how the optimizer responds. This guide covers both the connected rev140 lab and the public browser-only sandbox.</p>
+  <p><strong>Start with the mode badge.</strong> A convincing animation is not proof of a live connection, a successful roam, or a healthy network.</p>
+  <div class="tools">
+    <label for="manualSearch">Find a topic</label>
+    <input id="manualSearch" type="search" placeholder="Try “restore”, “IoT”, or “signal”" autocomplete="off">
+    <button id="clearSearch" type="button">Clear</button>
+    <button id="printManual" type="button">Print / Save PDF</button>
+    <span id="searchStatus" role="status" aria-live="polite"></span>
+  </div>
+</header>
+<div class="layout">
+<nav aria-label="Manual contents">
+  <strong>Contents</strong>
+  <p><a href="#manualSearch">Back to search</a></p>
+  <ol>
+    <li><a href="#quick-start">Quick start</a></li>
+    <li><a href="#modes">Modes and URLs</a></li>
+    <li><a href="#screen">Reading the screen</a></li>
+    <li><a href="#camera">Camera and playback</a></li>
+    <li><a href="#clients">Move a client</a></li>
+    <li><a href="#destinations">Destination walks</a></li>
+    <li><a href="#mesh-nodes">Move Agent-1 or extenders</a></li>
+    <li><a href="#presence">Disappear, disable, restore</a></li>
+    <li><a href="#signals">Signals and measurement sources</a></li>
+    <li><a href="#optimizer">Optimizer and convergence</a></li>
+    <li><a href="#reset">Reset and shared control</a></li>
+    <li><a href="#recording">Recording and replay</a></li>
+    <li><a href="#walkthroughs">Three demo walkthroughs</a></li>
+    <li><a href="#troubleshooting">Troubleshooting</a></li>
+    <li><a href="#operations">Operator setup and shutdown</a></li>
+    <li><a href="#evidence">Evidence and API reference</a></li>
+    <li><a href="#glossary">Glossary and limits</a></li>
+  </ol>
+</nav>
+<main id="manualContent">
+<p id="noResults" hidden>No matching topics. Try fewer words or select Clear.</p>
+<section id="quick-start" aria-labelledby="quick-start-title">
+  <h2 id="quick-start-title">1. Quick start</h2>
+  <h3>Try the room without a lab</h3>
+  <ol>
+    <li>Open the <a href="https://boardfarmdevs.github.io/meta-cmf-bananapi-vcpe/viewer/?mode=no-connect&amp;world=home-a-private-client-room-walk" target="_blank" rel="noopener">public sandbox</a>. Look for <strong>NO CONNECT</strong>.</li>
+    <li>It starts in <strong>Interact</strong>. Select a client, drag it across the floor, and release it.</li>
+    <li>Read the pinned details panel: coordinates, walls, predicted SNR, and the modeled strongest AP.</li>
+    <li>Try <strong>Move to…</strong>, then click a destination. Select <strong>Camera</strong> when you want to orbit the room.</li>
+    <li>Select <strong>Reset role</strong> or <strong>Reset all</strong> to clear your preview edits.</li>
+  </ol>
+  <h3>Operate the live lab</h3>
+  <ol>
+    <li>Open the <a href="http://192.168.2.140:18891/viewer/?mode=interactive" target="_blank" rel="noopener">rev140 live room</a> from a network that can reach the lab.</li>
+    <li>Wait for live state and current controller telemetry. Check the Whole lab card before editing.</li>
+    <li>Select <strong>Interact</strong>. Supply the run's operator capability if prompted; another browser may already hold control.</li>
+    <li>Confirm the <strong>LIVE RF</strong> badge, then drag one role and release it.</li>
+    <li>Wait for the accepted RF event, fresh measurements, and the optimizer result. The actual association line changes only when controller evidence changes.</li>
+  </ol>
+  <p class="note">Opening this manual does not pause the room, stop a walk, acquire control, or change RF. Live measurements and an already authorized optimizer continue while you read. Close the manual with its Close button or <kbd>Esc</kbd>.</p>
+</section>
+<section id="modes" aria-labelledby="modes-title">
+  <h2 id="modes-title">2. Modes and URLs</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th scope="col">Mode</th><th scope="col">What you see</th><th scope="col">What an edit can do</th></tr></thead>
+    <tbody>
+      <tr><td><strong>NO CONNECT</strong><br><code>?mode=no-connect</code></td><td>Golden World geometry and browser calculations.</td><td>Change the local preview only. No controller, optimizer, or medium API is contacted.</td></tr>
+      <tr><td><strong>Static preview</strong><br>World selector or local JSON</td><td>Precomputed scenario generations, trails, and predicted links.</td><td>Explore and override the browser presentation. Playback is local.</td></tr>
+      <tr><td><strong>Live observation</strong><br><code>?mode=live</code></td><td>A server-owned scenario with controller, health, traffic, and optimizer events.</td><td>Observe. The running scenario owns the RF changes.</td></tr>
+      <tr><td><strong>Interactive live</strong><br><code>?mode=interactive</code></td><td>Accepted room positions plus live network evidence.</td><td>With the capability and control lease, commit positions and RF-presence changes.</td></tr>
+      <tr><td><strong>Replay</strong><br><code>?mode=replay</code></td><td>A completed run's recorded world and event stream.</td><td>Scrub and play recorded evidence. Replay does not write RF.</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>Live room:</strong> <a class="path" href="http://192.168.2.140:18891/viewer/?mode=interactive" target="_blank" rel="noopener">http://192.168.2.140:18891/viewer/?mode=interactive</a></p>
+  <p><strong>EasyMesh WebUI:</strong> <a href="http://192.168.2.140:18889/" target="_blank" rel="noopener">http://192.168.2.140:18889/</a>. Its Network Topology page shows the logical network, not room coordinates.</p>
+  <p>The public GitHub Pages site is a static sandbox. Adding <code>mode=interactive</code> to a public URL does not create a lab connection. Replay also requires a replay server; a downloaded world alone contains geometry, not the controller's full evidence stream.</p>
+  <p>A live observer URL is shareable inside the lab network. The separate operator URL includes a run-scoped <code>#operator=…</code> capability; treat it as a control credential. The viewer removes that fragment from the address bar after consuming it. Never paste the capability into screenshots, issue reports, or shared notes.</p>
+</section>
+<section id="screen" aria-labelledby="screen-title">
+  <h2 id="screen-title">3. Reading the screen</h2>
+  <ul>
+    <li><strong>Left sidebar:</strong> mode, run ID, live cards, world and time controls, band selection, interaction controls, and the selected-node link table. Scroll it to reach lower controls.</li>
+    <li><strong>Room drawing:</strong> the floor, walls, mesh nodes, clients, paths, and link overlays. These positions define the experiment's geometry.</li>
+    <li><strong>Pinned details panel:</strong> appears in the room's upper-right corner when inspecting an interactive role. It compares the role's position, paths, and available measurements.</li>
+    <li><strong>Whole lab:</strong> device/client counts, private and IoT cohorts, observed topology shape, and health. The normal 20-client profile expects 10 private and 10 IoT clients.</li>
+    <li><strong>Hero client / Private-Laptop:</strong> a legacy focus card for the designated traffic probe, <code>sta_mobile_01</code>. It is an ordinary private client. Fleet reconciliation considers all 20 clients; this card is not a special steering privilege or a check of every client's traffic.</li>
+    <li><strong>External optimizer:</strong> authority, policy reason, current focus, fleet coverage, stronger candidates, action budget, and the last verified outcome.</li>
+    <li><strong>Recent events:</strong> a short running narrative. Full details and earlier events live in the saved evidence.</li>
+  </ul>
+  <p>The healthy model shorthand <code>5/15/50/24</code> means five mesh devices, fifteen radios, fifty BSS entries, and twenty-four associations, including backhaul. The WebUI may draw a separate Controller node alongside Agent-1, so six displayed icons do not imply six physical mesh devices.</p>
+  <p>Agent-1 represents the gateway's co-located agent/radios. Extender names follow the controller's current identity mapping; underlying role names and permanent radio identities provide stable bindings even when discovery order changes.</p>
+</section>
+<section id="camera" aria-labelledby="camera-title">
+  <h2 id="camera-title">4. Camera, playback, and overlays</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th scope="col">Control</th><th scope="col">Effect</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Camera</strong> + drag</td><td>Orbit the room.</td></tr>
+      <tr><td>Mouse wheel</td><td>Zoom the camera.</td></tr>
+      <tr><td><kbd>Shift</kbd> + drag</td><td>Pan the camera.</td></tr>
+      <tr><td>Click a role</td><td>Select it and inspect its links.</td></tr>
+      <tr><td><strong>Interact</strong> + role drag</td><td>Preview a new position; in live mode, commit on release.</td></tr>
+      <tr><td>Right-click a role</td><td>Open its movement, presence, and reset menu.</td></tr>
+      <tr><td><kbd>Esc</kbd> in the viewer</td><td>Dismiss the role menu or pending destination selection. Use Cancel walk to stop an accepted live walk.</td></tr>
+      <tr><td><strong>Play</strong>, <kbd>Space</kbd>, time slider, ½× / 1× / 2× / 4×</td><td>Control static/replay time. Live time belongs to the server and these controls are disabled.</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>Band for link colours</strong> changes the inspected/modelled band. It does not retune a radio, move a client between bands, or change its SSID.</p>
+  <p>Use the overlay checkboxes to reduce clutter: strongest simulated links, actual mesh backhaul, mobile trails, and station names. In a static world, backhaul paths are model information; live backhaul lines come from the controller.</p>
+  <p>The interactive scenario clock can reach the end of its base world's duration while the run continues. A stopped time-slider value is not, by itself, proof that live measurements or the optimizer stopped. Check live events and state.</p>
+</section>
+<section id="clients" aria-labelledby="clients-title">
+  <h2 id="clients-title">5. Move a client</h2>
+  <ol>
+    <li>Select <strong>Interact</strong>, then select a private or IoT client.</li>
+    <li>Drag it across the floor. The ghost is a browser preview; inspect the predicted path and walls before accepting the point.</li>
+    <li>Release the pointer. In live mode, the server validates and quantizes the position to the room's 5 cm grid.</li>
+    <li>Wait for the accepted position/RF event. Only then is the solid role authoritative.</li>
+    <li>Watch the serving measurement and actual association. A new modeled strongest AP can appear before the client has roamed.</li>
+  </ol>
+  <p>One client movement can update up to 30 directed frequency-qualified values: five APs × three bands × two directions. Changed values are applied as one atomic generation and read back before acceptance. A geometrical move that leaves every rounded SNR unchanged is an RF no-op and need not increment the medium generation.</p>
+  <p>Private and hidden-IoT clients keep their network identities. Body/cohort color and the signal gauge serve different purposes; a blue private client is not an indication of weak RF. The word “static” in a role name describes its base scenario, not a ban on moving it interactively.</p>
+  <p class="note">A movement is an RF stimulus. It does not directly assign the client to an AP. Scanning, association, controller telemetry, and authorized steering still determine the real network result.</p>
+</section>
+<section id="destinations" aria-labelledby="destinations-title">
+  <h2 id="destinations-title">6. Walk to a destination</h2>
+  <ol>
+    <li>Choose <strong>0.6 m/s stroll</strong>, <strong>1.4 m/s walk</strong>, or <strong>3.0 m/s run</strong>.</li>
+    <li>Select a movable role, then select <strong>Move to…</strong>, or right-click and choose <strong>Move to destination…</strong>.</li>
+    <li>Click the destination on the floor. The path and marker show the intended motion.</li>
+    <li>In live mode, use <strong>Pause walk</strong>, <strong>Resume walk</strong>, or <strong>Cancel walk</strong>. Cancel leaves the role at its last accepted position.</li>
+  </ol>
+  <p>The live server owns movement timing and accepted RF steps. Browser frame rate does not determine the RF trajectory. Continued control still depends on the lease: losing or releasing it cancels the walk and retains the last accepted position.</p>
+  <p>A walk follows the implemented destination path; it is not a navigation or obstacle-avoidance simulator. Walls contribute RF loss where paths cross them. Stop moving and let the room settle when you want a clean optimizer comparison.</p>
+  <p>In NO CONNECT mode, movement is browser-local. Live pause/cancel and recording controls can be unavailable there. A preview path does not prove any Wi-Fi traffic or association event occurred.</p>
+</section>
+<section id="mesh-nodes" aria-labelledby="mesh-nodes-title">
+  <h2 id="mesh-nodes-title">7. Move Agent-1 or an extender</h2>
+  <p>Agent-1 and all four extenders accept the same drag and destination controls as clients. Move the gateway marker to reposition the co-located Agent-1 radios in the RF room.</p>
+  <p>A mesh-node move updates both its client-facing paths and its mesh-peer paths. In the current profile, that is up to 144 values: 120 client-serving values plus 24 peer values, across three bands and both directions. They share one bounded, verified atomic update.</p>
+  <p>Coordinates do not relocate the controller process, WAN, management interface, or container. The node keeps its permanent identity. Agent-1 stays present; its presence control is protected.</p>
+  <p>The panel's <strong>Actual parent</strong> is controller evidence. <strong>Modeled mesh peer</strong> is the strongest geometric path on the selected band. Moving an extender can change backhaul conditions, but does not choose its parent directly.</p>
+  <p>For the centered comparison, leave Agent-1 near the room's middle and position extenders around it. The WebUI's star layout similarly centers Agent-1 and packs extenders around it; its diagram is a logical layout and does not copy exact floor coordinates. Real branch and chain parentage remain visible as reported by the controller.</p>
+</section>
+<section id="presence" aria-labelledby="presence-title">
+  <h2 id="presence-title">8. Disappear, disable, and restore</h2>
+  <h3>Temporarily hide a client</h3>
+  <p>Select the client and choose <strong>Disappear</strong>. The server applies the world's minimum SNR to all 30 serving-link values while retaining the container and radio identity. The marker remains selectable in an absent/hollow style. You can reposition it while absent.</p>
+  <p>To bring it back, select the same marker or its role menu and choose <strong>Reappear</strong>. RF is recomputed at its current position; normal discovery and association then recover.</p>
+  <h3>Temporarily disable an extender</h3>
+  <ol>
+    <li>Select the extender, for example <strong>Extender-4</strong>.</li>
+    <li>Choose <strong>Disable fronthaul</strong>. All its client-serving links are attenuated together, up to 120 values.</li>
+    <li>Keep watching actual associations while the optimizer measures and evacuates affected clients.</li>
+    <li>To restore it, click the same grey extender and choose <strong>Restore fronthaul</strong> in the sidebar or right-click menu.</li>
+    <li>Wait for measured convergence. Clients return only when that AP is the better eligible choice.</li>
+  </ol>
+  <p>A disabled extender can still be moved. Its fronthaul stays disabled until restored, at which point the current geometry is used. <strong>Reset role</strong> restores both its session-start position and presence.</p>
+  <p class="note attention">Disable fronthaul leaves the extender's agent, container, and backhaul running. It is not a hardware power-off test. Current presence controls use minimum-SNR attenuation (normally −20 dB), not an independent radio-unavailable primitive; actual delivery and disconnection outcomes must be observed.</p>
+</section>
+<section id="signals" aria-labelledby="signals-title">
+  <h2 id="signals-title">9. Signals, lines, and measurement sources</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th scope="col">Display</th><th scope="col">Meaning</th></tr></thead>
+    <tbody>
+      <tr><td>Predicted SNR, distance, wall count/loss</td><td>Geometry model for the selected band and direction.</td></tr>
+      <tr><td>Applied SNR / RF generation</td><td>Values accepted and read back through the medium control interface.</td></tr>
+      <tr><td>Serving RCPI / RSSI and metric age</td><td>The controller's current-link report. Its age matters after movement or reassociation.</td></tr>
+      <tr><td>Candidate RCPI</td><td>EasyMesh-reported candidate quality. The current hwsim candidate provider is explicitly model-backed; a real protocol exchange does not make it an independent receiver sample.</td></tr>
+      <tr><td>Dashed scenario-best line</td><td>The model's best path, not actual ownership.</td></tr>
+      <tr><td>Cyan association line</td><td>Controller-observed client ownership.</td></tr>
+      <tr><td>Yellow target line</td><td>The optimizer's nominated target, not proof of a completed roam.</td></tr>
+      <tr><td>Dark-blue backhaul line in live mode</td><td>Controller-observed mesh parentage.</td></tr>
+    </tbody>
+  </table></div>
+  <p>The ten-segment signal gauge progresses from red through amber to green. It uses fresh controller RSSI when available and otherwise falls back to modeled serving-link SNR. Inspect the details and age when interpreting it; color alone is not proof of a fresh measurement.</p>
+  <p>SNR is a ratio in dB; RSSI is received power in dBm. They cannot be compared as equal numbers. A valid RCPI in the normal 0–220 range converts to dBm using <code>RCPI / 2 − 110</code>; for example, RCPI 106 corresponds to −57 dBm. Unavailable values remain unknown, not zero signal.</p>
+  <p>A band-selector change can alter the model's strongest path without changing the client's actual band. Likewise, a healthy signal says nothing by itself about traffic delivery, available airtime, or physical-radio calibration.</p>
+</section>
+<section id="optimizer" aria-labelledby="optimizer-title">
+  <h2 id="optimizer-title">10. Optimizer behavior and recovery time</h2>
+  <p>The authority is chosen when the server starts. <strong>Stimulus</strong> applies room RF without optimizer work; <strong>recommend</strong> explains possible steers; <strong>act</strong> permits bounded automatic BTM requests. The browser's control lease authorizes room edits, not a change of optimizer authority.</p>
+  <p>Interactive act mode measures the entire eligible private and IoT fleet. Candidates remain within each client's SSID and band. A strictly stronger target must satisfy the policy hold; the current interactive configuration uses a minimum gain of one RCPI unit and a five-second hold. Exact ties do not cause a roam.</p>
+  <ol>
+    <li>The server accepts and verifies the new RF generation.</li>
+    <li>It waits until motion stops and RF has settled, normally at least two seconds.</li>
+    <li>It obtains fresh serving and candidate telemetry under a consistent room state.</li>
+    <li>The policy evaluates eligible clients. The default batch selects up to three, weakest serving link first, using gain as a tie-breaker.</li>
+    <li>Each BTM action runs sequentially and receives its own association and traffic verification.</li>
+    <li>A room change, failed request, or failed verification stops the batch; a later valid cycle evaluates the remaining work.</li>
+  </ol>
+  <p>The current hwsim path briefly applies a declared RF steering assist after the measured target is chosen, refreshes candidate scan records, and sends a real EasyMesh/802.11v BTM request. It restores the authoritative room matrix afterward. Assisted values are not fresh optimizer input. See the assist events and individual verification results in the evidence.</p>
+  <h3>Why do clients take time to turn green?</h3>
+  <p>Movement, telemetry freshness, candidate collection, policy hold, BTM, reassociation, and traffic checks take time. Several clients may need multiple batches. A full fleet can take minutes; neither the five-second policy interval nor a completed drag is a promise of five-second convergence.</p>
+  <p>Watch <strong>Fleet check</strong>, <strong>Stronger AP available</strong>, the current focus, and successful verifications. Continued dragging invalidates measurement windows, so a stable room is the fastest way to obtain a useful result.</p>
+  <p class="note">“Converged” means no stronger eligible measured AP remains for the checked fleet. It does not guarantee every client is green: a client can be on its best AP and still have weak RF because all available paths are poor.</p>
+  <p>Interactive act mode normally has a 100-request circuit breaker, adjustable at startup. When the action budget is exhausted, automatic steering cannot continue even if measurements find improvements. Candidate-query failures can terminate the run; a disconnected viewer is not proof that reconciliation continues in the background.</p>
+</section>
+<section id="reset" aria-labelledby="reset-title">
+  <h2 id="reset-title">11. Reset and shared control</h2>
+  <p><strong>Reset role</strong> returns a live role to its session-start position and presence. <strong>Reset all</strong> applies those resets to changed controllable roles. These are regular RF transactions, so expect new measurement and convergence work afterward.</p>
+  <p>In the static sandbox, reset clears local overrides and returns to the base scenario at the current playback time. Reset is not an arbitrary undo history and does not restart the lab.</p>
+  <p>One browser owns the renewable control lease; other browsers can observe. A competing operator receives a lease conflict. Coordinate control or wait for the existing lease to expire instead of repeatedly submitting edits. The normal lease is 30 seconds and renews while control remains active.</p>
+  <p>Closing the tab or switching out of interactive control releases or eventually expires the lease. The server retains accepted room state; it does not undo the presentation. Accepted walks are cancelled when the lease is lost. Reopen the current run, inspect the authoritative state, and acquire control again before editing.</p>
+  <p>Stopping the room process is different: it restores the exact captured pre-run RF baseline. There is currently no viewer button that performs this operator shutdown.</p>
+</section>
+<section id="recording" aria-labelledby="recording-title">
+  <h2 id="recording-title">12. Recording and replay</h2>
+  <ol>
+    <li>In interactive live mode, select <strong>Start recording</strong> and give the recording a name.</li>
+    <li>Move clients or mesh nodes, run destination walks, and change presence as usual.</li>
+    <li>Select <strong>Stop recording</strong>.</li>
+    <li>Select <strong>Download world</strong> to save the compiled JSON.</li>
+    <li>Open that file through the viewer's local-world input to inspect its geometry and timing without a lab.</li>
+  </ol>
+  <p>Only accepted server positions and presence changes are recorded. Unaccepted ghosts are not part of the recording. The exported <code>wmdcfg.world-plan.v1</code> includes bound roles, timed positions, presence intervals, and calculated links. Geometry samples are compiled at the recording cadence, currently 200 ms.</p>
+  <p>A recorded world reproduces stimulus; it does not guarantee identical Wi-Fi scheduler timing or client choices on a later live run. Full evidence replay uses the run directory, which also contains controller and optimizer events.</p>
+  <p>Recording is unavailable in NO CONNECT mode. Local-world loading and playback remain available. Closing the browser is not the same as stopping a recording; use Stop recording before Download world.</p>
+</section>
+<section id="walkthroughs" aria-labelledby="walkthroughs-title">
+  <h2 id="walkthroughs-title">13. Three short demonstrations</h2>
+  <h3>A. Walk one client between rooms</h3>
+  <ol><li>Start from a healthy, stable fleet and note a client's actual AP and signal.</li><li>Move it toward another extender using 1.4 m/s.</li><li>Compare predicted best path with the actual association line.</li><li>Stop at the destination and watch measurement, recommendation, BTM, and verification events.</li><li>Reset the role and observe the return; save the recording if needed.</li></ol>
+  <h3>B. Disable Extender-4, then restore it</h3>
+  <ol><li>Note its serving clients and select Disable fronthaul.</li><li>Leave the room stable while clients evacuate through normal steering.</li><li>Select the same grey extender and choose Restore fronthaul.</li><li>Observe which clients return because it is their best eligible AP. Others may correctly stay where they are.</li><li>Check fleet coverage, traffic, and health, not just marker colors.</li></ol>
+  <h3>C. Swap two extenders</h3>
+  <ol><li>Note the initial positions of Extender-3 and Extender-4.</li><li>Drag each to the other's position, completing both edits.</li><li>Stop editing. Expect measurement work to restart for the changed environment.</li><li>Follow client ownership and actual backhaul separately; a room coordinate is not a topology assignment.</li><li>Use Reset role on both extenders, or Reset all if every edit should return to the session baseline.</li></ol>
+  <p>In the public sandbox these demonstrations illustrate geometry only. Present a successful live steer only when its real controller and verification evidence is available.</p>
+</section>
+<section id="troubleshooting" aria-labelledby="troubleshooting-title">
+  <h2 id="troubleshooting-title">14. Troubleshooting</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th scope="col">Symptom</th><th scope="col">What to check</th></tr></thead>
+    <tbody>
+      <tr><td>The rev140 room URL refuses connections.</td><td>The server may be stopped. Confirm lab-network access, the appliance, its port proxy, and the room process. Refreshing cannot restart it. Use the public sandbox while the operator investigates.</td></tr>
+      <tr><td>The room draws but nothing roams.</td><td>Check NO CONNECT/preview versus LIVE RF, optimizer authority, action budget, stronger candidates, and measurement freshness. Recommend mode never sends the steer.</td></tr>
+      <tr><td>The optimizer says Measurements unavailable.</td><td>In interactive mode, temporary candidate-query timeouts pause steering, not the viewer. The previous candidate/convergence result is discarded. With the default interval, retries back off for 5, 10, 20, then at most 30 seconds; a full fresh measurement must succeed before evaluation resumes. Unacted holds restart; cooldown and action history remain intact. Inspect the measurement-unavailable event for failed query details.</td></tr>
+      <tr><td>The room says disconnected or failed.</td><td>Check the run's latest worker/error events and summary. Invalid measurements, other fatal worker errors, and scripted-run query failures still stop the run and trigger RF restoration. Confirm the process is alive before trusting old cards.</td></tr>
+      <tr><td>Interact requests a token or returns 403.</td><td>Use the current run's operator capability, available to the operator inside the appliance. A previous run's token is not valid.</td></tr>
+      <tr><td>Another operator holds control / lease conflict.</td><td>Coordinate with that browser, release its control, or allow its lease to expire. Observation remains available.</td></tr>
+      <tr><td>A position is rejected as stale or conflicting.</td><td>Reload authoritative interaction state and retry the intended edit. Do not replay old revisions or change an already-used command ID's content.</td></tr>
+      <tr><td>An extender is grey and clients have left.</td><td>Select that same extender and choose Restore fronthaul. Reset role also restores its session-start position/presence.</td></tr>
+      <tr><td>A client remains weak after movement.</td><td>Allow a stable measurement interval; inspect actual AP, metric age, better eligible candidates, and budget. If every AP has a poor path, move a node/client closer or reduce wall crossings.</td></tr>
+      <tr><td>The band buttons do not move a client to 6 GHz.</td><td>They select displayed/modelled link colors only. Actual association and eligible steering retain the client's band and SSID.</td></tr>
+      <tr><td>Download world is disabled.</td><td>Recording requires interactive live mode. Start and stop a recording first; a static preview has no server recording.</td></tr>
+      <tr><td>Positions change but the RF generation does not.</td><td>The rounded RF values may be unchanged. Look for an accepted RF no-op rather than treating every geometric edit as a failed write.</td></tr>
+      <tr><td>Medium instance/generation mismatch or failed restore.</td><td>Stop further RF writes. Preserve the recovery record and evidence; an operator must inspect ownership before attempting guarded recovery.</td></tr>
+    </tbody>
+  </table></div>
+  <p>For a useful report, include the URL mode, run ID, role name, exact operation, last accepted revision, error text, and relevant event times. Exclude operator and lease tokens. Report measured and predicted signals separately.</p>
+</section>
+<section id="operations" aria-labelledby="operations-title">
+  <h2 id="operations-title">15. Operator setup and shutdown</h2>
+  <p>Run these commands inside the RDK appliance, from its checked-out repository. The 0905 appliance is <code>rdkeasymesh-20-0905</code> on rev140 and rev150, using canonical branch <code>codex/0905-clean</code>. The commands below require shell access; the public website does not run them.</p>
+  <pre><code>cd /home/easymesh/git/meta-cmf-bananapi-vcpe
+gen/tests/health-audit.sh
+gen/demo/room-demo check
+gen/demo/room-demo interactive --mode recommend --listen 0.0.0.0:8891</code></pre>
+  <p>For an explicitly authorized automatic-steering session:</p>
+  <pre><code>gen/demo/room-demo interactive \
+  --mode act --yes-act --max-actions 100 \
+  --listen 0.0.0.0:8891</code></pre>
+  <p>The existing rev140 proxy maps outer port <code>18891</code> to appliance port <code>8891</code>. Do not create a second room process on the same medium. A process PID or a reachable page alone is not a complete medium-health check.</p>
+  <p>The current operator capability is stored in <code>/run/easymesh-room-demo/operator.token</code> while the session runs. Obtain it through the operator's shell and use the browser prompt or the terminal's operator URL. Do not publish it.</p>
+  <h3>Normal stop</h3>
+  <p>Use <kbd>Ctrl</kbd> + <kbd>C</kbd> in the owning room terminal, or stop the actual owning service if the operator launched one. SIGINT/SIGTERM drain accepted work and restore the captured RF matrix. Check the final outcome and <code>restored=true</code>; a worker failure can have <code>outcome=failed</code> even if RF restoration succeeded.</p>
+  <h3>After an unclean interruption</h3>
+  <pre><code>gen/demo/room-demo recover</code></pre>
+  <p>This uses the checksummed journal at <code>/run/easymesh-room-demo/recovery.json</code>. Recovery refuses an unexpected medium instance or unexplained generation. Resolve that condition before starting another writer. Do not run another configurator, independent RF-bias helper, or room scenario concurrently.</p>
+  <h3>Replay a completed run</h3>
+  <pre><code>gen/demo/room-demo replay \
+  /tmp/easymesh-room-demo-runs/RUN_ID \
+  --listen 0.0.0.0:8891</code></pre>
+  <p>Use <code>/viewer/?mode=replay</code> on that server and ensure port 8891 is free first. Replay serves saved evidence and is not an interactive live session.</p>
+</section>
+<section id="evidence" aria-labelledby="evidence-title">
+  <h2 id="evidence-title">16. Evidence and API reference</h2>
+  <p>Run evidence is stored under <code>/tmp/easymesh-room-demo-runs/RUN_ID/</code>. Copy important runs to durable storage before clearing temporary files or rebuilding the appliance.</p>
+  <ul>
+    <li><code>world.json</code>, <code>layout.json</code>, and <code>runtime-world.json</code>: scenario inputs and viewer geometry.</li>
+    <li><code>inventory.json</code>, <code>bindings.json</code>, and <code>demo-manifest.json</code>: identities and run configuration.</li>
+    <li><code>live-events.jsonl</code>: accepted commands, RF generations, network observations, optimizer actions, traffic, and restoration.</li>
+    <li><code>health-preflight.json</code>, <code>health-postflight.json</code>, and <code>interactive-summary.json</code>: acceptance and final outcome.</li>
+    <li><code>recovery.json</code>: the final checksummed medium-recovery state.</li>
+    <li><code>recorded-mobility.json</code> and <code>recorded-world.json</code>: recording outputs, when present.</li>
+    <li><code>evidence-index.json</code>: artifact sizes and SHA-256 digests.</li>
+  </ul>
+  <h3>Read-only endpoints on a room server</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th scope="col">Path</th><th scope="col">Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><code>GET /healthz</code></td><td>HTTP service status and run identity; not a complete RF-health assertion.</td></tr>
+      <tr><td><code>GET /api/demo/current</code></td><td>Current reduced state and latest events.</td></tr>
+      <tr><td><code>GET /api/demo/world</code></td><td>The served world document.</td></tr>
+      <tr><td><code>GET /api/demo/events?after=N</code></td><td>Server-sent events after sequence N.</td></tr>
+      <tr><td><code>GET /api/demo/events.json</code></td><td>The event collection for replay.</td></tr>
+      <tr><td><code>GET /api/demo/interactions</code></td><td>Live role positions, presence, movements, lease status, revision, and medium state.</td></tr>
+      <tr><td><code>GET /api/demo/recording/world</code></td><td>The completed recording, when available.</td></tr>
+    </tbody>
+  </table></div>
+  <h3>Mutation contract</h3>
+  <p>The browser normally handles this. Mutations require <code>Authorization: Bearer OPERATOR_TOKEN</code>, the acquired lease token, and a unique command ID. Position/presence/movement writes carry the latest <code>expected_revision</code> and <code>If-Match: "world-revision-N"</code>.</p>
+  <p>Acquire control with <code>POST /api/demo/interactions/lease</code>. Position uses <code>PUT /api/demo/roles/ROLE/position</code>; presence uses <code>PUT /api/demo/roles/ROLE/presence</code>. A position body has this shape:</p>
+  <pre><code>{
+  "token": "LEASE_TOKEN",
+  "expected_revision": 4,
+  "client_sequence": 1,
+  "command_id": "manual-example-position-1",
+  "position": [12.5, 8.0],
+  "final": true
+}</code></pre>
+  <p>This is an example, not a ready-to-send current command. Re-read the revision and substitute a current lease. Retrying the exact same command ID and body returns its original result without a second RF update; changing that body's meaning under the same ID conflicts.</p>
+  <p>Keep three identifiers distinct: event <code>sequence</code> orders evidence; room <code>revision</code> guards accepted world changes; medium <code>generation</code> identifies RF state. A temporary steering assist or RF no-op means these counters need not advance together.</p>
+</section>
+<section id="glossary" aria-labelledby="glossary-title">
+  <h2 id="glossary-title">17. Glossary and current limits</h2>
+  <dl>
+    <dt><strong>AP / agent / extender</strong></dt><dd>An access point serves clients; an EasyMesh agent manages its radios. An extender is a mesh node with an upstream backhaul connection.</dd>
+    <dt><strong>Fronthaul / backhaul</strong></dt><dd>Fronthaul connects client stations to APs. Backhaul connects mesh nodes toward the gateway.</dd>
+    <dt><strong>STA / SSID / BSSID</strong></dt><dd>A station is a Wi-Fi client. An SSID names its network; a BSSID identifies an individual AP service endpoint.</dd>
+    <dt><strong>BTM</strong></dt><dd>802.11v BSS Transition Management: the protocol used to request a client move to another BSS.</dd>
+    <dt><strong>Golden World</strong></dt><dd>A deterministic geometry and RF-stimulus plan used for repeatable experiments.</dd>
+    <dt><strong>hwsim / wmediumd</strong></dt><dd>Linux virtual radios and a userspace wireless medium. Real Wi-Fi and EasyMesh software runs over controlled virtual RF conditions.</dd>
+    <dt><strong>Room revision / environment epoch</strong></dt><dd>Versioning for accepted room state and its RF environment. Movement can invalidate a candidate measurement window.</dd>
+    <dt><strong>Lease / operator capability</strong></dt><dd>The capability authorizes writes to a run; the renewable lease selects the current interactive owner.</dd>
+  </dl>
+  <p>Supported here: client and mesh-node movement, bounded fronthaul absence/restoration, live measurements, sequential verified fleet steering, accepted-state recording, and evidence replay.</p>
+  <p>Wall/door editing, calibrated interference regions, arbitrary undo history, per-role simultaneous browser ownership, and physical-radio prediction are not provided by these controls. A deterministic stimulus is not a guarantee of identical live timing.</p>
+  <p>The lab demonstrates protocol and policy behavior under controlled virtual conditions. Candidate measurement provenance, modeled attenuation, traffic evidence, and infrastructure failures remain separate facts.</p>
+</section>
+</main>
+</div>
+<footer>Manual edition: September 2026 · Applies to the 20-client interactive room and the public NO CONNECT sandbox. Live configuration and run evidence determine actual authority and outcomes.</footer>
+<script>
+(function () {
+  'use strict';
+  const search = document.getElementById('manualSearch');
+  const sections = [...document.querySelectorAll('main section')];
+  const entries = [...document.querySelectorAll('nav li')];
+  const status = document.getElementById('searchStatus');
+  function filter() {
+    const terms = search.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+    let count = 0;
+    sections.forEach(section => {
+      const content = section.textContent.toLocaleLowerCase();
+      section.hidden = !terms.every(term => content.includes(term));
+      if (!section.hidden) count += 1;
+    });
+    entries.forEach(entry => {
+      entry.hidden = document.getElementById(entry.querySelector('a').hash.slice(1)).hidden;
+    });
+    document.getElementById('noResults').hidden = count !== 0;
+    status.textContent = terms.length ? `${count} of ${sections.length} topics match` : `${sections.length} topics`;
+  }
+  search.addEventListener('input', filter);
+  document.getElementById('clearSearch').addEventListener('click', () => {
+    search.value = '';
+    filter();
+    search.focus();
+  });
+  window.addEventListener('hashchange', () => {
+    const target = document.getElementById(location.hash.slice(1));
+    if (target && target.closest('section')?.hidden) {
+      search.value = '';
+      filter();
+      target.scrollIntoView();
+    }
+  });
+  document.getElementById('printManual').addEventListener('click', () => window.print());
+  filter();
+}());
+</script>
+</body>
+</html>
