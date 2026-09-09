@@ -2644,6 +2644,15 @@
       if (interactiveLiveMode && !applyingWorld) $('#worldSwitchStatus').textContent += ' Waiting for controller convergence.';
     } else if (event.kind.startsWith('interaction.playback.')) {
       interaction.revision = Math.max(interaction.revision, Number(event.payload.revision || 0));
+      for (const [role, value] of Object.entries(event.payload.roles || {})) {
+        if (!world.roles[role]) continue;
+        const dragging = interaction.leaseToken && interaction.drag && interaction.drag.role === role;
+        const prior = interaction.overrides[role] || {};
+        interaction.overrides[role] = {
+          position: dragging && prior.position ? prior.position : value.position.slice(),
+          present: !!value.present,
+        };
+      }
       applyPlaybackSnapshot(event.payload.playback);
     } else if (event.kind === 'network.snapshot') {
       networkState = event.payload;
