@@ -179,6 +179,12 @@
     return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f];
   }
 
+  function nextPlaybackPause(world, startTime, endTime) {
+    const pauses = Array.isArray(world.pause_at_ms) ? world.pause_at_ms : [];
+    return pauses.filter(time => Number.isSafeInteger(time) && time > 0 && time < world.duration_ms
+      && startTime < time && time <= endTime).sort((left, right) => left - right)[0] ?? null;
+  }
+
   function movementDurationMs(a, b, speedMps) {
     const speed = Number(speedMps);
     if (!(speed > 0)) throw new Error('movement speed must be positive');
@@ -190,6 +196,7 @@
     clampPosition,
     interpolate,
     movementDurationMs,
+    nextPlaybackPause,
     pathAnalysis,
     predictLinks,
     predictMeshLinks,

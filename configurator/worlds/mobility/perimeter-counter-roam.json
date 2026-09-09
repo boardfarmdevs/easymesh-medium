@@ -1,0 +1,25 @@
+{
+  "schema": "wmdcfg.mobility.v1",
+  "name": "perimeter-counter-roam",
+  "tags": ["quick-demo", "perimeter", "opposite-directions", "roaming-checkpoints", "mobile-2", "clients-12"],
+  "duration_ms": 60000,
+  "tick_ms": 1000,
+  "pause_at_ms": [14000, 28000, 42000],
+  "seed": 1713,
+  "nodes": [
+    {"role": "sta_mobile_01", "path": [
+      {"time_ms": 0, "position": [2, 2]},
+      {"time_ms": 14000, "position": [38, 2]},
+      {"time_ms": 28000, "position": [38, 38]},
+      {"time_ms": 42000, "position": [2, 38]},
+      {"time_ms": 56000, "position": [2, 2]}
+    ]},
+    {"role": "sta_mobile_02", "path": [
+      {"time_ms": 0, "position": [3, 3]},
+      {"time_ms": 14000, "position": [3, 37]},
+      {"time_ms": 28000, "position": [37, 37]},
+      {"time_ms": 42000, "position": [37, 3]},
+      {"time_ms": 56000, "position": [3, 3]}
+    ]}
+  ]
+}

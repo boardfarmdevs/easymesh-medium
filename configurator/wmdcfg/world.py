@@ -85,6 +85,17 @@ def _validate_layout(layout: dict[str, Any]) -> None:
             raise ScenarioError(f"wall {index} loss cannot be negative")
 
 
+def playback_pause_points(document: dict[str, Any]) -> list[int]:
+    pauses = document.get("pause_at_ms", [])
+    duration = document.get("duration_ms")
+    if (not isinstance(pauses, list)
+            or (pauses and type(duration) is not int)
+            or any(type(value) is not int or not 0 < value < duration for value in pauses)
+            or pauses != sorted(set(pauses))):
+        raise ScenarioError("pause_at_ms must be ordered unique integer times inside the duration")
+    return pauses
+
+
 def _validate_mobility(mobility: dict[str, Any]) -> None:
     if mobility.get("schema") != "wmdcfg.mobility.v1":
         raise ScenarioError("mobility schema must be wmdcfg.mobility.v1")
@@ -94,6 +105,7 @@ def _validate_mobility(mobility: dict[str, Any]) -> None:
         raise ScenarioError("mobility duration must be positive and tick must be 100ms..60s")
     if duration % tick:
         raise ScenarioError("mobility duration_ms must be an exact multiple of tick_ms")
+    playback_pause_points(mobility)
     if not isinstance(mobility.get("name"), str) or not mobility["name"]:
         raise ScenarioError("mobility requires a non-empty name")
     roles: set[str] = set()
@@ -229,6 +241,9 @@ def compile_world(layout: dict[str, Any], mobility: dict[str, Any]) -> dict[str,
         "walls": layout.get("walls", []),
         "generations": generations,
     }
+    pauses = playback_pause_points(mobility)
+    if pauses:
+        result["pause_at_ms"] = list(pauses)
     result["golden_sha256"] = _hash(result)
     # Keep the serialized artifact byte-stable across jq/Python versions.
     # Some serializers preserve an exact float as ``5.0`` while others emit
@@ -245,6 +260,7 @@ def verify_world_plan(plan: dict[str, Any]) -> None:
     unsigned.pop("golden_sha256", None)
     if claimed != _hash(unsigned):
         raise ScenarioError("world plan golden_sha256 does not match its contents")
+    playback_pause_points(plan)
 
 
 def _role_lines(plan: dict[str, Any]) -> list[str]:

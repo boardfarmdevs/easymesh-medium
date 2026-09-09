@@ -97,7 +97,7 @@
   <h2 id="quick-start-title">1. Quick start</h2>
   <h3>Try the room without a lab</h3>
   <ol>
-    <li>Open the <a href="https://boardfarmdevs.github.io/meta-cmf-bananapi-vcpe/viewer/?mode=no-connect&amp;world=home-a-private-client-room-walk" target="_blank" rel="noopener">public sandbox</a>. Look for <strong>NO CONNECT</strong>.</li>
+    <li>Open the <a href="https://boardfarmdevs.github.io/meta-cmf-bananapi-vcpe/viewer/?world=home-a-private-client-room-walk" target="_blank" rel="noopener">public sandbox</a>. Look for <strong>NO CONNECT</strong>; no mode parameter is needed.</li>
     <li>Select a client, drag it across the floor, and release it. No pointer-mode switch is needed.</li>
     <li>Read the movable details panel: coordinates, walls, predicted SNR, and the modeled strongest AP. Drag its dark background to move the panel without moving the device.</li>
     <li>Try <strong>Move to…</strong>, then click a destination. Drag empty space to orbit, or Shift-drag anywhere to pan.</li>
@@ -105,7 +105,7 @@
   </ol>
   <h3>Operate the live lab</h3>
   <ol>
-    <li>Open the <a href="http://192.168.2.140:18891/viewer/?mode=interactive" target="_blank" rel="noopener">rev140 live room</a> from a network that can reach the lab.</li>
+    <li>Open the <a href="http://192.168.2.140:48891/" target="_blank" rel="noopener">rev140 0907 live room</a> from a network that can reach the lab. Interactive control is the server default; no mode parameter is needed.</li>
     <li>Wait for live state and current controller telemetry. Check the Whole lab card before editing.</li>
     <li>Drag a device or press Play. No operator token is required; the browser acquires a control lease automatically. Another browser may already hold control.</li>
     <li>Confirm the <strong>LIVE RF</strong> badge, then drag one role and release it.</li>
@@ -118,15 +118,16 @@
   <div class="table-wrap"><table>
     <thead><tr><th scope="col">Mode</th><th scope="col">What you see</th><th scope="col">What an edit can do</th></tr></thead>
     <tbody>
-      <tr><td><strong>NO CONNECT</strong><br><code>?mode=no-connect</code></td><td>Golden World geometry and browser calculations.</td><td>Change the local preview only. No controller, optimizer, or medium API is contacted.</td></tr>
+      <tr><td><strong>NO CONNECT</strong><br>Default on static hosting; optional <code>?mode=no-connect</code></td><td>Golden World geometry and browser calculations.</td><td>Change the local preview only. No controller, optimizer, or medium API is contacted.</td></tr>
       <tr><td><strong>Static preview</strong><br>World selector or local JSON</td><td>Precomputed scenario generations, trails, and predicted links.</td><td>Explore and override the browser presentation. Playback is local.</td></tr>
       <tr><td><strong>Live observation</strong><br><code>?mode=live</code></td><td>A server-owned scenario with controller, health, traffic, and optimizer events.</td><td>Observe. The running scenario owns the RF changes.</td></tr>
-      <tr><td><strong>Interactive live</strong><br><code>?mode=interactive</code></td><td>Accepted room positions plus live network evidence.</td><td>With the capability and control lease, commit positions and RF-presence changes.</td></tr>
+      <tr><td><strong>Interactive live</strong><br>Default on an interactive lab server; optional <code>?mode=interactive</code></td><td>Accepted room positions plus live network evidence.</td><td>With the control lease, commit positions and RF-presence changes.</td></tr>
       <tr><td><strong>Replay</strong><br><code>?mode=replay</code></td><td>A completed run's recorded world and event stream.</td><td>Scrub and play recorded evidence. Replay does not write RF.</td></tr>
     </tbody>
   </table></div>
-  <p><strong>Live room:</strong> <a class="path" href="http://192.168.2.140:18891/viewer/?mode=interactive" target="_blank" rel="noopener">http://192.168.2.140:18891/viewer/?mode=interactive</a></p>
-  <p><strong>EasyMesh WebUI:</strong> <a href="http://192.168.2.140:18889/" target="_blank" rel="noopener">http://192.168.2.140:18889/</a>. Its Network Topology page shows the logical network, not room coordinates.</p>
+  <p><strong>Live room:</strong> <a class="path" href="http://192.168.2.140:48891/" target="_blank" rel="noopener">http://192.168.2.140:48891/</a></p>
+  <p>The lab server supplies its default in the viewer HTML: interactive when it offers room controls, observation for a scripted run, and replay for an evidence replay server. Static hosting and files opened from disk default to the disconnected sandbox without probing for a live backend. Explicit <code>?mode=live</code>, <code>?mode=replay</code>, and existing interactive/no-connect bookmarks still override the default. Choosing a browser mode never changes the server's optimizer authority.</p>
+  <p><strong>EasyMesh WebUI:</strong> <a href="http://192.168.2.140:48889/" target="_blank" rel="noopener">http://192.168.2.140:48889/</a>. Its Network Topology page shows the logical network, not room coordinates.</p>
   <p>The public GitHub Pages site is a static sandbox. Adding <code>mode=interactive</code> to a public URL does not create a lab connection. Replay also requires a replay server; a downloaded world alone contains geometry, not the controller's full evidence stream.</p>
   <p>The updated interactive server has no operator capability check. Anyone who can reach it can acquire the free control lease. Keep it on a trusted lab network, SSH tunnel, or authenticated gateway; do not expose the backend directly to the internet. <code>mode=live</code> hides controls but is not an access-control boundary. Read-only server sessions still reject writes.</p>
 </section>
@@ -162,6 +163,7 @@
     <tbody>
       <tr><td>Drag empty space</td><td>Orbit the room, including during playback.</td></tr>
       <tr><td>Mouse wheel</td><td>Zoom the camera.</td></tr>
+      <tr><td><strong>Full screen</strong></td><td>Expand the room scene; Play/Pause, the scenario clock, dragging and device properties remain available. Use Exit full screen or Esc to return. Native Network Topology has its own Full screen button, retaining its fit/layout and export controls. Neither button changes RF or associations. Embedded pages require <code>allowfullscreen</code>.</td></tr>
       <tr><td><kbd>Shift</kbd> + drag</td><td>Pan the camera.</td></tr>
       <tr><td>Click a role</td><td>Select it and inspect its links.</td></tr>
       <tr><td>Drag a device</td><td>Preview a new position; in live mode, commit on release. Other devices keep playing. Clicks without dragging only inspect.</td></tr>
@@ -174,6 +176,8 @@
   <p><strong>Band for link colours</strong> changes the inspected/modelled band. It does not retune a radio, move a client between bands, or change its SSID.</p>
   <p>Use the overlay checkboxes to reduce clutter: strongest simulated links for stations and extenders, actual mesh backhaul, and mobile trails. Station names are always visible. In a static world, backhaul paths are model information; live backhaul lines come from the controller. Backhaul paths are thicker floor-level lines colored by the upstream AP: red from Agent-1, orange from an extender. Thin dashed floor lines show each extender's strongest simulated peer on the selected band, using that peer's red/orange color. When simulated and actual peers agree, the dashed path runs just beside the solid one. Both remain visible slightly lighter through walls. The viewer and movable properties panel use the operating system's standard arrow cursor, including while dragging; drag and playback controls are unchanged.</p>
   <p>Dragging, a manual walk or a presence change keeps that device under manual control for the rest of the loaded world; other devices continue their scripts. Pause/resume preserves those overrides. Reload the world to clear them. One server worker advances at most one frame/second and reuses verified RF transactions; under load playback slows instead of sending a burst. Pausing freezes scripted motion, not the lab or telemetry, and lets the optimizer measure a stable room and converge. Switching worlds, closing the controlling tab or losing its lease pauses playback. A completed script leaves the lab running at its final state.</p>
+  <p><strong>Quick roaming demos:</strong> <code>home-a-one-client-handover</code> moves one client across a wall in 20 seconds with ten fixed reference clients; allow steering to settle after completion. <code>large-room-perimeter-counter-roam</code> sends two clients around opposite perimeter lanes of a 40×40 m room, with ten fixed clients. It pauses automatically at 14, 28 and 42 seconds. Wait for fresh metrics and verified associations in both the room and native Network Topology, then press Play to continue. The walkers visit extender roles 1→2→4→3→1 and 1→3→4→2→1 respectively; role numbers may differ from display labels. Both return at 56 seconds and finish at 60 seconds, excluding checkpoint waits. A checkpoint does not itself assign an AP or prove convergence. Disconnected previews pause too, but show simulated links only; recorded replay follows its original events.</p>
+  <p><strong>Extender evacuation:</strong> <code>large-room-extender-evacuation</code> keeps twelve clients stationary in a 40×40 m room. Initially eight cluster clients should associate with extender role 1. Play moves that extender from (8,8) to (36,32), then finishes at 20 seconds. Leave the lab running afterward: the eight clients should steer to Agent-1 because its RF is now stronger. The extender is not disabled and no client is forcibly reassigned by the script. Its own backhaul may become a branch through extender role 4. Confirm actual associations, not only dashed simulated links.</p>
 </section>
 <section id="clients" aria-labelledby="clients-title">
   <h2 id="clients-title">5. Move a client</h2>
@@ -246,7 +250,9 @@
   </table></div>
   <p>The ten-segment signal gauge progresses from red through amber to green. In live mode it uses fresh controller RSSI or a verified client Wi-Fi reading after successful traffic on the matching connection. Missing or stale readings are grey; modeled SNR never substitutes for a missing live measurement. Offline worlds use modeled serving-link SNR. Inspect the source and age when interpreting a reading.</p>
   <h3>Optimizer progress and per-client decisions</h3>
-  <p>The optimizer status distinguishes reading current connections, measuring AP alternatives, waiting for movement/RF to settle, blocked measurements, steering, and verified convergence. Candidate progress counts completed protocol queries, not guessed percentages; a failed query is not counted as complete. The previous evaluation age and cycle duration remain visible during the next measurement cycle.</p>
+  <p>The main optimizer status describes the latest valid result rather than every background task. <strong>Converged</strong> stays steady during routine reading and candidate collection while that result is fresh; it refers to the last evaluation, not a guarantee about unmeasured changes. New non-converged results, measurement failures, degraded health, RF invalidation, and evaluations older than 60 seconds remove the convergence indication immediately. No telemetry or steering is delayed to quiet the display.</p>
+  <p>Expand <strong>Background measurement details</strong> to see reading current connections, measuring AP alternatives, and retry progress. This section stays closed until you choose to open it, so routine collection does not flash the main headline. Candidate progress counts completed protocol queries, not guessed percentages; a failed query is not counted as complete. The previous evaluation age and cycle duration remain visible during the next measurement cycle.</p>
+  <p>Optimizer activity, metrics, expanded measurement details and per-client decisions, and Recent events use fixed-height reading areas, so live updates do not move the controls below them. Scroll inside an area for longer messages or more clients; no error text is truncated. You can also Tab into an area and use the arrow keys, Page Down, or Space to scroll without starting playback. Opening or closing details intentionally changes the panel height. Live updates continue at their normal rate.</p>
   <p>Select a station to see its own decision in the optimizer panel. Expand <strong>Per-client decisions</strong> for every client's serving AP, nominated target, current signal, reported association age, and reason for waiting or moving. Wait values are the remaining time at the last evaluation, not a promise that stale evidence will become valid after a browser countdown. A zero association age persisting beyond a cycle is a reporting problem to investigate.</p>
   <p><strong>Incomplete check is not convergence.</strong> Missing/stale candidate readings do not prove there is no stronger AP. Moving a device invalidates old convergence and per-client decisions until new evidence is collected. AP names match the controller and topology drawing; internal room role numbers can differ from discovery-order extender labels.</p>
   <p>SNR is a ratio in dB; RSSI is received power in dBm. They cannot be compared as equal numbers. A valid RCPI in the normal 0–220 range converts to dBm using <code>RCPI / 2 − 110</code>; for example, RCPI 106 corresponds to −57 dBm. Unavailable values remain unknown, not zero signal.</p>
@@ -255,22 +261,27 @@
 <section id="optimizer" aria-labelledby="optimizer-title">
   <h2 id="optimizer-title">10. Optimizer behavior and recovery time</h2>
   <p>The authority is chosen when the server starts. <strong>Stimulus</strong> applies room RF without optimizer work; <strong>recommend</strong> explains possible steers; <strong>act</strong> permits bounded automatic BTM requests. The browser's control lease authorizes room edits, not a change of optimizer authority.</p>
-  <p>Interactive act mode measures the entire eligible private and IoT fleet. Candidates remain within each client's SSID and band. A strictly stronger target must satisfy the policy hold; the current interactive configuration uses a minimum gain of one RCPI unit and a five-second hold. Exact ties do not cause a roam.</p>
+  <h3>Profiling authority: read the fullscreen label</h3>
+  <p>The rev140 candidate at ports <strong>48891</strong> (room) and <strong>48889</strong> (topology) can run <strong>Unassisted BTM</strong>: the external room threshold policy chooses requests, but no RF steering assist, kernel signal fallback, scan-cache refresh or topology animation delay is used to improve the result. This is not the BPI controller's autonomous optimization policy. Ready clients can progress while another client is missing; the whole room remains unconverged until membership and fresh measurements are complete.</p>
+  <p><strong>Native observation</strong> means the room issues no client steering requests and performs no candidate collection. Serving-state observation and the selected traffic probe continue. Native stack behavior and client-initiated roaming are observed, not assumed to be a native optimizer. This mode is selected with <code>--mode stimulus --profiling</code>. Neither opening a browser nor acquiring its lease changes that authority.</p>
+  <p>Profiling normally protects the startup mesh RF and does not choose backhaul parents. To study real modeled AP-to-AP RF without an external parent selector, the operator can add <code>--model-backhaul</code> to stimulus profiling. Weak backhaul may disconnect an extender. Read the authority and backhaul labels rather than assuming all servers run the assisted/adaptive demonstration described below.</p>
+  <p>Interactive act mode measures eligible private and IoT clients, prioritizing all recently moved clients and clients of a moved AP before returning to the fleet. Candidates remain within each client's SSID and band. The fast interactive policy requires a measured two-dB advantage (four RCPI units), without a pre-action hold or minimum association dwell. Five seconds of post-success cooldown limits repeated moves. Exact ties do not cause a roam.</p>
   <ol>
     <li>The server accepts and verifies the new RF generation.</li>
-    <li>It waits until motion stops and RF has settled, normally at least two seconds.</li>
+    <li>It can evaluate while Play is active, but abandons any measurement spanning different RF generations.</li>
     <li>It obtains fresh serving and candidate telemetry under a consistent room state.</li>
-    <li>The policy evaluates eligible clients. The default batch selects up to three, weakest serving link first, using gain as a tie-breaker.</li>
-    <li>Each BTM action runs sequentially and receives its own association and traffic verification.</li>
+    <li>The policy evaluates eligible clients. The default batch selects up to eight, weakest serving link first, using gain as a tie-breaker. Visual highlights do not delay the request.</li>
+    <li>Assisted BTM actions serialize their temporary RF ownership. Unassisted profiling can submit a bounded group of independent client requests; each retains its own verification.</li>
     <li>A room change, failed request, or failed verification stops the batch; a later valid cycle evaluates the remaining work.</li>
   </ol>
-  <p>The current hwsim path briefly applies a declared RF steering assist after the measured target is chosen, refreshes candidate scan records, and sends a real EasyMesh/802.11v BTM request. It restores the authoritative room matrix afterward. Assisted values are not fresh optimizer input. See the assist events and individual verification results in the evidence.</p>
+  <p>The assisted hwsim demonstration briefly applies a declared RF steering assist after the measured target is chosen, refreshes candidate scan records, and sends a real EasyMesh/802.11v BTM request. It restores the authoritative room matrix afterward. Assisted values are not fresh optimizer input. Profiling disables this assistance. See the authority label, assist events and individual verification results in the evidence.</p>
   <h3>Why do clients take time to turn green?</h3>
   <p>The optimizer's <strong>stable</strong> badge is green when the last evaluated client has a fresh, normal stay decision; it does not guarantee maximum signal. <strong>AUTO BTM</strong> is green when automatic BSS Transition Management is enabled and ready, not necessarily executing a roam. Waiting or blocked states use yellow; missing, stale, or RF-invalidated evaluations use grey. Hover over the badges for their meaning.</p>
-  <p>Movement, telemetry freshness, candidate collection, policy hold, BTM, reassociation, and traffic checks take time. Several clients may need multiple batches. A full fleet can take minutes; neither the five-second policy interval nor a completed drag is a promise of five-second convergence.</p>
+  <p>Movement, telemetry freshness, candidate collection, scans, BTM, reassociation, and traffic checks take time. Several clients may need multiple batches. Native topology visibility is checked immediately and may take up to forty seconds; this is a failure deadline, not a fixed sleep. Full-fleet native metrics retries can still take minutes. Neither the five-second normal polling interval nor a completed drag promises five-second convergence; a new RF epoch wakes polling early.</p>
   <p>Watch <strong>Fleet check</strong>, <strong>Stronger AP available</strong>, the current focus, and successful verifications. Continued dragging invalidates measurement windows, so a stable room is the fastest way to obtain a useful result.</p>
   <p class="note">“Converged” means no stronger eligible measured AP remains for the checked fleet. It does not guarantee every client is green: a client can be on its best AP and still have weak RF because all available paths are poor.</p>
-  <p>A missing controller signal no longer blocks other clients. In this fixed-pool interactive lab, the optimizer can use a client-kernel RSSI reading after a successful Wi-Fi traffic probe, only when its BSSID and band match the controller. <strong>Kernel signal fallback</strong> shows how many clients used that explicit measurement source. No modeled signal is substituted and no controller value is overwritten; the native topology can remain grey until its own telemetry recovers. Failed probes or mismatches remain unmeasured, so fleet convergence is not claimed.</p>
+  <p>Outside profiling, the fixed-pool interactive optimizer can use a client-kernel RSSI reading after a successful Wi-Fi traffic probe, only when its BSSID and band match the controller. <strong>Kernel signal fallback</strong> shows how many clients used that explicit measurement source. Profiling does not use that fallback. No modeled signal is substituted and no controller value is overwritten; missing or stale measurements remain visible and cannot establish fleet convergence.</p>
+  <p>Interactive evidence is retained in a bounded journal. Long runs may expire their beginning; an expired live cursor resynchronizes, but full replay refuses an incomplete history. Evidence queue or disk failures mark qualification incomplete without pausing RF control. The operator can inspect <code>/api/demo/storage</code> for queue, retention and failure status. Archive completed runs separately; per-run rotation does not delete old run directories.</p>
   <p>Interactive act mode normally has a 100-request circuit breaker, adjustable at startup. When the action budget is exhausted, automatic steering cannot continue even if measurements find improvements. Candidate-query failures can terminate the run; a disconnected viewer is not proof that reconciliation continues in the background.</p>
 </section>
 <section id="reset" aria-labelledby="reset-title">
@@ -311,7 +322,7 @@
     <tbody>
       <tr><td>The rev140 room URL refuses connections.</td><td>The server may be stopped. Confirm lab-network access, the appliance, its port proxy, and the room process. Refreshing cannot restart it. Use the public sandbox while the operator investigates.</td></tr>
       <tr><td>The room draws but nothing roams.</td><td>Check NO CONNECT/preview versus LIVE RF, optimizer authority, action budget, stronger candidates, and measurement freshness. Recommend mode never sends the steer.</td></tr>
-      <tr><td>The optimizer says Measurements unavailable.</td><td>In interactive mode, temporary candidate-query timeouts pause steering, not the viewer. The previous candidate/convergence result is discarded. With the default interval, retries back off for 5, 10, 20, then at most 30 seconds; a full fresh measurement must succeed before evaluation resumes. Unacted holds restart; cooldown and action history remain intact. Inspect the measurement-unavailable event for failed query details.</td></tr>
+      <tr><td>The optimizer says Measurements unavailable.</td><td>In interactive mode, temporary candidate-query timeouts pause steering, not the viewer. Previous candidate/convergence results are discarded. Retries back off for 1, 2, 4, then at most 8 seconds; a new RF epoch wakes that wait early. A complete fresh snapshot for the selected clients is required. Deferred clients do not count as whole-fleet convergence. Cooldown and action history remain intact. Inspect the unavailable event for failed query details.</td></tr>
       <tr><td>The room says disconnected or failed.</td><td>Check the run's latest worker/error events and summary. Invalid measurements, other fatal worker errors, and scripted-run query failures still stop the run and trigger RF restoration. Confirm the process is alive before trusting old cards.</td></tr>
       <tr><td>A live change requests an operator token or returns 403.</td><td>Reload the updated rev140 viewer if an old page still prompts. No operator token is needed. A 403 can indicate a mismatched browser Origin/Host or invalid lease; open the viewer from the room server's own address and reacquire control.</td></tr>
       <tr><td>Another operator holds control / lease conflict.</td><td>Coordinate with that browser, release its control, or allow its lease to expire. Observation remains available.</td></tr>
@@ -328,7 +339,7 @@
 </section>
 <section id="operations" aria-labelledby="operations-title">
   <h2 id="operations-title">15. Operator setup and shutdown</h2>
-  <p>Run these commands inside the RDK appliance, from its checked-out repository. The 0905 appliance is <code>rdkeasymesh-20-0905</code> on rev140 and rev150, using canonical branch <code>codex/0905-clean</code>. The commands below require shell access; the public website does not run them.</p>
+  <p>Run these commands inside the RDK appliance, from its checked-out repository. The 0908 appliance is <code>rdkeasymesh-20-0908</code> on rev140, using canonical branch <code>codex/0908-clean</code>. Other hosts retain their separately deployed release. The commands below require shell access; the public website does not run them.</p>
   <pre><code>cd /home/easymesh/git/meta-cmf-bananapi-vcpe
 gen/tests/health-audit.sh
 gen/demo/room-demo check
@@ -337,7 +348,7 @@ gen/demo/room-demo interactive --mode recommend --listen 0.0.0.0:8891</code></pr
   <pre><code>gen/demo/room-demo interactive \
   --mode act --yes-act --max-actions 100 \
   --listen 0.0.0.0:8891</code></pre>
-  <p>The existing rev140 proxy maps outer port <code>18891</code> to appliance port <code>8891</code>. Do not create a second room process on the same medium. A process PID or a reachable page alone is not a complete medium-health check.</p>
+  <p>The rev140 0907 proxy maps outer port <code>48891</code> to appliance port <code>8891</code>. Do not create a second room process on the same medium. A process PID or a reachable page alone is not a complete medium-health check.</p>
   <p>The updated CLI creates no operator token file. Interactive control requires only the renewable lease and normal revision checks. Restrict network access to trusted users or place an authenticated gateway in front of the whole service.</p>
   <h3>Normal stop</h3>
   <p>Use <kbd>Ctrl</kbd> + <kbd>C</kbd> in the owning room terminal, or stop the actual owning service if the operator launched one. SIGINT/SIGTERM drain accepted work and restore the captured RF matrix. Check the final outcome and <code>restored=true</code>; a worker failure can have <code>outcome=failed</code> even if RF restoration succeeded.</p>
@@ -348,7 +359,7 @@ gen/demo/room-demo interactive --mode recommend --listen 0.0.0.0:8891</code></pr
   <pre><code>gen/demo/room-demo replay \
   /tmp/easymesh-room-demo-runs/RUN_ID \
   --listen 0.0.0.0:8891</code></pre>
-  <p>Use <code>/viewer/?mode=replay</code> on that server and ensure port 8891 is free first. Replay serves saved evidence and is not an interactive live session.</p>
+  <p>Open <code>/viewer/</code> on that replay server and ensure port 8891 is free first. Explicit <code>?mode=replay</code> bookmarks still work. Replay serves saved evidence and is not an interactive live session.</p>
 </section>
 <section id="evidence" aria-labelledby="evidence-title">
   <h2 id="evidence-title">16. Evidence and API reference</h2>

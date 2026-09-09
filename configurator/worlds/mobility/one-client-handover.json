@@ -1,0 +1,15 @@
+{
+  "schema": "wmdcfg.mobility.v1",
+  "name": "one-client-handover",
+  "tags": ["quick-demo", "wall-crossing", "mobile-1", "clients-11"],
+  "duration_ms": 20000,
+  "tick_ms": 1000,
+  "seed": 1712,
+  "nodes": [
+    {"role": "sta_mobile_01", "path": [
+      {"time_ms": 0, "position": [2, 2]},
+      {"time_ms": 2000, "position": [2, 2]},
+      {"time_ms": 18000, "position": [10, 3]}
+    ]}
+  ]
+}

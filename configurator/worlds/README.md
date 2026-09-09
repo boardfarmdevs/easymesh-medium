@@ -25,7 +25,7 @@ world at its real scenario rate. It interpolates station movement between
 generations, colours each station's strongest serving link by SNR on the
 selected band, draws movement trails, and can show the simulated backhaul.
 Clicking a node lists its current peers with distance, wall loss, and
-bidirectional SNR for 2.4, 5, and 6 GHz. Its preview-only Interact mode can
+bidirectional SNR for 2.4, 5, and 6 GHz. Its disconnected preview can
 drag a client, move it to a clicked destination at a selected speed, show
 crossed walls and predicted links, or preview disappearance. These operations
 are local visualization overrides and do not change wmediumd.
@@ -35,11 +35,18 @@ The public viewer is published as a static site from the repository's
 
 <https://boardfarmdevs.github.io/meta-cmf-bananapi-vcpe/viewer/>
 
-The room-focused, explicitly disconnected sandbox starts directly in
-interactive mode. It calculates the same browser-side geometry previews but
-cannot change a live lab:
+Static hosting defaults to the explicitly disconnected sandbox without a
+`mode` parameter or any backend discovery requests. It calculates the same
+browser-side geometry previews but cannot change a live lab:
 
-<https://boardfarmdevs.github.io/meta-cmf-bananapi-vcpe/viewer/?mode=no-connect&world=home-a-private-client-room-walk>
+<https://boardfarmdevs.github.io/meta-cmf-bananapi-vcpe/viewer/?world=home-a-private-client-room-walk>
+
+On an interactive lab server, open its base URL or `/viewer/` to use live play,
+dragging and world changes. The server sets the default in the HTML without an
+extra configuration request. Observation-only and replay servers supply their
+own defaults. Optional `?mode=live` and `?mode=replay` select observation or
+replay explicitly; older `?mode=interactive` and `?mode=no-connect` links still
+work. Browser modes do not change the server's optimizer authority.
 
 Select a world in the sidebar or address one directly, for example:
 
@@ -53,12 +60,37 @@ cd gen/wmediumd/configurator/worlds
 python3 -m http.server 8000
 ```
 
-Then open <http://localhost:8000/viewer/>. In Camera mode, drag to orbit,
+Then open <http://localhost:8000/viewer/>. Drag empty space to orbit,
 shift-drag to pan, use the wheel to zoom, press space to play or pause, and
-click a node to inspect its links. Select Interact to drag a client, or
+click a node to inspect its links. Drag a client directly, or
 right-click it to choose destination movement and presence controls. Opening
 `index.html` directly also works with the file picker. Three.js is bundled, so
 the viewer does not require a public CDN.
+
+## Quick demo worlds
+
+The catalog includes `home-a-one-client-handover` (20 s, one walking client and
+ten fixed clients) and `large-room-perimeter-counter-roam` (60 s, two opposing
+perimeter walkers and ten fixed clients in a 40×40 m open room). The existing
+Disappear/Reappear (60 s), Extender Loss/Recovery (90 s) and Fast Transit (30 s)
+rooms remain available without duplicate catalog entries.
+
+`large-room-extender-evacuation` moves one extender across a 40×40 m room in a
+20-second script while twelve clients stay still. Eight begin near the moving
+extender and should steer to Agent-1 after it moves away and playback completes.
+No AP is disabled and no association is forced by the scenario. Allow additional
+time for real steering and measurement. Both the room and native topology have
+Full screen controls; the room keeps Play/Pause and its clock available there.
+
+The perimeter world carries optional signed `pause_at_ms` metadata. Live and
+disconnected playback stop at 14, 28 and 42 s; press Play to continue. Live
+pauses allow the optimizer to measure stable RF and verify handovers. These
+waits are additional wall-clock time, not part of the 60-second script. No
+pause proves that roaming succeeded. Raw `.wmd` exports remain RF sequences
+and do not implement these viewer checkpoints.
+
+See the [per-room inspection guide](../../../../doc/easymesh/reference/room-playback-inspection-guide.md)
+for the expected AP sequences and checks in both views.
 
 ## Install the renderer dependencies
 

@@ -89,7 +89,7 @@ function renderTelemetry(summary) {
     ['Drops total', number(drops)],
     ['Off-channel / CCA / interference', `${number(summary.drops_offchannel)} / ${number(summary.drops_cca)} / ${number(summary.drops_interference)}`],
     ['PER / no receiver', `${number(summary.drops_per)} / ${number(summary.drops_no_receiver)}`],
-    ['Netlink EINVAL / other', `${number(summary.netlink_clone_einval)} / ${number(summary.netlink_other_errors)}`],
+    ['Netlink tracked clone EINVAL / other', `${number(summary.netlink_clone_einval)} / ${number(summary.netlink_other_errors)}`],
     ['Link evictions / event-ring overwrites', `${number(summary.active_link_evictions)} / ${number(summary.event_overruns)}`],
     ['Queue delay last / max', `${number(summary.queue_delay_usec_last)} / ${number(summary.queue_delay_usec_max)} µs`]
   ]);

@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="room-viewer-mode" content="no-connect">
 <title>wmediumd world viewer</title>
 <style>
   :root {
@@ -91,13 +92,21 @@
   .phase.cooldown, .phase.verified, .phase.healthy { color: #fff; background: #176b48; }
   .phase.failed { color: #fff; background: var(--gateway); }
   .phase.unknown { color: #40464d; background: #d8dde2; }
-  #optimizerStatus { margin-bottom:8px; padding:8px; border-left:4px solid #e0a421; background:#fff7df; }
+  .live-scroll { overflow-y:auto; overflow-x:hidden; overflow-wrap:anywhere; scrollbar-gutter:stable; overflow-anchor:none; }
+  #optimizerStatus { height:12rem; margin-bottom:8px; padding:8px; border-left:4px solid #e0a421; background:#fff7df; }
   #optimizerStatus p { margin:4px 0; }
+  #optimizerStatus .sub { margin:4px 0; }
+  #optimizerActivity { margin:8px 0; font-size:11px; color:var(--muted); }
+  #optimizerActivityDetails { height:6rem; margin-top:6px; font-size:12px; }
+  #optimizerMetrics { height:26rem; }
+  #optimizerMetrics .metric-grid { grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); }
+  .live-scroll:focus-visible { outline:2px solid var(--extender); outline-offset:2px; }
   #optimizerClients { margin-top:8px; font-size:11px; }
+  #optimizerClientRows { height:18rem; margin-top:6px; }
   #optimizerClients table { width:100%; border-collapse:collapse; }
   #optimizerClients td { padding:5px 2px; border-top:1px solid #e5ded2; vertical-align:top; overflow-wrap:anywhere; }
   #optimizerClients tr.selected { background:#fff0ca; }
-  #eventRibbon { max-height: 126px; overflow: hidden; font-size: 11px; }
+  #eventRibbon { height:126px; font-size:11px; }
   .event-row { display: grid; grid-template-columns: 78px 1fr; gap: 7px; padding: 3px 0; border-top: 1px solid #eee8dc; }
   .event-row:first-child { border-top: 0; }
   .event-time { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -118,6 +127,12 @@
   .speed-row { display: grid; grid-template-columns: 1fr 108px; gap: 8px; align-items: center; margin-top: 8px; }
   .speed-row select { width: 100%; }
   main { position: relative; overflow: hidden; }
+  main:fullscreen { width: 100vw; height: 100dvh; background: var(--paper); }
+  #sceneToolbar { position: absolute; top: 10px; left: 12px; z-index: 25; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; max-width: calc(100% - 300px); }
+  #fullscreenStatus { font-size: 12px; background: var(--paper); }
+  .fullscreen-only { display: none; }
+  main:fullscreen .fullscreen-only { display: inline-block; }
+  #fullscreenTime { padding: 5px 9px; background: #faf8f3; border-radius: 4px; font-variant-numeric: tabular-nums; }
   canvas { display: block; }
   #hint { position: absolute; right: 12px; bottom: 10px; font-size: 11px; color: var(--muted); }
   #err { position: absolute; left: 50%; top: 40%; transform: translate(-50%,-50%); max-width: 480px; background: #fff; border: 1px solid var(--rule); padding: 16px 20px; display: none; }
@@ -144,6 +159,7 @@
   #roleMenu button:hover { background: #eee7f3; }
   main canvas { cursor: default; touch-action: none; }
   @media (max-width: 760px) {
+    #sceneToolbar { max-width: calc(100% - 24px); }
     body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
     aside { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 45vh; }
   }
@@ -155,14 +171,15 @@
   <a class="manual-link" id="openManual" href="manual.html" aria-haspopup="dialog">Manual &amp; Help</a>
   <div class="sub" id="worldmeta">Loading…</div>
   <div id="liveStatus" role="status" aria-live="polite"></div>
+  <div id="profilingAuthority" class="hint" role="status"></div>
   <div class="sub" id="liveRun"></div>
 
   <div class="live-only">
     <div class="card" id="storyCard"><h2>Scenario</h2><div id="storyText">Waiting for the conductor…</div></div>
     <div class="card" id="labCard"><h2>Whole lab</h2><div id="labMetrics" class="metric-grid"><span>Status</span><b>waiting</b></div></div>
     <div class="card" id="heroCard"><h2>Traffic probe · cyan ring</h2><div id="heroMetrics">Waiting for controller telemetry…</div><div class="sub">Ctrl-click any client</div></div>
-    <div class="card" id="optimizerCard"><h2>External optimizer</h2><div id="optimizerStatus" role="status" aria-live="polite">Waiting for live status…</div><div id="optimizerMetrics">No evaluation yet.</div><details id="optimizerClients"><summary>Per-client decisions</summary><div id="optimizerClientRows"></div></details></div>
-    <div class="card"><h2>Recent events</h2><div id="eventRibbon"></div></div>
+    <div class="card" id="optimizerCard"><h2>External optimizer</h2><div id="optimizerStatus" class="live-scroll" tabindex="0" role="status" aria-label="Optimizer result" aria-live="polite">Waiting for live status…</div><details id="optimizerActivity"><summary>Background measurement details</summary><div id="optimizerActivityDetails" class="live-scroll" tabindex="0" role="region" aria-label="Background measurement activity">Waiting for measurements…</div></details><div id="optimizerMetrics" class="live-scroll" tabindex="0" role="region" aria-label="Optimizer metrics">No evaluation yet.</div><details id="optimizerClients"><summary>Per-client decisions</summary><div id="optimizerClientRows" class="live-scroll" tabindex="0" role="region" aria-label="Per-client decisions"></div></details></div>
+    <div class="card"><h2>Recent events</h2><div id="eventRibbon" class="live-scroll" tabindex="0" role="region" aria-label="Recent events"></div></div>
   </div>
 
   <label class="field" for="world">World</label>
@@ -189,6 +206,8 @@
       <button data-speed="4">4×</button>
     </span>
   </div>
+
+  <div id="playbackCheckpoint" class="sub" role="status" hidden></div>
 
   <label class="field">Band for link colours</label>
   <span class="seg" id="band" role="group" aria-label="band">
@@ -251,7 +270,14 @@
     Labels: <b>gw</b> gateway, <b>e1</b> extender_1, <b>m01</b> sta_mobile_01, <b>s01</b> sta_static_01.
   </div>
 </aside>
-<main>
+<main id="roomView">
+  <div id="sceneToolbar">
+    <button type="button" id="roomFullscreen" aria-pressed="false">Full screen</button>
+    <button type="button" id="fullscreenPlay" class="fullscreen-only">Play</button>
+    <span id="fullscreenTime" class="fullscreen-only"></span>
+    <span id="fullscreenAuthority" class="fullscreen-only"></span>
+    <span id="fullscreenStatus" role="status" aria-live="polite"></span>
+  </div>
   <div id="hint">drag devices to move · drag empty space to orbit · Shift-drag to pan · scroll to zoom · Space plays</div>
   <div id="spatialHud" tabindex="0" role="region" aria-label="Device properties. Drag to reposition; arrow keys move; Home resets." title="Drag to reposition · double-click the heading to reset"></div>
   <div id="roleMenu">
@@ -272,6 +298,7 @@
   <iframe id="manualFrame" title="Searchable room viewer manual"></iframe>
 </dialog>
 <script src="manual-dialog.js"></script>
+<script src="fullscreen-control.js?v=fullscreen-1"></script>
 <script src="vendor/three.min.js"></script>
 <script src="interaction-model.js"></script>
 <script src="signal-meter.js?v=signal-meter-1"></script>
@@ -285,6 +312,8 @@
     'home-a-border-hover', 'home-a-fast-transit', 'home-a-disappear-reappear',
     'home-a-extender-loss-recovery', 'home-a-flash-crowd', 'home-a-asymmetric-link',
     'home-a-band-walk-small', 'home-a-private-client-room-walk',
+    'home-a-one-client-handover', 'large-room-perimeter-counter-roam',
+    'large-room-extender-evacuation',
   ];
   const GOLDEN_DIR = '../golden/';
   const AP_H = 2.2, STA_H = 0.9, WALL_H = 2.6;
@@ -310,7 +339,8 @@
   let band = '5';
   let selected = null;       // role name
   let world3d = null;        // three objects for the current world
-  const requestedMode = new URLSearchParams(location.search).get('mode');
+  const requestedMode = new URLSearchParams(location.search).get('mode') ||
+    document.querySelector('meta[name="room-viewer-mode"]')?.content || 'no-connect';
   const noConnectMode = requestedMode === 'no-connect';
   const interactiveLiveMode = requestedMode === 'interactive';
   const liveMode = requestedMode === 'live' || interactiveLiveMode;
@@ -318,6 +348,7 @@
   let liveSource = null;
   let liveTerminal = false;
   let networkState = null, optimizerState = null, trafficState = null;
+  let profilingState = null;
   let trafficProbeState = null, liveClock = null;
   let healthState = null, actionState = null, verificationState = null;
   let storyState = 'Waiting for the conductor…';
@@ -356,6 +387,7 @@
   const main = $('main');
   makeDraggablePropertiesPanel($('#spatialHud'));
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, stencil: true });
+  let sceneRenderDirty = true;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   main.appendChild(renderer.domElement);
   const scene = new THREE.Scene();
@@ -372,6 +404,7 @@
       target.y + r * Math.cos(phi),
       target.z + r * Math.sin(phi) * Math.cos(theta));
     camera.lookAt(target);
+    sceneRenderDirty = true;
   }
   (function bindOrbit() {
     let drag = null;
@@ -484,8 +517,21 @@
     const w = main.clientWidth, h = main.clientHeight;
     renderer.setSize(w, h, false);
     camera.aspect = w / h; camera.updateProjectionMatrix();
+    sceneRenderDirty = true;
   }
   window.addEventListener('resize', resize);
+  EasyMeshFullscreen.attach({target: main, button: $('#roomFullscreen'),
+    status: $('#fullscreenStatus'), onChange: resize});
+  new ResizeObserver(resize).observe(main);
+  function syncFullscreenPlayback() {
+    $('#fullscreenPlay').textContent = $('#play').textContent;
+    $('#fullscreenPlay').disabled = $('#play').disabled;
+  }
+  $('#fullscreenPlay').addEventListener('click', () => $('#play').click());
+  new MutationObserver(syncFullscreenPlayback).observe($('#play'), {
+    attributes: true, attributeFilter: ['disabled'], childList: true, subtree: true,
+  });
+  syncFullscreenPlayback();
 
   // ---- helpers -------------------------------------------------------------
   const P = (x, y, z) => new THREE.Vector3(x, z, -y);   // plan (x, y) + height -> scene
@@ -980,6 +1026,7 @@
     // nodes
     const nodes = {};
     const pickables = [];
+    const markerScale = Math.max(1, Math.min(2, Math.max(size.width, size.height) / 20));
     for (const role of Object.keys(world.roles)) {
       const kind = kindOf(role), ap = isAp(role);
       const color = COL[kind];
@@ -1068,6 +1115,8 @@
         ghost.visible = false;
         root.add(ghost);
       }
+      grp.scale.setScalar(markerScale);
+      if (ghost) ghost.scale.setScalar(markerScale);
       root.add(grp);
       nodes[role] = { grp, post, head, ring, probeRing, tag, gauge, ghost, color, ap, h };
     }
@@ -1111,12 +1160,31 @@
   }
 
   // ---- per-frame update ----------------------------------------------------
+  function updateSegmentAttribute(geometry, name, values) {
+    const attribute = geometry.getAttribute(name);
+    if (!attribute || attribute.array.length !== values.length) {
+      geometry.setAttribute(name, new THREE.Float32BufferAttribute(values, 3));
+      return true;
+    }
+    let changed = false;
+    for (let index = 0; index < values.length; index++) {
+      const value = Math.fround(values[index]);
+      if (attribute.array[index] !== value) {
+        attribute.array[index] = value;
+        changed = true;
+      }
+    }
+    if (changed) attribute.needsUpdate = true;
+    return changed;
+  }
   function setSegments(obj, pts, cols) {
     const g = obj.geometry;
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-    if (cols) g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
-    g.computeBoundingSphere();
-    if (obj.computeLineDistances) obj.computeLineDistances();
+    const moved = updateSegmentAttribute(g, 'position', pts);
+    if (cols) updateSegmentAttribute(g, 'color', cols);
+    if (moved) {
+      g.computeBoundingSphere();
+      if (obj.computeLineDistances) obj.computeLineDistances();
+    }
   }
   function deviceRole(name) {
     const value = String(name || '').toLowerCase();
@@ -1199,8 +1267,44 @@
     const candidate = (optimizerState.candidates || []).find((item) => item.bssid === decision.target_bssid);
     return candidate ? (candidate.role || deviceRole(candidate.device_name)) : null;
   }
+  let updateQueued = false;
+  const renderStats = {requests: 0, updates: 0, totalMilliseconds: 0, maximumMilliseconds: 0};
+  const frameTimings = new URLSearchParams(location.search).get('profile') === '1' ? [] : null;
+  let receivedNetworkFrame = null;
+  let updatedNetworkFrame = null;
   function update() {
+    renderStats.requests++;
+    if (updateQueued) return;
+    updateQueued = true;
+    requestAnimationFrame(() => {
+      updateQueued = false;
+      const started = performance.now();
+      updateFrame();
+      updatedNetworkFrame = receivedNetworkFrame;
+      renderScene();
+      const elapsed = performance.now() - started;
+      renderStats.updates++;
+      renderStats.totalMilliseconds += elapsed;
+      renderStats.maximumMilliseconds = Math.max(renderStats.maximumMilliseconds, elapsed);
+    });
+  }
+  function renderScene() {
     if (!world3d) return;
+    renderer.render(scene, camera);
+    sceneRenderDirty = false;
+    if (frameTimings && updatedNetworkFrame && updatedNetworkFrame !== renderStats.lastNetworkFrame) {
+      renderStats.lastNetworkFrame = updatedNetworkFrame;
+      const frame = {...updatedNetworkFrame, submitted_at: performance.now()};
+      requestAnimationFrame(() => {
+        frame.next_frame_at = performance.now();
+        frameTimings.push(frame);
+        if (frameTimings.length > 2000) frameTimings.splice(0, frameTimings.length - 2000);
+      });
+    }
+  }
+  function updateFrame() {
+    if (!world3d) return;
+    $('#fullscreenTime').textContent = (tMs / 1000).toFixed(1) + ' / ' + (world.duration_ms / 1000) + ' s';
     const fr = frameAt(tMs), g = fr.g;
     const { nodes } = world3d;
     const pos = {};
@@ -1713,6 +1817,8 @@
       mesh_device_count_mismatch: 'Waiting for all mesh agents',
       movement_active: 'Waiting for device movement to finish',
       rf_settle_interval: 'Waiting for the radio environment to settle',
+      rf_not_applied: 'Waiting for the initial verified RF generation',
+      rf_snapshot_superseded: 'RF changed; refreshing measurements',
       backhaul_reconciling: 'Settling mesh backhaul before measuring client APs',
       fresh_current_link_metric: 'Waiting for a signal sample after the RF change',
       target_association_observed: 'Move observed; checking stability and traffic',
@@ -1722,36 +1828,53 @@
     return reasons[reason] || String(reason || 'Waiting for evaluation').replace(/_/g, ' ');
   }
   function renderOptimizerStatus() {
+    if (profilingState && profilingState.mode === 'native-observation') {
+      $('#optimizerStatus').innerHTML = '<b>Native observation · no lab steering</b><p>Only the room RF stimulus is applied. No external candidate queries, client steering or backhaul-parent selection.</p>';
+      $('#optimizerActivityDetails').textContent = 'External candidate collection is disabled in native observation.';
+      $('#optimizerClientRows').textContent = 'No external policy evaluations. Serving metrics and the selected traffic probe remain observational inputs.';
+      return;
+    }
     const status = optimizerState || {}, progress = status.progress;
     const fleet = status.fleet || {}, rows = status.client_decisions || [];
-    const now = liveMode && liveClock && liveClock.serverMs
-      ? liveClock.serverMs + performance.now() - liveClock.receivedMs
-      : Date.parse(networkState && networkState.observed_at) || Date.now();
-    const age = status.evaluated_at ? Math.max(0, (now - Date.parse(status.evaluated_at)) / 1000) : null;
+    const now = liveMode
+      ? liveClock ? liveClock.serverMs + Math.max(0, performance.now() - liveClock.receivedMs) : NaN
+      : Date.parse(networkState && networkState.observed_at || status.evaluated_at || '');
+    const age = status.evaluated_at ? (now - Date.parse(status.evaluated_at)) / 1000 : null;
+    const freshEvaluation = Number.isFinite(age) && age >= 0 && age <= 60;
     const blocked = rows.filter(row => /missing|stale|unknown|mismatch|minimum_dwell/.test(row.reason));
-    let heading = 'Waiting for evaluation', detail = '';
-    if (status.status === 'unavailable' && !progress) {
-      heading = 'Paused: measurements unavailable';
-      detail = 'Automatic steering waits for a successful measurement retry.';
-    } else if (progress) {
+    let activity = status.status === 'unavailable' ? 'Waiting for the next measurement retry.'
+      : 'Background monitoring continues between evaluations.';
+    if (progress) {
       if (progress.kind === 'optimizer.progress') {
-        heading = progress.phase === 'candidate_queries' ? 'Measuring AP alternatives' : 'Reading current connections';
-        if (status.status === 'unavailable') heading = 'Retrying: ' + heading.charAt(0).toLowerCase() + heading.slice(1);
+        activity = progress.phase === 'candidate_queries' ? 'Measuring AP alternatives' : 'Reading current connections';
+        if (status.status === 'unavailable') activity = 'Retrying: ' + activity.charAt(0).toLowerCase() + activity.slice(1);
         if (progress.total_queries != null) {
           const node = networkState && networkState.mesh && (networkState.mesh.nodes || []).find(item => item.device_id === progress.active_agent);
-          detail = progress.completed_queries + ' / ' + progress.total_queries + ' queries completed' +
+          activity += ': ' + progress.completed_queries + ' / ' + progress.total_queries + ' queries completed' +
             (node ? ' · ' + displayRole(node.role) : '') + '. ' + progress.selected_clients + ' / ' + progress.total_clients + ' clients eligible to measure.';
         }
       } else {
-        heading = optimizerReason(progress.reason || (progress.kind === 'optimizer.environment.changed' ? 'rf_settle_interval' : 'movement_active'));
-        detail = 'Previous decisions are not valid for the changed environment.';
+        activity = optimizerReason(progress.reason || (progress.kind === 'optimizer.environment.changed' ? 'rf_settle_interval' : 'movement_active'));
       }
-    } else if (age != null && age > 60) {
+    }
+    $('#optimizerActivityDetails').textContent = activity;
+    let heading = 'Waiting for evaluation', detail = '';
+    if (progress && progress.kind !== 'optimizer.progress') {
+      heading = activity;
+      detail = 'Previous decisions are not valid for the changed environment.';
+    } else if (status.status === 'unavailable') {
+      heading = 'Paused: measurements unavailable';
+      detail = 'Automatic steering waits for a successful measurement retry.';
+    } else if (age != null && !freshEvaluation) {
       heading = 'Waiting for an updated evaluation';
-      detail = 'Last result is old; convergence is not confirmed.';
-    } else if (fleet.converged) {
+      detail = Number.isFinite(age) && age > 60 ? 'Last result is old; convergence is not confirmed.'
+        : 'Evaluation age is unknown; convergence is not confirmed.';
+    } else if (healthState && healthState.healthy === false) {
+      heading = 'Waiting for lab health recovery';
+      detail = 'The latest health check is degraded; convergence is not confirmed.';
+    } else if (fleet.converged && freshEvaluation && fleet.roster_complete !== false && fleet.measurement_complete !== false) {
       heading = 'Converged: all clients checked';
-      detail = 'No stronger eligible AP in the latest fresh measurements.';
+      detail = 'Last check: all clients were within ' + (Number(fleet.minimum_gain_rcpi || 1) / 2) + ' dB of their strongest measured AP. Monitoring continues.';
     } else if (blocked.length) {
       heading = blocked.length + ' clients waiting or blocked';
       const counts = {};
@@ -1762,8 +1885,14 @@
       detail = (fleet.clients_checked || 0) + ' / ' + rows.length + ' clients have fresh AP comparisons.';
     }
     const selectedDecision = rows.find(row => row.role === selected);
+    if (fleet.roster_complete === false) {
+      detail += ' Native roster incomplete: ' + (fleet.missing_clients || []).length + ' missing clients, ' +
+        (fleet.unexpected_clients || []).length + ' unexpected/offline clients still reported. Available clients continue; whole-room convergence is not confirmed.';
+    }
     $('#optimizerStatus').innerHTML = '<b>' + esc(heading) + '</b><p>' + esc(detail) + '</p>' +
-      (age == null ? '' : '<div class="sub">Last evaluation ' + Math.floor(age) + ' s ago · cycle ' +
+      '<div class="sub">' + (status.profiling || networkState && networkState.profiling ? 'Unassisted BTM profiling · external room policy' : 'Assisted demo · external room policy') + '</div>' +
+      (status.unavailable_cohort_reason ? '<div class="sub">One client group lacks fresh AP comparisons; other fresh groups remain actionable. ' + esc(status.unavailable_cohort_reason) + '</div>' : '') +
+      (!Number.isFinite(age) || age < 0 ? '' : '<div class="sub">Last evaluation ' + Math.floor(age) + ' s ago · cycle ' +
         (Number(status.observation_elapsed_ms || 0) / 1000).toFixed(1) + ' s</div>') +
       (selectedDecision ? '<p><b>' + esc(displayRole(selected)) + ':</b> ' + esc(optimizerReason(selectedDecision.reason)) +
         (selectedDecision.wait_remaining_seconds ? ' · ' + esc(selectedDecision.wait_remaining_seconds) + ' s remaining at evaluation' : '') + '</p>' : '');
@@ -1816,7 +1945,7 @@
     if (optimizerState && optimizerState.progress && optimizerState.progress.reason === 'backhaul_reconciling') {
       $('#optimizerMetrics').innerHTML = '<div><span class="phase waiting">BACKHAUL SETTLING</span></div>' +
         '<p><b>Client steering waits for mesh parent verification.</b></p>' +
-        '<div class="sub">Lab backhaul control runs first. Fresh client AP measurements resume after the parent graph settles.</div>';
+        '<div class="sub">Only an active parent-switch transaction blocks client work; ordinary backhaul settling does not.</div>';
     } else if (optimizerState && optimizerState.status === 'unavailable') {
       $('#optimizerMetrics').innerHTML =
         '<div><span class="phase">MEASUREMENTS UNAVAILABLE</span></div>' +
@@ -2021,6 +2150,7 @@
   function loadWorld(w) {
     if (replayMode && replayDurationMs) w = Object.assign({}, w, {duration_ms: replayDurationMs});
     world = w; tMs = 0; selected = null; playing = false; $('#play').textContent = 'Play';
+    showPlaybackCheckpoint(null);
     for (const role of Object.keys(interaction.overrides)) delete interaction.overrides[role];
     for (const role of Object.keys(interaction.previewPositions)) delete interaction.previewPositions[role];
     interaction.drag = interaction.movement = interaction.awaitingDestination = interaction.hudRole = null;
@@ -2128,12 +2258,21 @@
   // ---- controls ------------------------------------------------------------
   $('#scrub').addEventListener('input', (e) => {
     if (!world || liveMode) return;
+    showPlaybackCheckpoint(null);
     tMs = e.target.value / 1000 * world.duration_ms;
     if (replayMode) applyReplayUntil(tMs);
     update();
   });
+  function showPlaybackCheckpoint(time) {
+    const message = $('#playbackCheckpoint');
+    message.hidden = time == null;
+    message.textContent = time == null ? '' : 'Checkpoint at ' + (time / 1000) + ' s. ' +
+      (liveMode ? 'Wait for fresh measurements and verified roaming in both views; press Play to continue.'
+        : 'Compare predicted links; press Play to continue. This preview does not steer real clients.');
+  }
   function applyPlaybackSnapshot(snapshot) {
     livePlayback = snapshot;
+    showPlaybackCheckpoint(replayMode ? null : snapshot.checkpoint_ms);
     if (liveMode) tMs = Number(snapshot.time_ms || 0);
     if (interactiveLiveMode) {
       $('#play').disabled = playbackBusy || !interaction.apiEnabled || !snapshot.enabled;
@@ -2161,12 +2300,13 @@
       return;
     }
     playing = !playing;
+    if (playing) showPlaybackCheckpoint(null);
     $('#play').textContent = playing ? 'Pause' : 'Play';
     lastTick = performance.now();
     if (playing && tMs >= world.duration_ms) tMs = 0;
   }
   $('#play').addEventListener('click', togglePlay);
-  document.addEventListener('keydown', (e) => { if (!$('#viewerManual').open && e.code === 'Space' && !/INPUT|SELECT|BUTTON/.test(document.activeElement.tagName)) { e.preventDefault(); togglePlay(); } });
+  document.addEventListener('keydown', (event) => { if (!$('#viewerManual').open && event.code === 'Space' && !/INPUT|SELECT|BUTTON|SUMMARY/.test(document.activeElement.tagName) && !document.activeElement.closest('.live-scroll')) { event.preventDefault(); togglePlay(); } });
   document.querySelectorAll('[data-speed]').forEach((b) => b.addEventListener('click', () => {
     speed = +b.dataset.speed; document.querySelectorAll('[data-speed]').forEach((x) => x.setAttribute('aria-pressed', x === b));
   }));
@@ -2474,6 +2614,19 @@
       liveClock = {serverMs: Math.max(priorTime, recordedAt), receivedMs};
     }
     if (advanceClock) tMs = Math.max(0, Math.min(world.duration_ms, Number(event.world_time_ms) || 0));
+    if (event.kind === 'lab.profiling') {
+      const profile = event.payload;
+      profilingState = profile;
+      const label = profile.mode === 'native-observation'
+        ? 'Native observation · no lab steering'
+        : profile.mode === 'unassisted-btm' ? 'External policy · unassisted BTM'
+        : profile.mode === 'external-recommendations' ? 'External recommendations · no lab steering'
+        : 'Assisted demo · external policy';
+      for (const selector of ['#profilingAuthority', '#fullscreenAuthority']) {
+        const element = $(selector);
+        if (element) element.textContent = label + ' · ' + (profile.backhaul_rf || 'scenario') + ' backhaul';
+      }
+    }
     if (event.kind === 'room.world.committed') {
       const payload = event.payload;
       loadWorld(payload.world);
@@ -2494,6 +2647,9 @@
       applyPlaybackSnapshot(event.payload.playback);
     } else if (event.kind === 'network.snapshot') {
       networkState = event.payload;
+      if (frameTimings) receivedNetworkFrame = {sequence: event.sequence, received_at: performance.now(),
+        recorded_at: event.recorded_at, owners: (networkState.clients || []).map(client =>
+          [client.sta_mac, client.connected_bssid])};
       applyTrafficProbe(networkState.traffic_probe);
     } else if (event.kind === 'traffic.probe.selected') {
       applyTrafficProbe(event.payload.traffic_probe);
@@ -2642,6 +2798,12 @@
       applyLiveState(state);
       if (interactiveLiveMode) await refreshInteractionSnapshot();
       liveSource = new EventSource('/api/demo/events?after=' + encodeURIComponent(state.sequence));
+      liveSource.addEventListener('reset', () => {
+        liveSource.close();
+        liveSource = null;
+        setLiveStatus('connecting', 'history expired; resynchronizing');
+        connectLive();
+      });
       liveSource.onopen = () => {
         const current = $('#liveStatus').dataset.state;
         if (current === 'connecting' || current === 'disconnected') setLiveStatus(state.state, 'connected');
@@ -2693,7 +2855,9 @@
       const state = await stateResponse.json();
       replayInitialWorld = await worldResponse.json();
       loadWorld(replayInitialWorld);
-      replayEvents = (await eventsResponse.json()).events.sort((a, b) => a.sequence - b.sequence);
+      const eventDocument = await eventsResponse.json();
+      if (eventDocument.history?.truncated) throw new Error('Full replay expired; use the live view or a complete archived run');
+      replayEvents = eventDocument.events.sort((a, b) => a.sequence - b.sequence);
       replayDurationMs = replayEvents.reduce((maximum, event) => Math.max(maximum, event.world_time_ms), replayInitialWorld.duration_ms);
       loadWorld(replayInitialWorld);
       $('#liveRun').style.display = 'block';
@@ -2710,7 +2874,14 @@
     requestAnimationFrame(loop);
     const interactionChanged = world && advanceMovement(now);
     if (playing && world && !liveMode) {
-      tMs += (now - lastTick) * speed;
+      const targetTime = Math.min(world.duration_ms, tMs + (now - lastTick) * speed);
+      const checkpoint = replayMode ? null : interactionModel.nextPlaybackPause(world, tMs, targetTime);
+      tMs = checkpoint == null ? targetTime : checkpoint;
+      if (checkpoint != null) {
+        playing = false;
+        $('#play').textContent = 'Play';
+        showPlaybackCheckpoint(checkpoint);
+      }
       if (tMs >= world.duration_ms) { tMs = world.duration_ms; playing = false; $('#play').textContent = 'Play'; }
       if (replayMode) applyReplayUntil(tMs);
       update();
@@ -2719,10 +2890,12 @@
       update();
     }
     lastTick = now;
-    if (world3d) renderer.render(scene, camera);
+    if (sceneRenderDirty && !updateQueued) renderScene();
   }
   resize(); placeCamera(); requestAnimationFrame(loop);
   window.__scene = scene; window.__viewer = {
+    renderStats,
+    frameTimings,
     loadWorld, update, frameAt: (t) => frameAt(t),
     bestServing: (g) => bestServing(g),
     setTime: (t) => { tMs = t; update(); },

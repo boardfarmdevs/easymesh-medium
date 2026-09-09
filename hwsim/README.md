@@ -1,7 +1,10 @@
 # hwsim module build
 
-`build-hwsim.sh` obtains the source matching the running Ubuntu kernel, applies
-the lab patches, and builds an out-of-tree `mac80211_hwsim.ko`. Linux 6.8 and
+`build-hwsim.sh` first requests the source matching the running Ubuntu kernel,
+falling back to the available HWE source when that version is no longer indexed.
+It applies the lab patches and builds an out-of-tree `mac80211_hwsim.ko` against
+the installed kernel headers. Retain the build log and module checksum when
+recording release provenance. Linux 6.8 and
 7.0 are supported; the optional kernel-medium evaluation is accepted only on
 Linux 7.0.
 

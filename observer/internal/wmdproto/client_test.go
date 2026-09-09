@@ -198,6 +198,17 @@ func TestEventRingOverwriteIsInformationalWithoutHistoryGap(t *testing.T) {
 	}
 }
 
+func TestNetlinkHealthDoesNotMisclassifyOtherEINVAL(test *testing.T) {
+	state, reasons := assessHealth(model.TelemetrySummary{NetlinkOtherErrors: 1}, false)
+	if state != "degraded" || len(reasons) != 1 || reasons[0] != "netlink errors outside tracked clone EINVAL have been observed" {
+		test.Fatalf("other netlink error classified incorrectly: state=%s reasons=%v", state, reasons)
+	}
+	state, reasons = assessHealth(model.TelemetrySummary{NetlinkCloneEINVAL: 1}, false)
+	if state != "ok" || len(reasons) != 1 || reasons[0] != "no current queue or event-integrity warning" {
+		test.Fatalf("tracked clone error classified incorrectly: state=%s reasons=%v", state, reasons)
+	}
+}
+
 func serveAssociationConnection(t *testing.T, listener *net.UnixListener, generation uint64) {
 	t.Helper()
 	conn, err := listener.AcceptUnix()

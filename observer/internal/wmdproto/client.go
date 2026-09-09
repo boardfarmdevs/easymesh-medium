@@ -792,7 +792,7 @@ func assessHealth(summary model.TelemetrySummary, eventHistoryGap bool) (string,
 	}
 	if summary.NetlinkOtherErrors > 0 {
 		state = "degraded"
-		reasons = append(reasons, "non-EINVAL netlink errors have been observed")
+		reasons = append(reasons, "netlink errors outside tracked clone EINVAL have been observed")
 	}
 	if len(reasons) == 0 {
 		reasons = []string{"no current queue or event-integrity warning"}

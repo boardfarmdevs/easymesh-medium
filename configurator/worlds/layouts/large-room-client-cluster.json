@@ -1,0 +1,165 @@
+{
+  "schema": "wmdcfg.world-layout.v1",
+  "name": "large-room-client-cluster",
+  "tags": [
+    "large-room",
+    "five-agent",
+    "open-plan",
+    "extender-evacuation"
+  ],
+  "space": {
+    "width_m": 40,
+    "height_m": 40
+  },
+  "propagation": {
+    "reference_distance_m": 1,
+    "reference_snr_db_by_band": {
+      "5": 50,
+      "6": 47,
+      "2.4": 54
+    },
+    "path_loss_exponent": 2.2,
+    "shadowing_stddev_db": 0,
+    "minimum_snr_db": -20,
+    "maximum_snr_db": 60
+  },
+  "walls": [],
+  "nodes": [
+    {
+      "role": "gateway",
+      "kind": "fronthaul_ap",
+      "position": [
+        20,
+        20
+      ]
+    },
+    {
+      "role": "extender_1",
+      "kind": "fronthaul_ap",
+      "position": [
+        8,
+        8
+      ]
+    },
+    {
+      "role": "extender_2",
+      "kind": "fronthaul_ap",
+      "position": [
+        36,
+        4
+      ]
+    },
+    {
+      "role": "extender_3",
+      "kind": "fronthaul_ap",
+      "position": [
+        4,
+        36
+      ]
+    },
+    {
+      "role": "extender_4",
+      "kind": "fronthaul_ap",
+      "position": [
+        36,
+        36
+      ]
+    },
+    {
+      "role": "sta_static_01",
+      "kind": "station",
+      "position": [
+        8,
+        9
+      ]
+    },
+    {
+      "role": "sta_static_02",
+      "kind": "station",
+      "position": [
+        9,
+        8
+      ]
+    },
+    {
+      "role": "sta_static_03",
+      "kind": "station",
+      "position": [
+        9,
+        9
+      ]
+    },
+    {
+      "role": "sta_static_04",
+      "kind": "station",
+      "position": [
+        10,
+        8
+      ]
+    },
+    {
+      "role": "sta_static_05",
+      "kind": "station",
+      "position": [
+        8,
+        10
+      ]
+    },
+    {
+      "role": "sta_static_06",
+      "kind": "station",
+      "position": [
+        10,
+        10
+      ]
+    },
+    {
+      "role": "sta_static_07",
+      "kind": "station",
+      "position": [
+        11,
+        9
+      ]
+    },
+    {
+      "role": "sta_static_08",
+      "kind": "station",
+      "position": [
+        9,
+        11
+      ]
+    },
+    {
+      "role": "sta_static_09",
+      "kind": "station",
+      "position": [
+        37,
+        4
+      ]
+    },
+    {
+      "role": "sta_static_10",
+      "kind": "station",
+      "position": [
+        4,
+        37
+      ]
+    },
+    {
+      "role": "sta_mobile_01",
+      "kind": "station",
+      "position": [
+        37,
+        37
+      ]
+    },
+    {
+      "role": "sta_mobile_02",
+      "kind": "station",
+      "position": [
+        39,
+        39
+      ]
+    }
+  ]
+}

@@ -7,7 +7,7 @@ from wmdcfg.model import ScenarioError
 from wmdcfg.geometry import directed_link, quantize_position, wall_crossings
 from wmdcfg.parser import parse
 from wmdcfg.compiler import validate_scenario
-from wmdcfg.world import compile_world, export_wmd, verify_world_plan
+from wmdcfg.world import _hash, compile_world, export_wmd, verify_world_plan
 
 
 def _layout(walls=True):
@@ -122,6 +122,23 @@ class WorldTests(unittest.TestCase):
         plan = compile_world(_layout(), _mobility())
         rewritten = json.loads(json.dumps(plan).replace("5.0", "5"))
         verify_world_plan(rewritten)
+
+    def test_checkpoint_metadata_is_signed_and_validated(self):
+        mobility = _mobility()
+        mobility["pause_at_ms"] = [1000, 2000]
+        plan = compile_world(_layout(), mobility)
+        self.assertEqual(plan["pause_at_ms"], [1000, 2000])
+        verify_world_plan(plan)
+        for invalid in (None, True, "1000", [0], [3000], [1000, 1000], [2000, 1000], [True], [1.5]):
+            with self.subTest(invalid=invalid):
+                mobility["pause_at_ms"] = invalid
+                with self.assertRaisesRegex(ScenarioError, "pause_at_ms"):
+                    compile_world(_layout(), mobility)
+                plan["pause_at_ms"] = invalid
+                plan.pop("golden_sha256")
+                plan["golden_sha256"] = _hash(plan)
+                with self.assertRaisesRegex(ScenarioError, "pause_at_ms"):
+                    verify_world_plan(plan)
 
     def test_partial_final_tick_is_rejected(self):
         mobility = _mobility()
