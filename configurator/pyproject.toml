@@ -11,6 +11,11 @@ dependencies = []
 
 [project.scripts]
 wmdcfg = "wmdcfg.cli:main"
+wmdcfg-rf-audit = "wmdcfg.rf_audit:main"
+wmdcfg-rf-source-audit = "wmdcfg.rf_source_audit:main"
+wmdcfg-survey-bridge = "wmdcfg.survey_bridge:main"
+wmdcfg-rf-survey = "wmdcfg.rf_survey:main"
+wmdcfg-rf-validate = "wmdcfg.rf_validate:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

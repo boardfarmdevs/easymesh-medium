@@ -36,6 +36,7 @@ CAPABILITIES = {
     1 << 4: "frequency_qualified_snr",
     1 << 5: "read_only",
     1 << 11: "paged_link_dumps",
+    1 << 12: "channel_survey",
 }
 
 STATUS = {
@@ -164,6 +165,20 @@ class ControlClient:
 
     def status(self) -> DaemonStatus:
         return self._status(OP_STATUS)
+
+    def get_channel_survey(self, frequency_mhz: int) -> dict:
+        if "channel_survey" not in self.capabilities:
+            raise ActuatorError("daemon lacks channel survey capability")
+        generation, payload = self._request(15, struct.pack("!I", frequency_mhz))
+        record = struct.Struct("!IIQQQQ")
+        if len(payload) != record.size:
+            raise ActuatorError("invalid channel survey response length")
+        frequency, flags, start, observed, busy, overruns = record.unpack(payload)
+        if frequency != frequency_mhz or flags & ~3 or observed < start or busy > observed - start:
+            raise ActuatorError("invalid channel survey response fields")
+        return {"frequency_mhz": frequency, "flags": flags, "start_us": start,
+                "observed_us": observed, "busy_us": busy, "overruns": overruns,
+                "generation": generation}
 
     @staticmethod
     def _encode_links(updates: list[dict]) -> bytes:

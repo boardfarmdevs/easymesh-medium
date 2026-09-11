@@ -97,6 +97,11 @@ apply "$HERE/patches/0005-mac80211_hwsim-kernel-medium-rate-per.patch"
 apply "$HERE/patches/0006-mac80211_hwsim-kernel-medium-timing-observability.patch"
 apply "$HERE/patches/0007-mac80211_hwsim-allow-128-static-radios.patch"
 apply "$HERE/patches/0008-mac80211_hwsim-fix-multichannel-monitor-ack.patch"
+if [ "$GEN" = 7.0 ]; then
+    apply "$HERE/patches/0009-mac80211_hwsim-context-survey-cache.patch"
+else
+    echo ">> modeled survey cache requires Linux 7.0; retaining signal-only support"
+fi
 grep -q 'EXPERIMENTAL wmediumd' "$SRCDIR/mac80211_hwsim.c" \
     || { echo "patch 0001 did not apply -- check source version" >&2; exit 1; }
 

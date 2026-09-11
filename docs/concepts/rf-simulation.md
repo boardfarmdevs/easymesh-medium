@@ -104,9 +104,9 @@ No single surface is sufficient for an optimizer claim.
 
 ## Detailed documentation
 
-- [wmediumd internals](../reference/wmediumd-internals.md)
-- [wmediumd configurator](../reference/wmediumd-configurator.md)
-- [wmediumd Console](../reference/wmediumd-console.md)
+- [wmediumd internals](../reference/radio/wmediumd-internals.md)
+- [wmediumd configurator](../reference/radio/configurator.md)
+- [wmediumd Console](../reference/radio/console.md)
 - [Experiment catalog](../experiments/README.md)
 - [Optimizer](optimizer.md)
-- [Metrics](../reference/metrics.md)
+- [Metrics](../reference/observability/metrics.md)

@@ -37,7 +37,7 @@ HWSIM_KERNEL_MEDIUM_JITTER_US=500 \
 
 Never use `--load` while a BPI or WLAN-client container owns an hwsim PHY. For
 the complete design, controls, results, and limitations, see
-[the kernel-medium reference](../../doc/easymesh/reference/hwsim-kernel-medium.md).
+[the kernel-medium reference](../../doc/easymesh/reference/radio/kernel-medium.md).
 
 The destructive two-radio QEMU evaluator is:
 

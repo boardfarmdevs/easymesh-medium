@@ -23,16 +23,17 @@ class ActuatorIntegrationTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         root = Path(self.temp.name)
         self.control = root / "control.sock"
+        self.metrics = root / "metrics.sock"
         self.vhost = root / "vhost.sock"
         self.daemon = subprocess.Popen(
             [BINARY, "-c", str(ROOT / "tests/fixtures/two-radio.cfg"),
-             "-u", str(self.vhost), "-C", str(self.control)],
+             "-u", str(self.vhost), "-C", str(self.control), "-R", str(self.metrics)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
         )
         for _ in range(100):
-            if self.control.exists():
+            if self.control.exists() and self.metrics.exists():
                 break
             if self.daemon.poll() is not None:
                 stdout, stderr = self.daemon.communicate()
@@ -51,6 +52,21 @@ class ActuatorIntegrationTests(unittest.TestCase):
         self.daemon.communicate()
         self.temp.cleanup()
 
+    def test_read_only_channel_survey(self):
+        with ControlClient(str(self.metrics)) as client:
+            self.assertIn("channel_survey", client.capabilities)
+            first = client.get_channel_survey(5180)
+            time.sleep(0.025)
+            second = client.get_channel_survey(5180)
+            self.assertGreater(second["observed_us"], first["observed_us"])
+            self.assertEqual(second["start_us"], first["start_us"])
+            self.assertEqual(second["busy_us"], 0)
+            self.assertEqual(second["flags"], 3)
+            self.assertEqual(second["overruns"], 0)
+            self.assertNotEqual(client.get_channel_survey(2412)["start_us"], first["start_us"])
+            with self.assertRaises((ActuatorError, ValueError)):
+                client.get_channel_survey(100)
+
     def test_atomic_apply_rejection_readback_and_restore(self):
         original_pid = self.daemon.pid
         with ControlClient(str(self.control)) as client:
@@ -66,9 +82,10 @@ class ActuatorIntegrationTests(unittest.TestCase):
             self.assertEqual(client.get_link(SOURCE, DESTINATION), (0, 33))
             self.assertEqual(client.get_link(SOURCE, UNSPECIFIED), (0, 37))
 
-            with self.assertRaises(ActuatorError):
-                with ControlClient(str(self.control)):
-                    pass
+            with ControlClient(str(self.control)) as peer:
+                self.assertEqual(peer.status().instance_id, status.instance_id)
+                self.assertEqual(peer.status().generation, 0)
+                self.assertNotIn("read_only", peer.status().capabilities)
 
             update = [{"source": SOURCE, "destination": DESTINATION, "value": 12}]
             self.assertEqual(client.apply(1, update), update)
@@ -126,6 +143,22 @@ class ActuatorIntegrationTests(unittest.TestCase):
 
         self.assertIsNone(self.daemon.poll())
         self.assertEqual(self.daemon.pid, original_pid)
+
+    def test_read_only_capability_rejects_both_mutation_opcodes(self):
+        with ControlClient(str(self.control)) as writer, ControlClient(str(self.metrics)) as observer:
+            baseline = writer.status()
+            status = observer.status()
+            self.assertEqual(status.instance_id, baseline.instance_id)
+            self.assertIn("read_only", status.capabilities)
+            with ControlClient(str(self.metrics)) as second_observer:
+                self.assertEqual(second_observer.get_link(SOURCE, DESTINATION), (0, 33))
+            update = [{"source": SOURCE, "destination": DESTINATION, "value": 12}]
+            with self.assertRaisesRegex(ActuatorError, "read-only"):
+                observer.apply(1, update)
+            with self.assertRaisesRegex(ActuatorError, "read-only"):
+                observer.apply_frequency(1, [dict(update[0], frequency_mhz=5180)])
+            self.assertEqual(writer.status().generation, baseline.generation)
+            self.assertEqual(writer.get_link(SOURCE, DESTINATION), (0, 33))
 
 
 if __name__ == "__main__":

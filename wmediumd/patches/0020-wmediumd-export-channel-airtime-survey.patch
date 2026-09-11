@@ -1,0 +1,385 @@
+wmediumd: export bounded union airtime, excluding queue and contention wait
+
+Profile: single contention domain, legacy 20 MHz modeled airtime; not hardware capacity.
+Only queried frequencies subscribe, so scans cannot evict operating-channel counters.
+
+--- a/wmediumd/Makefile
++++ b/wmediumd/Makefile
+@@ -49,7 +49,7 @@
+ 
+ CFLAGS+=-DVERSION_STR=$(VERSION_STR)
+ LDFLAGS+=-lconfig 
+-OBJECTS=wmediumd.o config.o per.o control.o
++OBJECTS=wmediumd.o config.o per.o control.o airtime.o
+ OBJECTS += lib/loop.o lib/sched.o lib/schedctrl.o
+ OBJECTS += lib/uds.o lib/vhost.o lib/wallclock.o
+ 
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -665,6 +665,10 @@
+ 	int i, j;
+ 	int rate_idx, per_rate_idx;
+ 	int ac;
++	struct { uint32_t offset, duration; } air_intervals[64];
++	unsigned int air_count = 0;
++	bool air_overflow = false;
++	uint64_t air_now, air_start;
+ 
+ 	/* TODO configure phy parameters */
+ 	int slot_time = 9;
+@@ -730,8 +734,16 @@
+ 						 frame->freq, frame->data_len,
+ 						 station, deststa);
+ 		for (j = 0; j < frame->tx_rates[i].count; j++) {
+-			send_time += difs + pkt_duration(frame->data_len,
++			int data_time = pkt_duration(frame->data_len,
+ 				index_to_rate(per_rate_idx, frame->freq));
++			send_time += difs;
++			if (air_count < sizeof(air_intervals) / sizeof(air_intervals[0])) {
++				air_intervals[air_count].offset = send_time;
++				air_intervals[air_count++].duration = data_time;
++			} else {
++				air_overflow = true;
++			}
++			send_time += data_time;
+ 
+ 			retries++;
+ 
+@@ -815,6 +827,18 @@
+ 		}
+ 	}
+ 
++	air_now = wmd_airtime_now();
++	air_start = air_now + target - scheduler.current_time;
++	for (unsigned int air_index = 0; air_index < air_count; air_index++)
++		wmd_airtime_record(&ctx->airtime, frame->freq, air_now,
++			air_start + air_intervals[air_index].offset,
++			air_intervals[air_index].duration);
++	if (is_acked && !noack)
++		wmd_airtime_record(&ctx->airtime, frame->freq, air_now,
++			air_start + send_time - ack_time_usec + sifs,
++			ack_time_usec - sifs);
++	if (air_overflow)
++		wmd_airtime_invalidate(&ctx->airtime, frame->freq, air_now);
+ 	target += send_time;
+ 
+ 	frame->duration = send_time;
+@@ -1877,6 +1901,12 @@
+ 		printf("PASS telemetry: bounded counters, active link, VIF and event state\n");
+ 	}
+ 
++	if (wmd_airtime_selftest()) {
++		printf("FAIL airtime: interval union and bounded channel snapshots\n");
++		fails++;
++	} else {
++		printf("PASS airtime: interval union excludes waits and isolates frequencies\n");
++	}
+ 	printf("=== self-test %s (%d failures) ===\n", fails ? "FAILED" : "PASSED", fails);
+ 	return fails ? 1 : 0;
+ }
+--- a/wmediumd/wmediumd.h
++++ b/wmediumd/wmediumd.h
+@@ -119,6 +119,7 @@
+ #include <usfstl/sched.h>
+ 
+ #include "list.h"
++#include "airtime.h"
+ #include "ieee80211.h"
+ 
+ typedef uint8_t u8;
+@@ -236,6 +237,7 @@
+ 	u64 control_instance_hi;
+ 	u64 control_instance_lo;
+ 	u64 control_generation;
++	struct wmd_airtime airtime;
+ 	struct wmd_frequency_override *frequency_overrides;
+ 	size_t frequency_override_capacity;
+ 	size_t frequency_override_count;
+--- a/wmediumd/control.c
++++ b/wmediumd/control.c
+@@ -566,7 +566,7 @@
+ 	struct wmediumd *ctx = client->ctx;
+ 	uint32_t capabilities = WMDC_CAP_RADIO_PAIR_SNR |
+ 		WMDC_CAP_ATOMIC_GENERATIONS | WMDC_CAP_READBACK | WMDC_CAP_DUMP |
+-		WMDC_CAP_PAGED_LINK_DUMPS;
++		WMDC_CAP_PAGED_LINK_DUMPS | WMDC_CAP_CHANNEL_SURVEY;
+ 	uint32_t max_updates = ctx->num_stas * ctx->num_stas;
+ 
+ 	if (ctx->frequency_overrides) {
+@@ -1679,6 +1679,33 @@
+ 	free(client);
+ }
+ 
++static int handle_channel_survey(struct wmd_control_client *client,
++                                const void *payload, uint32_t length)
++{
++    struct wmd_airtime_sample sample;
++    struct {
++        uint32_t frequency, flags;
++        uint64_t start_us, observed_us, busy_us, overruns;
++    } __attribute__((packed)) response;
++    uint32_t frequency;
++    if (length != sizeof(frequency))
++        return send_response(client->loop.fd, WMDC_OP_GET_CHANNEL_SURVEY,
++                             WMDC_ERR_LENGTH, client->ctx->control_generation, NULL, 0);
++    memcpy(&frequency, payload, sizeof(frequency));
++    frequency = be32toh(frequency);
++    if (wmd_airtime_read(&client->ctx->airtime, frequency, wmd_airtime_now(), &sample))
++        return send_response(client->loop.fd, WMDC_OP_GET_CHANNEL_SURVEY,
++                             WMDC_ERR_FREQUENCY, client->ctx->control_generation, NULL, 0);
++    response.frequency = htobe32(sample.frequency);
++    response.flags = htobe32(sample.flags);
++    response.start_us = htobe64(sample.start_us);
++    response.observed_us = htobe64(sample.observed_us);
++    response.busy_us = htobe64(sample.busy_us);
++    response.overruns = htobe64(sample.overruns);
++    return send_response(client->loop.fd, WMDC_OP_GET_CHANNEL_SURVEY,
++                         WMDC_OK, client->ctx->control_generation, &response, sizeof(response));
++}
++
+ static void control_handler(struct usfstl_loop_entry *entry)
+ {
+ 	struct wmd_control_client *client =
+@@ -1778,6 +1805,9 @@
+ 		result = handle_get_association(client,
+ 			frame + sizeof(*header), payload_len);
+ 		break;
++	case WMDC_OP_GET_CHANNEL_SURVEY:
++		result = handle_channel_survey(client, frame + sizeof(*header), payload_len);
++		break;
+ 	default:
+ 		break;
+ 	}
+--- a/wmediumd/control.h
++++ b/wmediumd/control.h
+@@ -26,6 +26,7 @@
+ 	WMDC_OP_DUMP_VIFS = 12,
+ 	WMDC_OP_DUMP_EVENTS = 13,
+ 	WMDC_OP_GET_ASSOCIATION = 14,
++	WMDC_OP_GET_CHANNEL_SURVEY = 15,
+ };
+ 
+ enum wmdc_status {
+@@ -54,6 +55,7 @@
+ 	WMDC_CAP_EVENT_RING = 1U << 9,
+ 	WMDC_CAP_ASSOCIATION_OWNERSHIP = 1U << 10,
+ 	WMDC_CAP_PAGED_LINK_DUMPS = 1U << 11,
++	WMDC_CAP_CHANNEL_SURVEY = 1U << 12,
+ };
+ 
+ #define WMDC_FREQUENCY_OVERRIDE (1U << 0)
+--- a/wmediumd/airtime.c
++++ b/wmediumd/airtime.c
+@@ -0,0 +1,166 @@
++#include "airtime.h"
++
++#include <stdlib.h>
++#include <string.h>
++#include <time.h>
++
++uint64_t wmd_airtime_now(void)
++{
++    struct timespec now;
++    clock_gettime(CLOCK_MONOTONIC, &now);
++    return (uint64_t)now.tv_sec * 1000000 + now.tv_nsec / 1000;
++}
++
++static struct wmd_airtime_channel *channel_find(struct wmd_airtime *state,
++                                                uint32_t frequency)
++{
++    unsigned int slot;
++    for (slot = 0; slot < WMD_AIRTIME_CHANNELS; slot++)
++        if (state->channels[slot] && state->channels[slot]->frequency == frequency)
++            return state->channels[slot];
++    return NULL;
++}
++
++static struct wmd_airtime_channel *channel_get(struct wmd_airtime *state,
++                                               uint32_t frequency, uint64_t now_us)
++{
++    unsigned int slot;
++    if (frequency < 2300 || frequency > 7125)
++        return NULL;
++    for (slot = 0; slot < WMD_AIRTIME_CHANNELS; slot++)
++        if (state->channels[slot] && state->channels[slot]->frequency == frequency)
++            return state->channels[slot];
++    for (slot = 0; slot < WMD_AIRTIME_CHANNELS; slot++) {
++        struct wmd_airtime_channel *channel = state->channels[slot];
++        if (channel && now_us - channel->cursor * 64 < 60000000)
++            continue;
++        if (!channel)
++            channel = calloc(1, sizeof(*channel));
++        else
++            memset(channel, 0, sizeof(*channel));
++        if (!channel)
++            return NULL;
++        channel->frequency = frequency;
++        channel->cursor = now_us / 64;
++        channel->start_us = channel->cursor * 64;
++        state->channels[slot] = channel;
++        return channel;
++    }
++    return NULL;
++}
++
++static void channel_advance(struct wmd_airtime_channel *channel, uint64_t now_us)
++{
++    uint64_t target = now_us / 64;
++    uint64_t remaining = target > channel->cursor ? target - channel->cursor : 0;
++    if (remaining > WMD_AIRTIME_BINS)
++        remaining = WMD_AIRTIME_BINS;
++    while (remaining--) {
++        uint64_t *cell = &channel->bins[channel->cursor % WMD_AIRTIME_BINS];
++        channel->busy_us += __builtin_popcountll(*cell);
++        *cell = 0;
++        channel->cursor++;
++    }
++    if (channel->cursor < target)
++        channel->cursor = target;
++}
++
++void wmd_airtime_invalidate(struct wmd_airtime *state, uint32_t frequency,
++                           uint64_t now_us)
++{
++    struct wmd_airtime_channel *channel = channel_find(state, frequency);
++    if (!channel)
++        return;
++    channel->overruns++;
++    channel->invalid_until_us = now_us + 64 * WMD_AIRTIME_BINS;
++}
++
++void wmd_airtime_record(struct wmd_airtime *state, uint32_t frequency,
++                       uint64_t now_us, uint64_t start_us, uint64_t duration_us)
++{
++    struct wmd_airtime_channel *channel = channel_find(state, frequency);
++    uint64_t end_us;
++    if (!channel || !duration_us)
++        return;
++    channel_advance(channel, now_us);
++    end_us = start_us + duration_us;
++    if (end_us < start_us || start_us < channel->cursor * 64 ||
++        end_us > (channel->cursor + WMD_AIRTIME_BINS) * 64) {
++        wmd_airtime_invalidate(state, frequency, now_us);
++        if (end_us > channel->invalid_until_us && end_us >= start_us)
++            channel->invalid_until_us = end_us;
++        return;
++    }
++    while (start_us < end_us) {
++        unsigned int offset = start_us % 64;
++        unsigned int length = end_us - start_us;
++        uint64_t mask;
++        if (length > 64 - offset)
++            length = 64 - offset;
++        mask = length == 64 ? UINT64_MAX : ((UINT64_C(1) << length) - 1) << offset;
++        channel->bins[(start_us / 64) % WMD_AIRTIME_BINS] |= mask;
++        start_us += length;
++    }
++}
++
++int wmd_airtime_read(struct wmd_airtime *state, uint32_t frequency,
++                     uint64_t now_us, struct wmd_airtime_sample *sample)
++{
++    struct wmd_airtime_channel *channel = channel_get(state, frequency, now_us);
++    if (!channel)
++        return -1;
++    channel_advance(channel, now_us);
++    memset(sample, 0, sizeof(*sample));
++    sample->frequency = frequency;
++    sample->start_us = channel->start_us;
++    sample->observed_us = channel->cursor * 64;
++    sample->busy_us = channel->busy_us;
++    sample->overruns = channel->overruns;
++    sample->flags = WMD_AIRTIME_MODEL_LEGACY20;
++    if (sample->observed_us > sample->start_us &&
++        sample->observed_us >= channel->invalid_until_us)
++        sample->flags |= WMD_AIRTIME_VALID;
++    return 0;
++}
++
++void wmd_airtime_free(struct wmd_airtime *state)
++{
++    unsigned int slot;
++    for (slot = 0; slot < WMD_AIRTIME_CHANNELS; slot++) {
++        free(state->channels[slot]);
++        state->channels[slot] = NULL;
++    }
++}
++
++int wmd_airtime_selftest(void)
++{
++    struct wmd_airtime state = {0};
++    struct wmd_airtime_sample sample;
++    int failures = 0;
++    wmd_airtime_read(&state, 5180, 6400, &sample);
++    failures += !!(sample.flags & WMD_AIRTIME_VALID);
++    wmd_airtime_read(&state, 5200, 6400, &sample);
++    for (unsigned int frequency = 5300; frequency < 5800; frequency += 5)
++        wmd_airtime_record(&state, frequency, 6400, 6410, 10);
++    failures += state.channels[2] != NULL;
++    wmd_airtime_record(&state, 5180, 6400, 6410, 80);
++    wmd_airtime_record(&state, 5180, 6400, 6450, 80);
++    wmd_airtime_record(&state, 5200, 6400, 6410, 200);
++    wmd_airtime_read(&state, 5180, 6656, &sample);
++    failures += sample.busy_us != 120;
++    failures += sample.observed_us - sample.start_us != 256;
++    failures += !(sample.flags & WMD_AIRTIME_VALID);
++    wmd_airtime_read(&state, 5200, 6656, &sample);
++    failures += sample.busy_us != 200;
++    wmd_airtime_read(&state, 5180, 6400000, &sample);
++    failures += sample.busy_us != 120;
++    wmd_airtime_record(&state, 5180, 6400000, 6400000, 64);
++    wmd_airtime_read(&state, 5180, 6400064, &sample);
++    failures += sample.busy_us != 184;
++    wmd_airtime_record(&state, 5180, 6400064, 8000000, 64);
++    wmd_airtime_read(&state, 5180, 6400128, &sample);
++    failures += !!(sample.flags & WMD_AIRTIME_VALID);
++    failures += sample.overruns != 1;
++    wmd_airtime_free(&state);
++    return failures;
++}
+--- a/wmediumd/airtime.h
++++ b/wmediumd/airtime.h
+@@ -0,0 +1,43 @@
++#ifndef WMD_AIRTIME_H
++#define WMD_AIRTIME_H
++
++#include <stdint.h>
++
++#define WMD_AIRTIME_CHANNELS 16
++#define WMD_AIRTIME_BINS 16384
++#define WMD_AIRTIME_VALID 1
++#define WMD_AIRTIME_MODEL_LEGACY20 2
++
++struct wmd_airtime_channel {
++    uint32_t frequency;
++    uint64_t start_us;
++    uint64_t cursor;
++    uint64_t busy_us;
++    uint64_t invalid_until_us;
++    uint64_t overruns;
++    uint64_t bins[WMD_AIRTIME_BINS];
++};
++
++struct wmd_airtime {
++    struct wmd_airtime_channel *channels[WMD_AIRTIME_CHANNELS];
++};
++
++struct wmd_airtime_sample {
++    uint32_t frequency;
++    uint32_t flags;
++    uint64_t start_us;
++    uint64_t observed_us;
++    uint64_t busy_us;
++    uint64_t overruns;
++};
++
++uint64_t wmd_airtime_now(void);
++int wmd_airtime_read(struct wmd_airtime *state, uint32_t frequency,
++                     uint64_t now_us, struct wmd_airtime_sample *sample);
++void wmd_airtime_record(struct wmd_airtime *state, uint32_t frequency,
++                       uint64_t now_us, uint64_t start_us, uint64_t duration_us);
++void wmd_airtime_invalidate(struct wmd_airtime *state, uint32_t frequency,
++                           uint64_t now_us);
++void wmd_airtime_free(struct wmd_airtime *state);
++int wmd_airtime_selftest(void);
++#endif

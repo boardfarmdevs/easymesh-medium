@@ -1,0 +1,343 @@
+mac80211_hwsim: optional bounded, fresh, context-qualified survey provider
+
+Root-only debugfs input. Default disabled. Exposes only time and busy time,
+never fabricated noise, TX or RX counters. Provider expires after one second.
+
+--- a/drivers/net/wireless/virtual/mac80211_hwsim.c
++++ b/drivers/net/wireless/virtual/mac80211_hwsim.c
+@@ -748,6 +748,20 @@
+ 	u8 valid;
+ };
+ 
++#define HWSIM_RF_CONTEXTS 8
++
++static bool survey_cache;
++module_param(survey_cache, bool, 0644);
++MODULE_PARM_DESC(survey_cache, "Use the bounded userspace RF survey cache instead of dummy scan counters");
++
++struct hwsim_rf_context {
++	struct ieee80211_chanctx_conf *context;
++	struct ieee80211_channel *channel;
++	u64 epoch, provider, active_us, busy_us, observed_us;
++	unsigned int width, users;
++	bool valid;
++};
++
+ struct mac80211_hwsim_data {
+ 	struct list_head list;
+ 	struct rhash_head rht;
+@@ -799,6 +813,9 @@
+ 	unsigned int rx_filter;
+ 	bool started, idle, scanning;
+ 	struct mutex mutex;
++	spinlock_t rf_survey_lock;
++	u64 rf_epoch;
++	struct hwsim_rf_context rf_contexts[HWSIM_RF_CONTEXTS];
+ 	enum ps_mode {
+ 		PS_DISABLED, PS_ENABLED, PS_AUTO_POLL, PS_MANUAL_POLL
+ 	} ps;
+@@ -1328,6 +1345,169 @@
+ 			 hwsim_fops_rx_rssi_read, hwsim_fops_rx_rssi_write,
+ 			 "%lld\n");
+ 
++static void hwsim_rf_reset(struct mac80211_hwsim_data *data)
++{
++	unsigned long flags;
++	unsigned int slot;
++	spin_lock_irqsave(&data->rf_survey_lock, flags);
++	for (slot = 0; slot < HWSIM_RF_CONTEXTS; slot++) {
++		data->rf_contexts[slot].valid = false;
++		data->rf_contexts[slot].epoch = ++data->rf_epoch;
++	}
++	spin_unlock_irqrestore(&data->rf_survey_lock, flags);
++}
++
++static void hwsim_rf_context_update(struct ieee80211_hw *hw,
++				   struct ieee80211_chanctx_conf *context,
++				   int users_delta, bool remove)
++{
++	struct mac80211_hwsim_data *data = hw->priv;
++	struct hwsim_rf_context *record = NULL;
++	unsigned long flags;
++	unsigned int slot;
++	unsigned int width = context->def.width == NL80211_CHAN_WIDTH_20 ||
++		context->def.width == NL80211_CHAN_WIDTH_20_NOHT ? 20 : 0;
++	spin_lock_irqsave(&data->rf_survey_lock, flags);
++	for (slot = 0; slot < HWSIM_RF_CONTEXTS; slot++)
++		if (data->rf_contexts[slot].context == context) {
++			record = &data->rf_contexts[slot];
++			break;
++		}
++	if (!record && !remove)
++		for (slot = 0; slot < HWSIM_RF_CONTEXTS; slot++)
++			if (!data->rf_contexts[slot].context) {
++				record = &data->rf_contexts[slot];
++				break;
++			}
++	if (record) {
++		if (remove) {
++			memset(record, 0, sizeof(*record));
++		} else {
++			if (record->context != context || record->channel != context->def.chan ||
++			    record->width != width || !record->users) {
++				record->epoch = ++data->rf_epoch;
++				record->valid = false;
++			}
++			record->context = context;
++			record->channel = context->def.chan;
++			record->width = width;
++			if (users_delta > 0)
++				record->users++;
++			else if (users_delta < 0 && record->users)
++				record->users--;
++		}
++	}
++	spin_unlock_irqrestore(&data->rf_survey_lock, flags);
++}
++
++static bool hwsim_rf_available(struct mac80211_hwsim_data *data)
++{
++	return READ_ONCE(data->started) && !READ_ONCE(data->scanning) &&
++		!READ_ONCE(data->hw_scan_request) && !READ_ONCE(data->tmp_chan);
++}
++
++static int hwsim_rf_survey_show(struct seq_file *stream, void *unused)
++{
++	struct mac80211_hwsim_data *data = stream->private;
++	struct hwsim_rf_context records[HWSIM_RF_CONTEXTS];
++	unsigned long flags;
++	unsigned int slot;
++	spin_lock_irqsave(&data->rf_survey_lock, flags);
++	memcpy(records, data->rf_contexts, sizeof(records));
++	spin_unlock_irqrestore(&data->rf_survey_lock, flags);
++	seq_printf(stream, "v1 radio %pM available %u\n", data->addresses[1].addr,
++		   hwsim_rf_available(data));
++	for (slot = 0; slot < HWSIM_RF_CONTEXTS; slot++) {
++		struct hwsim_rf_context *record = &records[slot];
++		if (!record->context || !record->users)
++			continue;
++		seq_printf(stream, "%u %llu %u %u %llu %llu %llu %llu %u\n",
++			slot, record->epoch, record->channel->center_freq, record->width,
++			record->provider, record->observed_us, record->active_us,
++			record->busy_us, record->valid);
++	}
++	return 0;
++}
++
++static int hwsim_rf_survey_open(struct inode *inode, struct file *file)
++{
++	return single_open(file, hwsim_rf_survey_show, inode->i_private);
++}
++
++static ssize_t hwsim_rf_survey_write(struct file *file, const char __user *buffer,
++				    size_t length, loff_t *offset)
++{
++	struct mac80211_hwsim_data *data = ((struct seq_file *)file->private_data)->private;
++	struct hwsim_rf_context *record;
++	char text[192], extra;
++	unsigned int slot;
++	unsigned long long epoch, provider, observed, active, busy;
++	unsigned long flags;
++	u64 now = ktime_get_ns() / 1000;
++	int error = 0;
++	if (!length || length >= sizeof(text) || copy_from_user(text, buffer, length))
++		return -EINVAL;
++	text[length] = 0;
++	if (sscanf(text, "v1 %u %llu %llu %llu %llu %llu %c", &slot, &epoch,
++		   &provider, &observed, &active, &busy, &extra) != 6 ||
++	    slot >= HWSIM_RF_CONTEXTS || !provider || busy > active ||
++	    observed > now || now - observed > 1000000 || !hwsim_rf_available(data))
++		return -EINVAL;
++	spin_lock_irqsave(&data->rf_survey_lock, flags);
++	record = &data->rf_contexts[slot];
++	if (!record->context || !record->users || record->epoch != epoch || record->width != 20)
++		error = -ESTALE;
++	else if (record->valid && record->provider == provider &&
++		 (observed <= record->observed_us || active < record->active_us || busy < record->busy_us))
++		error = -ERANGE;
++	else {
++		record->provider = provider;
++		record->observed_us = observed;
++		record->active_us = active;
++		record->busy_us = busy;
++		record->valid = active > 0;
++	}
++	spin_unlock_irqrestore(&data->rf_survey_lock, flags);
++	return error ? error : length;
++}
++
++static const struct file_operations hwsim_rf_survey_fops = {
++	.open = hwsim_rf_survey_open,
++	.read = seq_read,
++	.write = hwsim_rf_survey_write,
++	.llseek = seq_lseek,
++	.release = single_release,
++	.owner = THIS_MODULE,
++};
++
++static int hwsim_rf_get_survey(struct mac80211_hwsim_data *data, int index,
++			     struct survey_info *survey)
++{
++	unsigned long flags;
++	unsigned int slot, found = 0;
++	u64 now = ktime_get_ns() / 1000;
++	int result = -ENOENT;
++	if (index < 0 || !hwsim_rf_available(data))
++		return -ENOENT;
++	spin_lock_irqsave(&data->rf_survey_lock, flags);
++	for (slot = 0; slot < HWSIM_RF_CONTEXTS; slot++) {
++		struct hwsim_rf_context *record = &data->rf_contexts[slot];
++		if (!record->context || !record->users || !record->valid ||
++		    record->width != 20 || now - record->observed_us > 1000000)
++			continue;
++		if (found++ != index)
++			continue;
++		survey->channel = record->channel;
++		survey->filled = SURVEY_INFO_IN_USE | SURVEY_INFO_TIME | SURVEY_INFO_TIME_BUSY;
++		survey->time = record->active_us / 1000;
++		survey->time_busy = record->busy_us / 1000;
++		result = 0;
++		break;
++	}
++	spin_unlock_irqrestore(&data->rf_survey_lock, flags);
++	return result;
++}
++
+ static const char * const hwsim_kernel_medium_band_names[] = {
+ 	"2.4", "5", "6",
+ };
+@@ -2789,6 +2969,7 @@
+ 	struct mac80211_hwsim_data *data = hw->priv;
+ 	wiphy_dbg(hw->wiphy, "%s\n", __func__);
+ 	data->started = true;
++	hwsim_rf_reset(data);
+ 	return 0;
+ }
+ 
+@@ -2799,6 +2980,7 @@
+ 	int i;
+ 
+ 	data->started = false;
++	hwsim_rf_reset(data);
+ 
+ 	for (i = 0; i < ARRAY_SIZE(data->link_data); i++)
+ 		hrtimer_cancel(&data->link_data[i].beacon_timer);
+@@ -3437,6 +3619,8 @@
+ 				     struct survey_info *survey)
+ {
+ 	struct mac80211_hwsim_data *hwsim = hw->priv;
++	if (READ_ONCE(survey_cache))
++		return hwsim_rf_get_survey(hwsim, idx, survey);
+ 
+ 	if (idx < 0 || idx >= ARRAY_SIZE(hwsim->survey_data))
+ 		return -ENOENT;
+@@ -3691,6 +3875,7 @@
+ 		return -EBUSY;
+ 	}
+ 	hwsim->hw_scan_request = req;
++	hwsim_rf_reset(hwsim);
+ 	hwsim->hw_scan_vif = vif;
+ 	hwsim->scan_chan_idx = 0;
+ 	if (req->flags & NL80211_SCAN_FLAG_RANDOM_ADDR)
+@@ -3748,6 +3933,7 @@
+ 	memcpy(hwsim->scan_addr, mac_addr, ETH_ALEN);
+ 	mac80211_hwsim_config_mac_nl(hw, hwsim->scan_addr, true);
+ 	hwsim->scanning = true;
++	hwsim_rf_reset(hwsim);
+ 	memset(hwsim->survey_data, 0, sizeof(hwsim->survey_data));
+ 
+ out:
+@@ -3778,6 +3964,7 @@
+ 
+ 	wiphy_dbg(hwsim->hw->wiphy, "hwsim ROC begins\n");
+ 	hwsim->tmp_chan = hwsim->roc_chan;
++	hwsim_rf_reset(hwsim);
+ 	ieee80211_ready_on_channel(hwsim->hw);
+ 
+ 	ieee80211_queue_delayed_work(hwsim->hw, &hwsim->roc_done,
+@@ -3794,6 +3981,7 @@
+ 	mutex_lock(&hwsim->mutex);
+ 	ieee80211_remain_on_channel_expired(hwsim->hw);
+ 	hwsim->tmp_chan = NULL;
++	hwsim_rf_reset(hwsim);
+ 	mutex_unlock(&hwsim->mutex);
+ 
+ 	wiphy_dbg(hwsim->hw->wiphy, "hwsim ROC expired\n");
+@@ -3834,6 +4022,7 @@
+ 
+ 	mutex_lock(&hwsim->mutex);
+ 	hwsim->tmp_chan = NULL;
++	hwsim_rf_reset(hwsim);
+ 	mutex_unlock(&hwsim->mutex);
+ 
+ 	wiphy_dbg(hw->wiphy, "hwsim ROC canceled\n");
+@@ -3845,6 +4034,7 @@
+ 				      struct ieee80211_chanctx_conf *ctx)
+ {
+ 	hwsim_set_chanctx_magic(ctx);
++	hwsim_rf_context_update(hw, ctx, 0, false);
+ 	wiphy_dbg(hw->wiphy,
+ 		  "add channel context control: %d MHz/width: %d/cfreqs:%d/%d MHz\n",
+ 		  ctx->def.chan->center_freq, ctx->def.width,
+@@ -3855,6 +4045,7 @@
+ static void mac80211_hwsim_remove_chanctx(struct ieee80211_hw *hw,
+ 					  struct ieee80211_chanctx_conf *ctx)
+ {
++	hwsim_rf_context_update(hw, ctx, 0, true);
+ 	wiphy_dbg(hw->wiphy,
+ 		  "remove channel context control: %d MHz/width: %d/cfreqs:%d/%d MHz\n",
+ 		  ctx->def.chan->center_freq, ctx->def.width,
+@@ -3867,6 +4058,7 @@
+ 					  struct ieee80211_chanctx_conf *ctx,
+ 					  u32 changed)
+ {
++	hwsim_rf_context_update(hw, ctx, 0, false);
+ 	hwsim_check_chanctx_magic(ctx);
+ 	wiphy_dbg(hw->wiphy,
+ 		  "change channel context control: %d MHz/width: %d/cfreqs:%d/%d MHz\n",
+@@ -3879,6 +4071,7 @@
+ 					     struct ieee80211_bss_conf *link_conf,
+ 					     struct ieee80211_chanctx_conf *ctx)
+ {
++	hwsim_rf_context_update(hw, ctx, 1, false);
+ 	hwsim_check_magic(vif);
+ 	hwsim_check_chanctx_magic(ctx);
+ 
+@@ -3902,6 +4095,7 @@
+ 						struct ieee80211_bss_conf *link_conf,
+ 						struct ieee80211_chanctx_conf *ctx)
+ {
++	hwsim_rf_context_update(hw, ctx, -1, false);
+ 	hwsim_check_magic(vif);
+ 	hwsim_check_chanctx_magic(ctx);
+ 
+@@ -3951,8 +4145,12 @@
+ 		switch (mode) {
+ 		case CHANCTX_SWMODE_REASSIGN_VIF:
+ 			hwsim_check_chanctx_magic(vifs[i].new_ctx);
++			hwsim_rf_context_update(hw, vifs[i].old_ctx, -1, false);
++			hwsim_rf_context_update(hw, vifs[i].new_ctx, 1, false);
+ 			break;
+ 		case CHANCTX_SWMODE_SWAP_CONTEXTS:
++			hwsim_rf_context_update(hw, vifs[i].old_ctx, 0, true);
++			hwsim_rf_context_update(hw, vifs[i].new_ctx, 1, false);
+ 			hwsim_set_chanctx_magic(vifs[i].new_ctx);
+ 			hwsim_clear_chanctx_magic(vifs[i].old_ctx);
+ 			break;
+@@ -6408,6 +6606,8 @@
+ 	/* By default all radios belong to the first group */
+ 	data->group = 1;
+ 	mutex_init(&data->mutex);
++	spin_lock_init(&data->rf_survey_lock);
++	data->rf_epoch = ktime_get_ns();
+ 
+ 	data->netgroup = hwsim_net_get_netgroup(net);
+ 	data->wmediumd = hwsim_net_get_wmediumd(net);
+@@ -6463,6 +6663,7 @@
+ 	}
+ 
+ 	data->debugfs = debugfs_create_dir("hwsim", hw->wiphy->debugfsdir);
++	debugfs_create_file("rf_survey", 0600, data->debugfs, data, &hwsim_rf_survey_fops);
+ 	debugfs_create_file("ps", 0666, data->debugfs, data, &hwsim_fops_ps);
+ 	debugfs_create_file("group", 0666, data->debugfs, data,
+ 			    &hwsim_fops_group);

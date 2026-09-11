@@ -11,6 +11,7 @@ from typing import Callable
 from .actuator import ActuatorError, ControlClient
 from .kernel_actuator import KernelMediumClient
 from .observers import mesh_health, snapshot
+from .rf_contract import capability_manifest
 
 
 COMMON_CAPABILITIES = {"atomic_generations", "readback", "dump_links"}
@@ -175,6 +176,9 @@ class Runner:
         try:
             with self._client() as client:
                 status = client.status()
+                (self.run_dir / "rf-capabilities.json").write_text(
+                    json.dumps(capability_manifest(self.backend, status), indent=2, sort_keys=True) + "\n"
+                )
                 plan_updates = [
                     update for event in self.plan["events"] for update in event["updates"]
                 ]

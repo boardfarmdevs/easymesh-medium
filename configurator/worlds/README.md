@@ -89,7 +89,7 @@ waits are additional wall-clock time, not part of the 60-second script. No
 pause proves that roaming succeeded. Raw `.wmd` exports remain RF sequences
 and do not implement these viewer checkpoints.
 
-See the [per-room inspection guide](../../../../doc/easymesh/reference/room-playback-inspection-guide.md)
+See the [per-room inspection guide](../../../../doc/easymesh/reference/rooms/catalog.md)
 for the expected AP sequences and checks in both views.
 
 ## Install the renderer dependencies

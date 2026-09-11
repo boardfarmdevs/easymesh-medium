@@ -1,11 +1,27 @@
 # wmediumd configurator
 
 This directory contains the scenario-language implementation described in
-[the wmediumd configurator reference](../../../doc/easymesh/reference/wmediumd-configurator.md).
+[the wmediumd configurator reference](../../../doc/easymesh/reference/radio/configurator.md).
 
 Python 3.8 or newer is supported so the offline compiler and tests can also run
 on the rev140 build host; live inventory and execution still run inside the lab
 VM that owns the LXD/hwsim topology.
+
+`python3 -m wmdcfg.cli rf-capabilities` shows the offline fidelity contract;
+live `status` negotiates the actual medium capabilities. A capability is not
+a fresh native measurement. For modeled survey/BSS Load setup, supported
+legacy20 profile, disruptive acceptance and results, see the
+[RF operation guide](../../../doc/easymesh/reference/radio/virtual-rf-assessment.md#124-implemented-phases-12-survey-and-native-bss-load).
+
+With the lab and survey bridge running, inspect fresh native contexts as root
+inside the outer VM, from this directory:
+
+```sh
+python3 -m wmdcfg.rf_survey --socket /run/meta-cmf-wmediumd/metrics/control.sock --seconds 10 --output /tmp/rf-survey.json
+```
+
+The earlier `rf_audit` remains a signal-only truthfulness/provenance check;
+it does not qualify the new modeled-airtime provider.
 
 The current `0.1` increment implements parsing, validation, live LXD/hwsim
 inventory, frozen role binding, deterministic event-plan compilation, and live
@@ -95,5 +111,5 @@ sudo python3 -m wmdcfg.cli run /tmp/two-ap-crossover.plan.json --backend kernel
 
 The adapter retains SNR units, generation checks, readback, and restoration.
 The kernel backend implements fewer RF effects; consult
-[the capability boundary](../../../doc/easymesh/reference/hwsim-kernel-medium.md)
+[the capability boundary](../../../doc/easymesh/reference/radio/kernel-medium.md)
 before using it for optimizer conclusions.

@@ -34,7 +34,7 @@ older `-R` read-only endpoint, configured state remains visible and packet
 metrics are clearly marked unavailable.
 
 The process boundaries and correlation model are described in
-[the wmediumd Console reference](../../../doc/easymesh/reference/wmediumd-console.md).
+[the wmediumd Console reference](../../../doc/easymesh/reference/radio/console.md).
 
 ## Build and test
 

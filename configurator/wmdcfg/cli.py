@@ -14,6 +14,7 @@ from .inventory import discover
 from .model import ScenarioError
 from .parser import parse
 from .runner import Runner
+from .rf_contract import capability_manifest
 from .world import compile_world, export_wmd, load_json, verify_world_plan
 
 
@@ -41,6 +42,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="wmdcfg")
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command", required=True)
+
+    rf_cmd = commands.add_parser("rf-capabilities", help="show the RF fidelity and validity contract")
+    rf_cmd.add_argument("--backend", choices=["userspace", "kernel"], default="userspace")
 
     inventory_cmd = commands.add_parser("inventory", help="capture the live LXD radio inventory")
     inventory_cmd.add_argument("-o", "--output")
@@ -94,6 +98,9 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     try:
+        if args.command == "rf-capabilities":
+            _write(capability_manifest(args.backend), None)
+            return 0
         if args.command == "status":
             client = (
                 ControlClient(args.socket)
@@ -111,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
                         "capabilities": sorted(status.capabilities),
                         "max_updates": status.max_updates,
                         "num_stations": status.num_stations,
+                        "rf_contract": capability_manifest(args.backend, status),
                     },
                     None,
                 )
