@@ -78,6 +78,26 @@ class SurveyBridgeTests(unittest.TestCase):
         second = self.bridge.convert(self.key, self.context, next_sample, "daemon")
         self.assertNotEqual(first["provider"], second["provider"])
 
+    def test_batched_observer_samples_are_not_global_activity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "phy0/hwsim/rf_survey"
+            path.parent.mkdir(parents=True)
+            path.write_text("v1 radio aa available 1\n0 1 5180 20 0 0 0 0 0\n")
+            client = Mock(instance_id="daemon", capabilities={"observer_surveys"})
+            client.get_channel_survey.return_value = self.first
+            client.get_observer_surveys.return_value = {("aa", 5180): self.first}
+            bridge = SurveyBridge(root)
+            bridge.tick(client)
+            client.get_observer_surveys.assert_called_once_with([("aa", 5180)])
+            client.get_channel_survey.return_value = self.second
+            client.get_observer_surveys.return_value = {
+                ("aa", 5180): {**self.second, "busy_us": 250100}}
+            with patch.object(Path, "write_text"):
+                report = bridge.tick(client)
+            self.assertEqual(report["channel_observations"][0]["value"], 50)
+            self.assertEqual(report["written"][0]["busy_us"], 250000)
+
     def test_context_abi(self):
         available, rows = parse_contexts(
             "v1 radio 02:00:00:00:00:00 available 1\n0 9 5180 20 0 0 0 0 0\n")
@@ -97,7 +117,7 @@ class SurveyBridgeTests(unittest.TestCase):
                 path.parent.mkdir(parents=True)
                 path.write_text("v1 radio aa available 1\n0 1 5180 20 0 0 0 0 0\n")
             bridge = SurveyBridge(root)
-            client = Mock(instance_id="daemon")
+            client = Mock(instance_id="daemon", capabilities=frozenset())
             client.get_channel_survey.return_value = self.first
             self.assertEqual(bridge.tick(client)["active_contexts"], 2)
             client.get_channel_survey.assert_called_once_with(5180)
@@ -107,6 +127,8 @@ class SurveyBridgeTests(unittest.TestCase):
                 self.assertEqual(write.call_count, 2)
                 self.assertEqual(len(report["written"]), 2)
                 self.assertFalse(report["physical_capacity_qualified"])
+                self.assertEqual(report["channel_observations"][0]["value"], 50)
+                self.assertEqual(report["channel_observations"][0]["window_us"], 1000000)
             for path in root.glob("*/hwsim/rf_survey"):
                 path.write_text("v1 radio aa available 0\n")
             bridge.tick(client)

@@ -37,6 +37,8 @@ CAPABILITIES = {
     1 << 5: "read_only",
     1 << 11: "paged_link_dumps",
     1 << 12: "channel_survey",
+    1 << 13: "observer_surveys",
+    1 << 14: "visibility_contention",
 }
 
 STATUS = {
@@ -179,6 +181,27 @@ class ControlClient:
         return {"frequency_mhz": frequency, "flags": flags, "start_us": start,
                 "observed_us": observed, "busy_us": busy, "overruns": overruns,
                 "generation": generation}
+
+    def get_observer_surveys(self, contexts: list[tuple[str, int]]) -> dict:
+        if "observer_surveys" not in self.capabilities:
+            raise ActuatorError("daemon lacks observer survey capability")
+        if not 1 <= len(contexts) <= 128 or len(set(contexts)) != len(contexts):
+            raise ActuatorError("observer batch must contain 1..128 unique contexts")
+        request = struct.Struct("!6sI")
+        record = struct.Struct("!6sIIQQQQ")
+        _, payload = self._request(16, b"".join(request.pack(_mac_bytes(radio), frequency)
+                                             for radio, frequency in contexts))
+        if len(payload) != len(contexts) * record.size:
+            raise ActuatorError("invalid observer survey batch length")
+        result = {}
+        for expected, fields in zip(contexts, record.iter_unpack(payload)):
+            radio, frequency, flags, start, observed, busy, overruns = fields
+            if (radio != _mac_bytes(expected[0]) or frequency != expected[1]
+                    or flags & ~3 or observed < start or busy > observed - start):
+                raise ActuatorError("invalid observer survey identity or counters")
+            result[expected] = {"frequency_mhz": frequency, "flags": flags, "start_us": start,
+                                "observed_us": observed, "busy_us": busy, "overruns": overruns}
+        return result
 
     @staticmethod
     def _encode_links(updates: list[dict]) -> bytes:

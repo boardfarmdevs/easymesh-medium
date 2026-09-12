@@ -1,0 +1,134 @@
+Subject: [PATCH] Preserve confirmed departures and reject stale downlink ownership
+
+An ACKed departure from the current AP is known absence, not missing evidence.
+Retain a bounded per-radio tombstone and export it with a zero owner and the
+DEPARTED flag, so HAL consumers reject stale peers immediately while retaining
+the conservative fallback for genuinely unknown state. Only successful
+association responses or station-originated ToDS data establish an owner;
+FromDS traffic may corroborate the current owner but cannot resurrect or steal
+it merely because the medium reports a PHY ACK.
+
+Upstream-Status: Inappropriate [hwsim EasyMesh laboratory interface]
+
+--- a/wmediumd/control.c
++++ b/wmediumd/control.c
+@@ -482,13 +482,13 @@
+ 	    ctx->association_owners[source] == destination) {
+ 		ctx->association_owners[source] = -1;
+ 		ctx->association_frequencies[source] = 0;
+-		ctx->association_flags[source] = 0;
++		ctx->association_flags[source] = WMDC_ASSOCIATION_DEPARTED;
+ 	}
+ 	if (destination >= 0 && destination < ctx->num_stas &&
+ 	    ctx->association_owners[destination] == source) {
+ 		ctx->association_owners[destination] = -1;
+ 		ctx->association_frequencies[destination] = 0;
+-		ctx->association_flags[destination] = 0;
++		ctx->association_flags[destination] = WMDC_ASSOCIATION_DEPARTED;
+ 	}
+ }
+ 
+@@ -533,7 +533,8 @@
+ 	if (direction == FCTL_TODS)
+ 		association_set(ctx, frame->sender->index, destination->index,
+ 			frame->freq, WMDC_ASSOCIATION_FROM_DATA);
+-	else if (direction == FCTL_FROMDS)
++	else if (direction == FCTL_FROMDS &&
++		 ctx->association_owners[destination->index] == frame->sender->index)
+ 		association_set(ctx, destination->index, frame->sender->index,
+ 			frame->freq, WMDC_ASSOCIATION_FROM_DATA);
+ }
+@@ -1041,13 +1042,18 @@
+ 	if (station < 0)
+ 		return send_response(client->loop.fd, WMDC_OP_GET_ASSOCIATION,
+ 			WMDC_ERR_IDENTITY, ctx->control_generation, NULL, 0);
+-	if (!ctx->association_owners ||
+-	    (owner = ctx->association_owners[station]) < 0)
++	if (!ctx->association_owners)
++		return send_response(client->loop.fd, WMDC_OP_GET_ASSOCIATION,
++			WMDC_ERR_UNKNOWN, ctx->control_generation, NULL, 0);
++	owner = ctx->association_owners[station];
++	if (owner < 0 &&
++	    ctx->association_flags[station] != WMDC_ASSOCIATION_DEPARTED)
+ 		return send_response(client->loop.fd, WMDC_OP_GET_ASSOCIATION,
+ 			WMDC_ERR_UNKNOWN, ctx->control_generation, NULL, 0);
+ 	memcpy(response.endpoint, request->endpoint, 6);
+ 	memcpy(response.station, ctx->sta_array[station]->addr, 6);
+-	memcpy(response.owner, ctx->sta_array[owner]->addr, 6);
++	if (owner >= 0)
++		memcpy(response.owner, ctx->sta_array[owner]->addr, 6);
+ 	response.frequency_mhz = htobe32(ctx->association_frequencies[station]);
+ 	response.flags = htobe32(ctx->association_flags[station]);
+ 	return send_response(client->loop.fd, WMDC_OP_GET_ASSOCIATION, WMDC_OK,
+@@ -2078,6 +2084,61 @@
+ 	association_record_tx(&ctx, frame, &source, false, false);
+ 	if (ctx.association_owners[source.index] != alternate.index)
+ 		failures++;
++	association_record_tx(&ctx, frame, &source, true, false);
++	if (ctx.association_owners[source.index] != alternate.index)
++		failures++;
++	frame->data[0] = IEEE80211_STYPE_DEAUTH << 4;
++	frame->data[1] = 0;
++	association_record_tx(&ctx, frame, &source, true, false);
++	if (ctx.association_owners[source.index] != alternate.index)
++		failures++;
++	frame->sender = &alternate;
++	association_record_tx(&ctx, frame, &source, false, false);
++	if (ctx.association_owners[source.index] != alternate.index)
++		failures++;
++	association_record_tx(&ctx, frame, &source, true, false);
++	if (ctx.association_owners[source.index] != -1 ||
++	    ctx.association_flags[source.index] != WMDC_ASSOCIATION_DEPARTED)
++		failures++;
++	frame->data[0] = FTYPE_DATA;
++	frame->data[1] = FCTL_FROMDS;
++	association_record_tx(&ctx, frame, &source, true, false);
++	if (ctx.association_owners[source.index] != -1 ||
++	    ctx.association_flags[source.index] != WMDC_ASSOCIATION_DEPARTED)
++		failures++;
++	int sockets[2];
++	if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sockets) != 0) {
++		failures++;
++	} else {
++		struct wmd_control_client client = {.ctx = &ctx};
++		struct wmdc_association request = {};
++		uint8_t response[sizeof(struct wmdc_header) + sizeof(request)];
++		struct wmdc_header *header = (struct wmdc_header *)response;
++		struct wmdc_association *answer =
++			(struct wmdc_association *)(response + sizeof(*header));
++		uint8_t absent_owner[6] = {};
++		client.loop.fd = sockets[0];
++		memcpy(request.endpoint, source.addr, 6);
++		handle_get_association(&client, (uint8_t *)&request, sizeof(request));
++		if (recv(sockets[1], response, sizeof(response), 0) != sizeof(response) ||
++		    be32toh(header->status) != WMDC_OK ||
++		    be32toh(answer->flags) != WMDC_ASSOCIATION_DEPARTED ||
++		    memcmp(answer->owner, absent_owner, 6) != 0)
++			failures++;
++		memcpy(request.endpoint, destination.addr, 6);
++		handle_get_association(&client, (uint8_t *)&request, sizeof(request));
++		if (recv(sockets[1], response, sizeof(response), 0) != sizeof(*header) ||
++		    be32toh(header->status) != WMDC_ERR_UNKNOWN)
++			failures++;
++		close(sockets[0]);
++		close(sockets[1]);
++	}
++	frame->sender = &source;
++	frame->data[1] = FCTL_TODS;
++	association_record_tx(&ctx, frame, &destination, true, false);
++	if (ctx.association_owners[source.index] != destination.index ||
++	    ctx.association_flags[source.index] != WMDC_ASSOCIATION_FROM_DATA)
++		failures++;
+ 	free(frame);
+ 	free(ctx.association_owners);
+ 	free(ctx.association_frequencies);
+--- a/wmediumd/control.h
++++ b/wmediumd/control.h
+@@ -89,6 +89,7 @@
+ 
+ #define WMDC_ASSOCIATION_FROM_RESPONSE (1U << 0)
+ #define WMDC_ASSOCIATION_FROM_DATA (1U << 1)
++#define WMDC_ASSOCIATION_DEPARTED (1U << 2)
+ 
+ /* GET_ASSOCIATION accepts this structure with only endpoint populated.  The
+  * response echoes that VIF/MAC and returns both provisioned base radios. */

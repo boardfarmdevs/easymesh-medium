@@ -1,0 +1,79 @@
+Subject: [PATCH] wmediumd: keep the earliest deadline armed during packet ingress
+
+New arrivals must not postpone an existing earlier completion timer. Always
+request the pending head after insertion, including while waiting. Exercise
+later/earlier arrivals and cancellation through the actual scheduler API.
+
+--- a/wmediumd/lib/sched.c
++++ b/wmediumd/lib/sched.c
+@@ -105,7 +105,8 @@
+ 	 * an interrupt we got from outside while waiting for the
+ 	 * external scheduler.
+ 	 */
+-	usfstl_sched_external_request(sched, job->start);
++	tmp = usfstl_sched_next_pending(sched, NULL);
++	usfstl_sched_external_request(sched, tmp->start);
+ 
+ 	if (sched->next_time_changed)
+ 		sched->next_time_changed(sched);
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -2047,6 +2047,50 @@
+ 	return failures;
+ }
+ 
++struct scheduler_deadline_fixture {
++	struct usfstl_scheduler clock;
++	uint64_t requested;
++};
++
++static void scheduler_deadline_request(struct usfstl_scheduler *clock, uint64_t requested)
++{
++	struct scheduler_deadline_fixture *fixture =
++		container_of(clock, struct scheduler_deadline_fixture, clock);
++	fixture->requested = requested;
++}
++
++static int scheduler_deadline_selftest(void)
++{
++	struct scheduler_deadline_fixture fixture = {};
++	struct usfstl_job jobs[] = {
++		{ .start = 1000 }, { .start = 2000 }, { .start = 3000 },
++		{ .start = 500 }, { .start = 4000 },
++	};
++	int failures = 0;
++	usfstl_list_init(&fixture.clock.joblist);
++	usfstl_list_init(&fixture.clock.pending_jobs);
++	fixture.clock.external_request = scheduler_deadline_request;
++	usfstl_sched_add_job(&fixture.clock, &jobs[0]);
++	failures += fixture.requested != 1000;
++	usfstl_sched_add_job(&fixture.clock, &jobs[1]);
++	failures += fixture.requested != 1000;
++	fixture.clock.waiting = 1;
++	fixture.clock.prev_external_sync_set = 0;
++	usfstl_sched_add_job(&fixture.clock, &jobs[2]);
++	failures += fixture.requested != 1000;
++	usfstl_sched_add_job(&fixture.clock, &jobs[3]);
++	failures += fixture.requested != 500;
++	usfstl_sched_del_job(&jobs[3]);
++	fixture.clock.prev_external_sync_set = 0;
++	usfstl_sched_add_job(&fixture.clock, &jobs[4]);
++	failures += fixture.requested != 1000;
++	for (unsigned int index = 0; index < sizeof(jobs) / sizeof(jobs[0]); index++)
++		usfstl_sched_del_job(&jobs[index]);
++	printf("%s scheduler deadline: retain earliest timer during ingress, advance earlier work and handle cancellation\n",
++		failures ? "FAIL" : "PASS");
++	return failures;
++}
++
+ static int wmd_selftest(void)
+ {
+ 	int fails = 0, i, j;
+@@ -2057,6 +2101,7 @@
+ 	fails += packet_path_selftest();
+ 	fails += spatial_queue_selftest();
+ 	fails += spatial_gap_selftest();
++	fails += scheduler_deadline_selftest();
+ 
+ 	/* ---------- WMD3: frequency-scoped interference ---------- */
+ 	t.num_stas = 4;

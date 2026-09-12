@@ -60,8 +60,11 @@ def ap_metric_loads(path: Path) -> list[dict]:
         raise ValueError("Ethernet or Linux cooked pcap required")
     header_size, protocol_offset = headers[linktype]
     records = []
+    pending = {}
     offset = 24
-    while offset + 16 <= len(raw):
+    while offset < len(raw):
+        if offset + 16 > len(raw):
+            raise ValueError("truncated packet header")
         seconds, fraction, length, original = struct.unpack_from(endian + "IIII", raw, offset)
         offset += 16
         frame = raw[offset:offset + length]
@@ -71,21 +74,55 @@ def ap_metric_loads(path: Path) -> list[dict]:
         if len(frame) < header_size + 8 or frame[protocol_offset:protocol_offset + 2] != b"\x89\x3a":
             continue
         cmdu = frame[header_size:]
-        if cmdu[2:4] != b"\x80\x0c" or cmdu[6] != 0:
+        if cmdu[0] != 0 or cmdu[2:4] != b"\x80\x0c":
             continue
-        position = 8
-        while position + 3 <= len(cmdu):
-            kind, size = struct.unpack_from("!BH", cmdu, position)
-            data = cmdu[position + 3:position + 3 + size]
+        timestamp = seconds + fraction / 1000000
+        source = frame[6:12] if linktype == 1 else frame[6:14] if linktype == 113 else frame[12:20]
+        message_id = struct.unpack_from("!H", cmdu, 4)[0]
+        key = (source, message_id)
+        pending = {identity: assembly for identity, assembly in pending.items()
+                   if 0 <= timestamp - assembly["started"] <= 5}
+        if len(pending) >= 1024 and key not in pending:
+            raise ValueError("too many incomplete AP metrics messages")
+        assembly = pending.setdefault(key, {"started": timestamp, "parts": {}, "last": None,
+                                            "invalid": False})
+        fragment = cmdu[6]
+        payload = cmdu[8:]
+        previous = assembly["parts"].get(fragment)
+        if previous is not None and previous != payload:
+            assembly["invalid"] = True
+        assembly["parts"][fragment] = payload
+        if cmdu[7] & 0x80:
+            if assembly["last"] is not None and assembly["last"] != fragment:
+                assembly["invalid"] = True
+            assembly["last"] = fragment
+        if sum(map(len, assembly["parts"].values())) > 65535:
+            raise ValueError("oversized AP metrics message")
+        last = assembly["last"]
+        if assembly["invalid"] or last is None or set(assembly["parts"]) != set(range(last + 1)):
+            continue
+        payload = b"".join(assembly["parts"][index] for index in range(last + 1))
+        del pending[key]
+        position = 0
+        decoded = []
+        complete = False
+        while position + 3 <= len(payload):
+            kind, size = struct.unpack_from("!BH", payload, position)
+            data = payload[position + 3:position + 3 + size]
             position += 3 + size
-            if len(data) != size or not kind:
+            if len(data) != size:
+                break
+            if not kind:
+                complete = size == 0
                 break
             if kind == 0x94 and size >= 10:
-                records.append({
+                decoded.append({
                     "bssid": ":".join(f"{octet:02x}" for octet in data[:6]),
                     "utilization_byte": data[6],
                     "station_count": struct.unpack_from("!H", data, 7)[0],
-                    "message_id": struct.unpack_from("!H", cmdu, 4)[0],
+                    "message_id": message_id,
                     "timestamp_seconds": seconds, "timestamp_fraction": fraction,
                 })
+        if complete:
+            records.extend(decoded)
     return records

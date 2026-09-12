@@ -28,6 +28,12 @@ CFG=${CFG:-$RUNTIME/wmediumd.cfg}
 PIDF=${WMEDIUMD_PIDFILE:-$RUNTIME/wmediumd.pid}
 LOG=${WMEDIUMD_LOG:-$RUNTIME/wmediumd.log}
 CPU_AFFINITY=${WMEDIUMD_CPU_AFFINITY:-}
+VISIBILITY_FLAG=
+case "${WMEDIUMD_VISIBILITY_CONTENTION:-0}" in
+    0) ;;
+    1) VISIBILITY_FLAG=-F ;;
+    *) echo "WMEDIUMD_VISIBILITY_CONTENTION must be 0 or 1" >&2; exit 1 ;;
+esac
 
 if [ -n "$CPU_AFFINITY" ]; then
     [[ "$CPU_AFFINITY" =~ ^[0-9]+([,-][0-9]+)*$ ]] || {
@@ -129,9 +135,9 @@ case "${1:-up}" in
         sudo rm -f "$IDENTITY"
     fi
     if [ -n "$CPU_AFFINITY" ]; then
-        sudo sh -c "taskset -c '$CPU_AFFINITY' '$WMD' -c '$CFG' -C '$CONTROL' -R '$METRICS' -O '$OBSERVER' >'$LOG' 2>&1 & echo \$! > '$PIDF'"
+        sudo sh -c "taskset -c '$CPU_AFFINITY' '$WMD' $VISIBILITY_FLAG -c '$CFG' -C '$CONTROL' -R '$METRICS' -O '$OBSERVER' >'$LOG' 2>&1 & echo \$! > '$PIDF'"
     else
-        sudo sh -c "'$WMD' -c '$CFG' -C '$CONTROL' -R '$METRICS' -O '$OBSERVER' >'$LOG' 2>&1 & echo \$! > '$PIDF'"
+        sudo sh -c "'$WMD' $VISIBILITY_FLAG -c '$CFG' -C '$CONTROL' -R '$METRICS' -O '$OBSERVER' >'$LOG' 2>&1 & echo \$! > '$PIDF'"
     fi
     sleep 1
     pid=$(cat "$PIDF" 2>/dev/null || true)

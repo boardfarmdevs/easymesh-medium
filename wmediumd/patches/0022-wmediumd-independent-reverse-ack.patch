@@ -1,0 +1,268 @@
+wmediumd: independent reverse ack
+
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -649,6 +649,11 @@
+ 	return model_rate_idx(frame->tx_rates[rate_slot].idx, flags, frame->freq);
+ }
+ 
++static bool rf_decodes(int signal_dbm, double probability, double draw, bool eligible)
++{
++	return eligible && signal_dbm >= CCA_THRESHOLD && draw >= probability;
++}
++
+ static void queue_frame(struct wmediumd *ctx, struct station *station,
+ 			struct frame *frame)
+ {
+@@ -666,7 +671,7 @@
+ 	int i, j;
+ 	int rate_idx, per_rate_idx;
+ 	int ac;
+-	struct { uint32_t offset, duration; } air_intervals[64];
++	struct { uint32_t offset, duration; } air_intervals[128];
+ 	unsigned int air_count = 0;
+ 	bool air_overflow = false;
+ 	uint64_t air_now, air_start;
+@@ -712,6 +717,8 @@
+ 	frame->signal = snr + NOISE_LEVEL;
+ 
+ 	noack = is_multicast_ether_addr(dest);
++	frame->forward_received = false;
++	frame->flags &= ~HWSIM_TX_STAT_ACK;
+ 
+ 	/* WMD 2/4: is the receiver actually tuned to this frequency? */
+ 	enum ack_eligibility mc_elig = ACK_ELIGIBLE;
+@@ -719,8 +726,7 @@
+ 		mc_elig = mc_receiver_ack_eligibility(ctx, dest, frame->freq);
+ 
+ 	double choice = drand48();
+-
+-	if (mc_elig != ACK_OFFCHANNEL)
++	double ack_choice = drand48();
+ 
+ 	for (i = 0; i < frame->tx_rates_count && !is_acked; i++) {
+ 
+@@ -731,13 +737,18 @@
+ 			break;
+ 
+ 		per_rate_idx = frame_model_rate_idx(frame, i);
+-		frame->rx_rate_idx = per_rate_idx;
++		if (!frame->forward_received)
++			frame->rx_rate_idx = per_rate_idx;
+ 		error_prob = ctx->get_error_prob(ctx, snr, per_rate_idx,
+ 						 frame->freq, frame->data_len,
+ 						 station, deststa);
+ 		for (j = 0; j < frame->tx_rates[i].count; j++) {
+ 			int data_time = pkt_duration(frame->data_len,
+ 				index_to_rate(per_rate_idx, frame->freq));
++			if (retries > 0) {
++				send_time += (cw * slot_time) / 2;
++				cw = min((cw << 1) + 1, queue->cw_max);
++			}
+ 			send_time += difs;
+ 			if (air_count < sizeof(air_intervals) / sizeof(air_intervals[0])) {
+ 				air_intervals[air_count].offset = send_time;
+@@ -753,29 +764,34 @@
+ 
+ 			/* skip ack/backoff/retries for noack frames */
+ 			if (noack) {
++				frame->forward_received = true;
+ 				is_acked = true;
+ 				break;
+ 			}
+ 
+-			/* TODO TXOPs */
+-
+-			/* backoff */
+-			if (j > 0) {
+-				send_time += (cw * slot_time) / 2;
+-				cw = (cw << 1) + 1;
+-				if (cw > queue->cw_max)
+-					cw = queue->cw_max;
++			if (rf_decodes(frame->signal, error_prob, choice,
++					 deststa && mc_station_receives_freq(deststa, frame->freq))) {
++				int reverse_snr = wmd_get_link_snr(ctx, deststa, station, frame->freq);
++				double reverse_per = ctx->get_error_prob(ctx, reverse_snr, 0,
++					frame->freq, 10, deststa, station);
++				frame->forward_received = true;
++				frame->rx_rate_idx = per_rate_idx;
++				if (air_count < sizeof(air_intervals) / sizeof(air_intervals[0])) {
++					air_intervals[air_count].offset = send_time + sifs;
++					air_intervals[air_count++].duration = ack_time_usec - sifs;
++				} else {
++					air_overflow = true;
++				}
++				is_acked = rf_decodes(reverse_snr + NOISE_LEVEL,
++					reverse_per, ack_choice, true);
+ 			}
+-
+ 			send_time += ack_time_usec;
+-
+-			if (choice > error_prob) {
+-				is_acked = true;
++			if (is_acked)
+ 				break;
+-			}
+-
+-			if (!use_fixed_random_value(ctx))
++			if (!use_fixed_random_value(ctx)) {
+ 				choice = drand48();
++				ack_choice = drand48();
++			}
+ 		}
+ 	}
+ 
+@@ -837,10 +853,6 @@
+ 		wmd_airtime_record(&ctx->airtime, frame->freq, air_now,
+ 			air_start + air_intervals[air_index].offset,
+ 			air_intervals[air_index].duration);
+-	if (is_acked && !noack)
+-		wmd_airtime_record(&ctx->airtime, frame->freq, air_now,
+-			air_start + send_time - ack_time_usec + sifs,
+-			ack_time_usec - sifs);
+ 	if (air_overflow)
+ 		wmd_airtime_invalidate(&ctx->airtime, frame->freq, air_now);
+ 	target += send_time;
+@@ -1054,7 +1066,7 @@
+ 
+ 	list_del(&frame->list);
+ 
+-	if (frame->flags & HWSIM_TX_STAT_ACK) {
++	if (frame->forward_received) {
+ 		/* rx the frame on the dest interface */
+ 		list_for_each_entry(station, &ctx->stations, list) {
+ 			if (memcmp(src, station->addr, ETH_ALEN) == 0)
+@@ -1132,6 +1144,7 @@
+ 				 * queued.  Recheck at delivery time instead of asking the
+ 				 * kernel to reject a stale off-channel clone. */
+ 				if (!mc_station_receives_freq(station, frame->freq)) {
++					frame->flags &= ~HWSIM_TX_STAT_ACK;
+ 					wmd_telemetry_record_rx(ctx, frame, station,
+ 						WMD_TELEMETRY_DROP_OFFCHANNEL,
+ 						frame->signal, frame->telemetry_snr_db,
+@@ -1225,20 +1238,7 @@
+ 	u32 seq = nlerr->msg.nlmsg_seq;
+ 	struct nl_cloned_frame_track *track = nl_tracked_cloned_frame(seq);
+ 
+-	/* mac80211_hwsim returns EINVAL when a well-formed cloned frame reaches a
+-	 * radio while it is idle, stopped, or between channel contexts.  That is
+-	 * normal RF delivery loss during scanning, not a daemon/protocol failure.
+-	 * Only downgrade requests which this process constructed and tracked;
+-	 * malformed or unrelated netlink failures remain errors. */
+-	if (gnlh->cmd == HWSIM_CMD_FRAME && nlerr->error == -EINVAL &&
+-	    track) {
+-		wmd_telemetry_netlink_rejection(ctx, track->source,
+-			track->destination, track->frequency_mhz,
+-			nlerr->error, true);
+-		w_logf(ctx, LOG_DEBUG,
+-			"nl: cloned frame not received, seq %u\n", seq);
+-		return NL_SKIP;
+-	}
++
+ 	wmd_telemetry_netlink_rejection(ctx,
+ 		track ? track->source : NULL,
+ 		track ? track->destination : NULL,
+@@ -1740,6 +1740,69 @@
+ 	return ctx->snr_matrix[sender->index * ctx->num_stas + receiver->index];
+ }
+ 
++static int packet_test_fading(struct wmediumd *ctx)
++{
++	return 0;
++}
++
++static double packet_test_per(struct wmediumd *ctx, double snr, unsigned int rate,
++			     u32 frequency, int length, struct station *source,
++			     struct station *destination)
++{
++	return snr < 5 ? 1 : 0;
++}
++
++static int packet_path_selftest(void)
++{
++	int failures = 0;
++	for (int scenario = 0; scenario < 3; scenario++) {
++		struct wmediumd test = {0};
++		struct station stations[2] = {0};
++		struct station *pointers[] = {&stations[0], &stations[1]};
++		int matrix[] = {0, 40, scenario == 1 ? -20 : 40, 0};
++		struct frame *frame = calloc(1, sizeof(*frame) + 24);
++		struct ieee80211_hdr *header = (void *)frame->data;
++		INIT_LIST_HEAD(&test.stations);
++		test.sta_array = pointers;
++		test.num_stas = 2;
++		test.snr_matrix = matrix;
++		test.get_link_snr = selftest_pair_snr;
++		test.get_error_prob = packet_test_per;
++		test.get_fading_signal = packet_test_fading;
++		for (int index = 0; index < 2; index++) {
++			stations[index].index = index;
++			stations[index].addr[0] = 0x02;
++			stations[index].addr[1] = 0xee;
++			stations[index].addr[5] = index;
++			station_init_queues(&stations[index]);
++			list_add_tail(&stations[index].list, &test.stations);
++			mc_update_vif_owner(&test, &stations[index], stations[index].addr,
++				 scenario == 2 && index == 1 ? 2437 : 5180);
++		}
++		frame->sender = &stations[0];
++		frame->freq = 5180;
++		frame->data_len = 24;
++		frame->tx_rates_count = 1;
++		frame->tx_rates[0].idx = 7;
++		frame->tx_rates[0].count = 3;
++		header->frame_control[0] = 0x08;
++		memcpy(header->addr1, stations[1].addr, ETH_ALEN);
++		memcpy(header->addr2, stations[0].addr, ETH_ALEN);
++		queue_frame(&test, &stations[0], frame);
++		failures += !!(frame->flags & HWSIM_TX_STAT_ACK) != (scenario == 0);
++		failures += frame->forward_received != (scenario != 2);
++		failures += frame->rx_rate_idx != 7;
++		failures += frame->tx_rates[0].count != (scenario == 0 ? 1 : 3);
++		failures += frame->duration <= 0;
++		list_del(&frame->list);
++		usfstl_sched_del_job(&frame->job);
++		free(frame);
++	}
++	printf("%s actual frame queue: RX rate, ACK success, reverse-only loss and off-channel retries\n",
++		failures ? "FAIL" : "PASS");
++	return failures;
++}
++
+ static int wmd_selftest(void)
+ {
+ 	int fails = 0, i, j;
+@@ -1747,6 +1810,7 @@
+ 	struct wmediumd t = {};
+ 
+ 	printf("=== wmediumd multichannel + Linux 7 rate-flags self-test ===\n");
++	fails += packet_path_selftest();
+ 
+ 	/* ---------- WMD3: frequency-scoped interference ---------- */
+ 	t.num_stas = 4;
+@@ -1919,6 +1983,15 @@
+ 			duration_failures ? "FAIL" : "PASS");
+ 		fails += duration_failures;
+ 	}
++	{
++		int decode_failures = !rf_decodes(-40, 0, 0, true) ||
++			rf_decodes(-40, 1, .9, true) || rf_decodes(-100, 0, .9, true) ||
++			rf_decodes(-40, 0, .9, false) ||
++			(rf_decodes(-40, 0, .9, true) && rf_decodes(-100, 0, .9, true));
++		printf("%s independent decode: ideal zero PER, reverse-link loss, off-channel and full PER\n",
++			decode_failures ? "FAIL" : "PASS");
++		fails += decode_failures;
++	}
+ 	printf("=== self-test %s (%d failures) ===\n", fails ? "FAILED" : "PASSED", fails);
+ 	return fails ? 1 : 0;
+ }
+--- a/wmediumd/wmediumd.h
++++ b/wmediumd/wmediumd.h
+@@ -285,6 +285,7 @@
+ 	int signal;
+ 	int duration;
+ 	int rx_rate_idx;
++	bool forward_received;
+ 	int telemetry_access_category;
+ 	int telemetry_destination;
+ 	int telemetry_snr_db;

@@ -1,0 +1,41 @@
+mac80211_hwsim: complete singleton aggregation TX feedback
+
+Each hwsim skb represents one MPDU. Requests marked for aggregation still
+need aggregate status for mac80211 rate control to account for them. Report
+one attempted MPDU and its real ACK outcome in both userspace and kernel
+medium paths. This does not add physical aggregation or force a PHY rate.
+
+--- a/drivers/net/wireless/virtual/mac80211_hwsim.c
++++ b/drivers/net/wireless/virtual/mac80211_hwsim.c
+@@ -2772,6 +2772,15 @@
+ 	return NULL;
+ }
+ 
++static void mac80211_hwsim_complete_ampdu_status(struct ieee80211_tx_info *info)
++{
++	if (!(info->flags & IEEE80211_TX_CTL_AMPDU))
++		return;
++	info->flags |= IEEE80211_TX_STAT_AMPDU;
++	info->status.ampdu_len = 1;
++	info->status.ampdu_ack_len = !!(info->flags & IEEE80211_TX_STAT_ACK);
++}
++
+ static void mac80211_hwsim_tx(struct ieee80211_hw *hw,
+ 			      struct ieee80211_tx_control *control,
+ 			      struct sk_buff *skb)
+@@ -2960,6 +2969,7 @@
+ 
+ 	if (!(txi->flags & IEEE80211_TX_CTL_NO_ACK) && ack)
+ 		txi->flags |= IEEE80211_TX_STAT_ACK;
++	mac80211_hwsim_complete_ampdu_status(txi);
+ 	ieee80211_tx_status_irqsafe(hw, skb);
+ }
+ 
+@@ -6967,6 +6977,7 @@
+ 	if (hwsim_flags & HWSIM_TX_CTL_NO_ACK)
+ 		txi->flags |= IEEE80211_TX_STAT_NOACK_TRANSMITTED;
+ 
++	mac80211_hwsim_complete_ampdu_status(txi);
+ 	ieee80211_tx_status_irqsafe(data2->hw, skb);
+ 	return 0;
+ out:

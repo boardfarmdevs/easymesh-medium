@@ -78,6 +78,8 @@ output.write_text(
     + "\n\nint main(void)\n{\n"
       "    mac_address_t local = {0x42, 0, 0, 0, 1, 0};\n"
       "    mac_address_t other = {0x42, 0, 0, 0, 2, 0};\n"
+      "    mac_address_t departed = {0};\n"
+      "    assert(hwsim_should_filter_station(true, departed, local, false, 0));\n"
       "    assert(!hwsim_should_filter_station(true, local, local, true, 900000));\n"
       "    assert(hwsim_should_filter_station(true, other, local, false, 0));\n"
       "    assert(!hwsim_should_filter_station(false, other, local, false, 0));\n"

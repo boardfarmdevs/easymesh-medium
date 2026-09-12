@@ -1,0 +1,100 @@
+wmediumd: phy metadata and airtime
+
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -66,8 +66,9 @@
+ 
+ static inline int pkt_duration(int len, int rate)
+ {
+-	/* preamble + signal + t_sym * n_sym, rate in 100 kbps */
+-	return 16 + 4 + 4 * div_round((16 + 8 * len + 6) * 10, 4 * rate);
++	if (rate == 10 || rate == 20 || rate == 55 || rate == 110)
++		return 192 + div_round(8 * (len + 4) * 10, rate);
++	return 20 + 4 * div_round((16 + 8 * (len + 4) + 6) * 10, 4 * rate);
+ }
+ 
+ int w_logf(struct wmediumd *ctx, u8 level, const char *format, ...)
+@@ -672,12 +673,12 @@
+ 
+ 	/* TODO configure phy parameters */
+ 	int slot_time = 9;
+-	int sifs = 16;
++	int sifs = frame->freq < 3000 ? 10 : 16;
+ 	int difs = 2 * slot_time + sifs;
+ 
+ 	int retries = 0;
+ 
+-	int ack_time_usec = pkt_duration(14, index_to_rate(0, frame->freq)) +
++	int ack_time_usec = pkt_duration(10, index_to_rate(0, frame->freq)) +
+ 	                    sifs;
+ 
+ 	/*
+@@ -730,6 +731,7 @@
+ 			break;
+ 
+ 		per_rate_idx = frame_model_rate_idx(frame, i);
++		frame->rx_rate_idx = per_rate_idx;
+ 		error_prob = ctx->get_error_prob(ctx, snr, per_rate_idx,
+ 						 frame->freq, frame->data_len,
+ 						 station, deststa);
+@@ -744,6 +746,8 @@
+ 				air_overflow = true;
+ 			}
+ 			send_time += data_time;
++			if (frame->freq < 3000 && per_rate_idx >= 4)
++				send_time += 6;
+ 
+ 			retries++;
+ 
+@@ -1001,7 +1005,7 @@
+ 	if (nla_put(msg, HWSIM_ATTR_ADDR_RECEIVER, ETH_ALEN,
+ 		    dst->hwaddr) ||
+ 	    nla_put(msg, HWSIM_ATTR_FRAME, data_len, data) ||
+-	    nla_put_u32(msg, HWSIM_ATTR_RX_RATE, 1) ||
++	    nla_put_u32(msg, HWSIM_ATTR_RX_RATE, rate_idx) ||
+ 	    nla_put_u32(msg, HWSIM_ATTR_FREQ, freq) ||
+ 	    nla_put_u32(msg, HWSIM_ATTR_SIGNAL, signal)) {
+ 		w_logf(ctx, LOG_ERR, "%s: Failed to fill a payload\n", __func__);
+@@ -1115,7 +1119,7 @@
+ 						      station,
+ 						      frame->data,
+ 						      frame->data_len,
+-						      1, signal,
++						      frame->rx_rate_idx, signal,
+ 						      frame->freq,
+ 						      frame->cookie);
+ 				wmd_telemetry_record_rx(ctx, frame, station,
+@@ -1149,7 +1153,7 @@
+ 						      station,
+ 						      frame->data,
+ 						      frame->data_len,
+-						      1, frame->signal,
++						      frame->rx_rate_idx, frame->signal,
+ 						      frame->freq,
+ 						      frame->cookie);
+ 				wmd_telemetry_record_rx(ctx, frame, station,
+@@ -1907,6 +1911,14 @@
+ 	} else {
+ 		printf("PASS airtime: interval union excludes waits and isolates frequencies\n");
+ 	}
++	{
++		int duration_failures = pkt_duration(1000, 60) != 1364 ||
++			pkt_duration(1000, 540) != 172 || pkt_duration(10, 60) != 44 ||
++			pkt_duration(10, 10) != 304 || pkt_duration(1000, 110) != 923;
++		printf("%s legacy airtime: FCS, DSSS long preamble, OFDM symbols and ACK length\n",
++			duration_failures ? "FAIL" : "PASS");
++		fails += duration_failures;
++	}
+ 	printf("=== self-test %s (%d failures) ===\n", fails ? "FAILED" : "PASSED", fails);
+ 	return fails ? 1 : 0;
+ }
+--- a/wmediumd/wmediumd.h
++++ b/wmediumd/wmediumd.h
+@@ -284,6 +284,7 @@
+ 	int flags;
+ 	int signal;
+ 	int duration;
++	int rx_rate_idx;
+ 	int telemetry_access_category;
+ 	int telemetry_destination;
+ 	int telemetry_snr_db;

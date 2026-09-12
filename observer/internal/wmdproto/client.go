@@ -203,6 +203,9 @@ func (c *Client) ResolveAssociations(ctx context.Context, snapshot *model.Snapsh
 		if decodeErr != nil {
 			return decodeErr
 		}
+		if association.Flags&4 != 0 {
+			continue
+		}
 		snapshot.Associations = append(snapshot.Associations, association)
 	}
 	sort.Slice(snapshot.Associations, func(i, j int) bool {
@@ -662,9 +665,14 @@ func decodeAssociation(payload []byte) (model.Association, error) {
 	}
 	frequency := binary.BigEndian.Uint32(payload[20:24])
 	flags := binary.BigEndian.Uint32(payload[24:28])
+	if flags&4 != 0 && (flags != 4 || frequency != 0 || macText(payload[12:18]) != "00:00:00:00:00:00") {
+		return model.Association{}, fmt.Errorf("invalid departed association payload")
+	}
 	band, channel := model.BandAndChannel(frequency)
 	evidence := "unknown"
-	if flags&1 != 0 && flags&2 != 0 {
+	if flags&4 != 0 {
+		evidence = "confirmed departure"
+	} else if flags&1 != 0 && flags&2 != 0 {
 		evidence = "association response and data"
 	} else if flags&1 != 0 {
 		evidence = "association response"

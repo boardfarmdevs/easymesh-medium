@@ -198,6 +198,37 @@ func TestEventRingOverwriteIsInformationalWithoutHistoryGap(t *testing.T) {
 	}
 }
 
+func TestConfirmedDepartureIsNotAnAssociation(test *testing.T) {
+	path := filepath.Join(test.TempDir(), "observer.sock")
+	listener := listenUnixPacket(test, path)
+	defer listener.Close()
+	go serveAssociationConnection(test, listener, 17)
+	snapshot := model.Snapshot{
+		Daemon: model.Daemon{
+			InstanceID:   "0123456789abcdeffedcba9876543210",
+			Generation:   17,
+			Capabilities: []string{"association_ownership"},
+		},
+		Stations: []model.Station{{MAC: "42:00:00:00:04:00", Role: "wlan-client"}},
+	}
+	if err := NewClient(path).ResolveAssociations(context.Background(), &snapshot); err != nil {
+		test.Fatal(err)
+	}
+	if len(snapshot.Associations) != 0 {
+		test.Fatalf("confirmed departure created an association: %+v", snapshot.Associations)
+	}
+	payload := make([]byte, associationSize)
+	binary.BigEndian.PutUint32(payload[24:28], 4)
+	association, err := decodeAssociation(payload)
+	if err != nil || association.Evidence != "confirmed departure" {
+		test.Fatalf("departure decode: %+v, %v", association, err)
+	}
+	payload[12] = 0x42
+	if _, err := decodeAssociation(payload); err == nil {
+		test.Fatal("departure with a live owner accepted")
+	}
+}
+
 func TestNetlinkHealthDoesNotMisclassifyOtherEINVAL(test *testing.T) {
 	state, reasons := assessHealth(model.TelemetrySummary{NetlinkOtherErrors: 1}, false)
 	if state != "degraded" || len(reasons) != 1 || reasons[0] != "netlink errors outside tracked clone EINVAL have been observed" {
@@ -247,6 +278,11 @@ func serveAssociationConnection(t *testing.T, listener *net.UnixListener, genera
 		copy(payload[12:18], testMACs[2][:])
 		binary.BigEndian.PutUint32(payload[20:24], 5180)
 		binary.BigEndian.PutUint32(payload[24:28], 3)
+		if endpoint[4] == 4 {
+			copy(payload[6:12], endpoint)
+			clear(payload[12:24])
+			binary.BigEndian.PutUint32(payload[24:28], 4)
+		}
 		if _, err := conn.Write(responseFrame(opcode, generation, payload)); err != nil {
 			return
 		}

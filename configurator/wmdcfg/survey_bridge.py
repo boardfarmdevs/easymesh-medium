@@ -42,6 +42,7 @@ class SurveyBridge:
         self.root = root
         self.fixed_utilization = fixed_utilization
         self.baselines = {}
+        self.previous_channels = {}
 
     def convert(self, key: tuple, context: dict, sample: dict, instance: str) -> dict | None:
         identity = (context["epoch"], instance, sample["start_us"], self.fixed_utilization)
@@ -85,12 +86,32 @@ class SurveyBridge:
                 errors.append(f"{path}: {error}")
         frequencies = sorted({row["frequency_mhz"] for _, row in contexts})
         samples = {frequency: client.get_channel_survey(frequency) for frequency in frequencies}
+        observer_keys = sorted({(row["radio"], row["frequency_mhz"]) for _, row in contexts})
+        observer_samples = (client.get_observer_surveys(observer_keys)
+                            if observer_keys and "observer_surveys" in getattr(client, "capabilities", ())
+                            else {})
+        observations = []
+        for frequency, sample in samples.items():
+            previous = self.previous_channels.get(frequency)
+            observation = {"frequency_mhz": frequency, "state": "warming_up", "value": None,
+                           "observed_us": sample["observed_us"], "window_us": None}
+            if previous and previous["instance"] == client.instance_id and previous["start_us"] == sample["start_us"]:
+                active = sample["observed_us"] - previous["observed_us"]
+                busy = sample["busy_us"] - previous["busy_us"]
+                if sample["flags"] & 1 and previous["flags"] & 1 and active > 0 and 0 <= busy <= active:
+                    observation.update(state="valid", value=100 * busy / active, window_us=active)
+                else:
+                    observation["state"] = "invalid"
+            observations.append(observation)
+        self.previous_channels = {frequency: {**sample, "instance": client.instance_id}
+                                  for frequency, sample in samples.items()}
         active_keys = {(str(path), context["slot"]) for path, context in contexts}
         self.baselines = {key: value for key, value in self.baselines.items() if key in active_keys}
         written = []
         for path, context in contexts:
             key = (str(path), context["slot"])
-            sample = samples[context["frequency_mhz"]]
+            sample = observer_samples.get((context["radio"], context["frequency_mhz"]),
+                                          samples[context["frequency_mhz"]])
             try:
                 record = self.convert(key, context, sample, client.instance_id)
                 if record is None:
@@ -106,13 +127,16 @@ class SurveyBridge:
         return {
             "schema": "easymesh.rf-survey-bridge.v1",
             "source": "synthetic-field-test" if self.fixed_utilization is not None else "wmediumd-modeled-airtime",
-            "profile": "single-contention-domain-legacy20",
+            "profile": ("visibility-reservation-legacy20" if
+                        "visibility_contention" in getattr(client, "capabilities", ()) else
+                        "single-contention-domain-legacy20"),
             "physical_capacity_qualified": False,
             "fixed_utilization_byte": self.fixed_utilization,
             "instance_id": client.instance_id,
             "recorded_monotonic_ns": time.monotonic_ns(),
             "active_contexts": len(contexts), "written": written, "errors": errors,
             "channels": samples,
+            "channel_observations": observations,
         }
 
 
@@ -151,7 +175,7 @@ def main(argv=None) -> int:
                     started = time.monotonic()
                     report = bridge.tick(client)
                     iterations += 1
-                    if args.status_file and (started - last_report >= 1 or args.iterations):
+                    if args.status_file and (started - last_report >= 0.25 or args.iterations):
                         temporary = args.status_file.with_suffix(".tmp")
                         temporary.write_text(json.dumps(report, sort_keys=True) + "\n")
                         temporary.replace(args.status_file)
@@ -162,6 +186,7 @@ def main(argv=None) -> int:
                     time.sleep(max(0, args.interval - (time.monotonic() - started)))
         except (OSError, ActuatorError, RuntimeError, ValueError) as error:
             bridge.baselines.clear()
+            bridge.previous_channels.clear()
             print(f"survey bridge unavailable: {error}", flush=True)
             if args.iterations:
                 return 1

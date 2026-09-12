@@ -34,6 +34,42 @@ def stop_process(process, stop_signal=signal.SIGTERM):
         process.wait(timeout=5)
 
 
+def scan_for_roam(client_node, bssid, frequency, timeout=15):
+    started = time.monotonic()
+    deadline = started + timeout
+    accepted = False
+    next_scan = started
+    scan_requests = 0
+    last_result = ""
+    while (now := time.monotonic()) < deadline:
+        if not accepted or now >= next_scan:
+            last_result = command("lxc", "exec", client_node, "--", "wpa_cli", "-i", "wlan0",
+                                  "scan", f"freq={frequency}").strip()
+            scan_requests += 1
+            next_scan = now + 1
+            if last_result == "OK":
+                accepted = True
+            elif last_result != "FAIL-BUSY":
+                raise RuntimeError(f"native directed scan rejected: {last_result}")
+        if accepted:
+            last_result = command("lxc", "exec", client_node, "--", "wpa_cli", "-i", "wlan0",
+                                  "bss", bssid)
+            fields = dict(line.split("=", 1) for line in last_result.splitlines() if "=" in line)
+            if (fields.get("bssid", "").lower() == bssid.lower() and
+                    fields.get("freq") == str(frequency) and fields.get("age", "").isdigit() and
+                    int(fields["age"]) <= 1):
+                return {**fields, "scan_requests": scan_requests,
+                        "scan_elapsed_seconds": time.monotonic() - started}
+        time.sleep(.2)
+    raise RuntimeError(f"native directed scan did not refresh {bssid} on {frequency}: {last_result}")
+
+
+def native_load_matches(rows, value):
+    last_per_bss = {row["bssid"]: row for row in rows}
+    return bool(last_per_bss) and all(
+        row["utilization_byte"] == value for row in last_per_bss.values())
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Short, disruptive RF survey/BSS-load acceptance")
     parser.add_argument("--stack", choices=("rdk", "prplmesh"), required=True)
@@ -91,7 +127,7 @@ def main(argv=None):
         if provider.poll() is not None:
             raise RuntimeError("survey fixture exited")
 
-    def capture(name):
+    def capture(name, expected_native=None):
         path = args.output / f"{name}.pcap"
         native_path = args.output / f"{name}-ap-metrics.pcap"
         with (args.output / f"{name}-tcpdump.log").open("w") as log:
@@ -103,7 +139,21 @@ def main(argv=None):
                 process = subprocess.Popen(
                     ["tcpdump", "-U", "-i", "hwsim0", "-w", str(path), "type mgt subtype beacon"],
                     stdout=log, stderr=log)
-                time.sleep(8 if name.startswith("fixed-") else 2)
+                capture_started = time.monotonic()
+                if expected_native is None:
+                    time.sleep(2)
+                else:
+                    while time.monotonic() - capture_started < 24:
+                        time.sleep(2)
+                        try:
+                            observed = [row for row in ap_metric_loads(native_path)
+                                        if not rdk or row["bssid"] == bssid]
+                        except (OSError, ValueError):
+                            continue
+                        if (time.monotonic() - capture_started >= 8 and
+                                native_load_matches(observed, expected_native)):
+                            break
+                report.setdefault("capture_seconds", {})[name] = time.monotonic() - capture_started
             finally:
                 try:
                     stop_process(process, signal.SIGINT)
@@ -122,7 +172,7 @@ def main(argv=None):
         for value in (0, 128, 255):
             name = f"fixed-{value}"
             start_provider(value, name)
-            rows = capture(name)
+            rows = capture(name, value)
             native_rows = json.loads((args.output / f"{name}-ap-metrics.json").read_text())
             counts = command("lxc", "exec", ap, "--", "iw", "dev", interface, "station", "dump")
             station_count = len(re.findall(r"^Station ", counts, re.MULTILINE))
@@ -138,8 +188,7 @@ def main(argv=None):
             check(name + "-scan", f"channel utilisation: {value}/255" in block,
                   bss_present=bool(block))
             last_per_bss = {row["bssid"]: row for row in native_rows}
-            check(name + "-native-ap-metrics", last_per_bss and all(
-                row["utilization_byte"] == value for row in last_per_bss.values()),
+            check(name + "-native-ap-metrics", native_load_matches(native_rows, value),
                 packets=len(native_rows),
                 bssids=len(last_per_bss),
                 scope="colocated-agent" if rdk else "remote-agents",
@@ -218,9 +267,8 @@ def main(argv=None):
         alternate_frequency = int(re.search(r"\((\d+) MHz\)", alternate_info)[1])
 
         def roam(target_bssid, target_frequency):
-            command("lxc", "exec", client_node, "--", "wpa_cli", "-i", "wlan0",
-                    "scan", f"freq={target_frequency}")
-            time.sleep(1)
+            scan = scan_for_roam(client_node, target_bssid, target_frequency)
+            report.setdefault("retune_scans", []).append(scan)
             result = command("lxc", "exec", client_node, "--", "wpa_cli", "-i", "wlan0",
                              "roam", target_bssid)
             if result.strip() != "OK":

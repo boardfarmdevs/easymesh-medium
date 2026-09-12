@@ -102,6 +102,7 @@ if [ "$GEN" = 7.0 ]; then
 else
     echo ">> modeled survey cache requires Linux 7.0; retaining signal-only support"
 fi
+apply "$HERE/patches/0010-mac80211_hwsim-complete-aggregation-feedback.patch"
 grep -q 'EXPERIMENTAL wmediumd' "$SRCDIR/mac80211_hwsim.c" \
     || { echo "patch 0001 did not apply -- check source version" >&2; exit 1; }
 

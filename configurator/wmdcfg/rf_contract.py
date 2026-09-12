@@ -30,7 +30,8 @@ def capability_manifest(backend: str, status=None) -> dict:
     modeled = backend == "userspace" and "channel_survey" in wire
     return {
         "schema": SCHEMA,
-        "profile": "single-contention-domain-legacy20" if modeled else "signal-only-unqualified-airtime",
+        "profile": ("visibility-reservation-legacy20" if "visibility_contention" in wire else
+                    "single-contention-domain-legacy20" if modeled else "signal-only-unqualified-airtime"),
         "backend": backend,
         "wire": {
             "state": "valid" if status is not None else "missing",

@@ -106,7 +106,7 @@ def main(argv=None):
     cpu_percent = (cpu_ticks(bridge_pid) - ticks_start) / os.sysconf("SC_CLK_TCK") / duration * 100
     report = {
         "schema": "easymesh.rf-survey-audit.v1", "read_only": True,
-        "profile": "single-contention-domain-legacy20", "physical_capacity_qualified": False,
+        "profile": status["profile"], "physical_capacity_qualified": False,
         "instance_id": instance, "duration_seconds": duration, "contexts": len(latest),
         "bridge_cpu_percent_one_core": cpu_percent, "errors": errors,
         "cache_age_ms": {name: percentile(ages, quantile) for name, quantile in

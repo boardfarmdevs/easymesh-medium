@@ -69,7 +69,8 @@ associations, run configurator scenarios, or make optimizer decisions.
 wmediumd does not implement the Wi-Fi association state machine or EasyMesh
 topology. The laboratory patch does retain a deliberately narrow ownership
 ledger learned only from ACKed successful association/reassociation responses
-or valid ACKed ToDS/FromDS data. This lets observers reject multicast fan-out
+or station-originated ACKed ToDS data. FromDS data can only corroborate the
+current owner. This lets observers reject multicast fan-out
 and stale old-AP traffic without treating packet activity as ownership. The UI
 must keep three concepts separate:
 
@@ -109,6 +110,14 @@ The `-R` read-only endpoint supplies daemon instance ID, control generation,
 station count, pair/frequency SNR readback and capability flags. It deliberately
 rejects both APPLY operations. The hwsim HAL uses it to answer simulated
 Unassociated STA Link Metrics requests.
+
+Association queries distinguish unknown ownership from a confirmed departure.
+An ACKed disconnect involving the current owner returns a zero owner and
+`WMDC_ASSOCIATION_DEPARTED` (bit 2), until a successful association response or
+station-originated ToDS data establishes the next owner. HAL excludes stale AP
+peers immediately; the Console does not draw a departed association. Unknown
+state still uses the conservative HAL fallback. Idle clients retain ownership,
+and an old AP's downlink PHY ACK cannot steal or resurrect it.
 
 The `-O` endpoint adds the following bounded state without JSON encoding, file
 I/O or blocking subscribers in wmediumd's frame loop:

@@ -67,6 +67,32 @@ class ActuatorIntegrationTests(unittest.TestCase):
             with self.assertRaises((ActuatorError, ValueError)):
                 client.get_channel_survey(100)
 
+    def test_read_only_batched_observer_surveys(self):
+        contexts = [("42:00:00:00:01:00", 5180), ("42:00:00:00:02:00", 5180)]
+        with ControlClient(str(self.metrics)) as client:
+            first = client.get_observer_surveys(contexts)
+            time.sleep(.03)
+            second = client.get_observer_surveys(contexts)
+            self.assertEqual(set(second), set(contexts))
+            self.assertEqual(second[contexts[0]]["observed_us"], second[contexts[1]]["observed_us"])
+            self.assertGreater(second[contexts[0]]["observed_us"], first[contexts[0]]["observed_us"])
+            self.assertEqual(second[contexts[0]]["busy_us"], 0)
+            for invalid in ([], contexts * 2, [("42:00:00:00:fe:00", 5180)],
+                            [("42:00:00:00:01:00", 100)]):
+                with self.assertRaises(ActuatorError):
+                    client.get_observer_surveys(invalid)
+            self.assertEqual(client.get_observer_surveys(contexts)[contexts[1]]["flags"], 3)
+
+    def test_qualification_restores_with_new_generations(self):
+        with ControlClient(str(self.control)) as client:
+            original = client.dump_links()[1]
+            client.apply(client.status().generation + 1, original)
+            self.assertEqual(client.dump_links()[1], original)
+            frequencies = [{"source": SOURCE, "destination": DESTINATION,
+                            "frequency_mhz": 5180, "value": 7, "override": True}]
+            client.apply_frequency(client.status().generation + 1, frequencies)
+            self.assertEqual(client.dump_frequency_links()[1], frequencies)
+
     def test_atomic_apply_rejection_readback_and_restore(self):
         original_pid = self.daemon.pid
         with ControlClient(str(self.control)) as client:

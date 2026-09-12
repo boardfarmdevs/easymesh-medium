@@ -175,6 +175,7 @@
   <div class="sub" id="liveRun"></div>
 
   <div class="live-only">
+    <div class="card" id="rfLoadCard"><h2>Modeled channel activity</h2><div id="rfLoad" class="metric-grid"></div><div class="sub">Frequency-wide busy time, not SNR or available capacity. Hover for age and window; — means unavailable.</div></div>
     <div class="card" id="storyCard"><h2>Scenario</h2><div id="storyText">Waiting for the conductor…</div></div>
     <div class="card" id="labCard"><h2>Whole lab</h2><div id="labMetrics" class="metric-grid"><span>Status</span><b>waiting</b></div></div>
     <div class="card" id="heroCard"><h2>Traffic probe · cyan ring</h2><div id="heroMetrics">Waiting for controller telemetry…</div><div class="sub">Ctrl-click any client</div></div>
@@ -302,6 +303,14 @@
 <script src="vendor/three.min.js"></script>
 <script src="interaction-model.js"></script>
 <script src="signal-meter.js?v=signal-meter-1"></script>
+<script src="rf-load.js?v=1"></script>
+<script>
+  if (document.querySelector('meta[name="room-viewer-mode"]').content === 'interactive') {
+    RoomRFLoad.start(document.getElementById('rfLoad'), '/api/demo/rf-load');
+  } else {
+    document.getElementById('rfLoadCard').hidden = true;
+  }
+</script>
 <script>
 (function () {
   'use strict';
@@ -1812,6 +1821,7 @@
       current_metric_freshness_unknown: 'Blocked: current signal age is unknown',
       current_metric_stale: 'Blocked: current signal is stale',
       fresh_candidate_metric_missing: 'Blocked: fresh AP alternatives are missing',
+      candidate_snapshot_incomplete: 'Reading remaining AP alternatives for this client',
       fresh_band_candidate_metric_missing: 'Blocked: fresh band alternatives are missing',
       client_count_mismatch: 'Waiting for the expected client roster',
       mesh_device_count_mismatch: 'Waiting for all mesh agents',

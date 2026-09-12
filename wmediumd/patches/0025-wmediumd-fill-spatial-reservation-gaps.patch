@@ -1,0 +1,220 @@
+Subject: [PATCH] Fill spatial reservation gaps without overtaking a sender
+
+In the opt-in visibility profile, appending every new packet after every
+conflicting future reservation makes a multicast packet block unrelated
+links long before it occupies the channel. Track reservations in completion
+order and admit the earliest conflict-free interval while preserving sender
+FIFO and multicast exclusion. The global profile is unchanged. Release
+calendar entries on delivery and client disconnect. Exercise the actual
+queue with an independent gap, same-sender FIFO and a multicast barrier.
+
+Upstream-Status: Inappropriate [hwsim EasyMesh laboratory interface]
+
+--- a/wmediumd/wmediumd.h
++++ b/wmediumd/wmediumd.h
+@@ -203,6 +203,7 @@
+ 
+ 	int num_stas;
+ 	struct list_head stations;
++	struct list_head rf_reservations;
+ 	struct station **sta_array;
+ 	int *snr_matrix;
+ 	double *error_prob_matrix;
+@@ -277,6 +278,7 @@
+ 
+ struct frame {
+ 	struct list_head list;		/* frame queue list */
++	struct list_head rf_reservation;
+ 	struct usfstl_job job;
+ 	struct usfstl_job start_job;
+ 	struct client *src;
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -680,6 +680,50 @@
+ 	return false;
+ }
+ 
++static uint64_t rf_reservation_start(struct wmediumd *ctx, const struct frame *frame,
++				    uint64_t duration)
++{
++	struct frame *reserved;
++	uint64_t target = scheduler.current_time;
++	if (!ctx->rf_reservations.next)
++		INIT_LIST_HEAD(&ctx->rf_reservations);
++	list_for_each_entry(reserved, &ctx->rf_reservations, rf_reservation) {
++		if (reserved->freq == frame->freq && reserved->sender == frame->sender &&
++		    reserved->job.start > target)
++			target = reserved->job.start;
++	}
++	list_for_each_entry(reserved, &ctx->rf_reservations, rf_reservation) {
++		if (reserved->job.start > target &&
++		    reserved->job.start - reserved->duration < target + duration &&
++		    rf_flows_conflict(ctx, reserved, frame))
++			target = reserved->job.start;
++	}
++	return target;
++}
++
++static void rf_reserve_frame(struct wmediumd *ctx, struct frame *frame)
++{
++	struct frame *reserved;
++	struct list_head *previous = &ctx->rf_reservations;
++	if (!ctx->visibility_contention)
++		return;
++	list_for_each_entry_reverse(reserved, &ctx->rf_reservations, rf_reservation) {
++		if (reserved->job.start <= frame->job.start) {
++			previous = &reserved->rf_reservation;
++			break;
++		}
++	}
++	list_add(&frame->rf_reservation, previous);
++}
++
++static void rf_release_frame(struct frame *frame)
++{
++	if (frame->rf_reservation.next) {
++		list_del(&frame->rf_reservation);
++		frame->rf_reservation.next = NULL;
++	}
++}
++
+ static void rf_record_airtime(struct wmediumd *ctx, struct station *source, u32 frequency,
+ 			     uint64_t now_us, uint64_t start_us, uint64_t duration_us)
+ {
+@@ -861,11 +905,15 @@
+ 			frame->flags |= HWSIM_TX_STAT_ACK;
+ 	}
+ 	target = scheduler.current_time;
+-	for (i = 0; i < IEEE80211_NUM_ACS; i++) {
+-		list_for_each_entry(tmpsta, &ctx->stations, list) {
+-			list_for_each_entry_reverse(candidate, &tmpsta->queues[i].frames, list) {
+-				if (candidate->job.start > target && rf_flows_conflict(ctx, candidate, frame))
+-					target = candidate->job.start;
++	if (ctx->visibility_contention) {
++		target = rf_reservation_start(ctx, frame, send_time);
++	} else {
++		for (i = 0; i < IEEE80211_NUM_ACS; i++) {
++			list_for_each_entry(tmpsta, &ctx->stations, list) {
++				list_for_each_entry_reverse(candidate, &tmpsta->queues[i].frames, list) {
++					if (candidate->job.start > target && rf_flows_conflict(ctx, candidate, frame))
++						target = candidate->job.start;
++				}
+ 			}
+ 		}
+ 	}
+@@ -923,6 +971,7 @@
+ 	frame->job.data = ctx;
+ 	frame->job.name = "frame";
+ 	usfstl_sched_add_job(&scheduler, &frame->job);
++	rf_reserve_frame(ctx, frame);
+ 	list_add_tail(&frame->list, &queue->frames);
+ }
+ 
+@@ -974,6 +1023,7 @@
+ 			list_for_each_entry_safe(frame, tmp, &queue->frames,
+ 						 list) {
+ 				if (frame->src == client) {
++					rf_release_frame(frame);
+ 					list_del(&frame->list);
+ 					usfstl_sched_del_job(&frame->job);
+ 					wmd_telemetry_frame_done(ctx);
+@@ -1110,6 +1160,7 @@
+ 	u8 *src = frame->sender->addr;
+ 	bool receiver_seen = false;
+ 
++	rf_release_frame(frame);
+ 	list_del(&frame->list);
+ 
+ 	if (frame->forward_received) {
+@@ -1846,6 +1897,7 @@
+ 		failures += frame->rx_rate_idx != 7;
+ 		failures += frame->tx_rates[0].count != (scenario == 0 || scenario >= 3 ? 1 : 3);
+ 		failures += frame->duration <= 0;
++		rf_release_frame(frame);
+ 		list_del(&frame->list);
+ 		usfstl_sched_del_job(&frame->job);
+ 		free(frame);
+@@ -1923,6 +1975,7 @@
+ 			wmd_airtime_free(&test.airtime);
+ 		}
+ 		for (int flow = 0; flow < 2; flow++) {
++			rf_release_frame(frames[flow]);
+ 			list_del(&frames[flow]->list);
+ 			usfstl_sched_del_job(&frames[flow]->job);
+ 			free(frames[flow]);
+@@ -1933,6 +1986,67 @@
+ 	return failures;
+ }
+ 
++static int spatial_gap_selftest(void)
++{
++	struct wmediumd test = {0};
++	struct station stations[4] = {0};
++	struct station *pointers[4];
++	struct frame *frames[5];
++	int matrix[16];
++	int failures = 0;
++	INIT_LIST_HEAD(&test.stations);
++	test.sta_array = pointers;
++	test.num_stas = 4;
++	test.snr_matrix = matrix;
++	test.get_link_snr = selftest_pair_snr;
++	test.get_error_prob = packet_test_per;
++	test.get_fading_signal = packet_test_fading;
++	test.visibility_contention = true;
++	for (int index = 0; index < 16; index++)
++		matrix[index] = -20;
++	matrix[1] = matrix[4] = matrix[11] = matrix[14] = 40;
++	for (int index = 0; index < 4; index++) {
++		pointers[index] = &stations[index];
++		stations[index].index = index;
++		stations[index].addr[0] = 0x02;
++		stations[index].addr[1] = 0xed;
++		stations[index].addr[5] = index;
++		station_init_queues(&stations[index]);
++		list_add_tail(&stations[index].list, &test.stations);
++		mc_update_vif_owner(&test, &stations[index], stations[index].addr, 5180);
++	}
++	for (int index = 0; index < 5; index++) {
++		struct frame *frame = calloc(1, sizeof(*frame) + 1500);
++		struct ieee80211_hdr *header = (void *)frame->data;
++		frames[index] = frame;
++		frame->sender = &stations[index < 2 ? index : 2];
++		frame->freq = 5180;
++		frame->data_len = index == 0 || index == 4 ? 1500 : 100;
++		frame->tx_rates_count = 1;
++		frame->tx_rates[0].idx = 7;
++		frame->tx_rates[0].count = 1;
++		header->frame_control[0] = 0x08;
++		memcpy(header->addr1, stations[index == 0 ? 1 : 3].addr, ETH_ALEN);
++		memcpy(header->addr2, frame->sender->addr, ETH_ALEN);
++		if (index == 1)
++			header->addr1[0] = 0xff;
++		queue_frame(&test, frame->sender, frame);
++	}
++	failures += frames[2]->job.start >= frames[0]->job.start;
++	failures += frames[3]->job.start - frames[3]->duration < frames[2]->job.start;
++	failures += frames[4]->job.start - frames[4]->duration < frames[1]->job.start;
++	for (int index = 0; index < 5; index++) {
++		rf_release_frame(frames[index]);
++		list_del(&frames[index]->list);
++		usfstl_sched_del_job(&frames[index]->job);
++		free(frames[index]);
++	}
++	wmd_airtime_free(&test.airtime);
++	printf("%s spatial reservation gaps: fill independent gaps, preserve sender FIFO and multicast exclusion\n",
++		failures ? "FAIL" : "PASS");
++	return failures;
++}
++
+ static int wmd_selftest(void)
+ {
+ 	int fails = 0, i, j;
+@@ -1942,6 +2056,7 @@
+ 	printf("=== wmediumd multichannel + Linux 7 rate-flags self-test ===\n");
+ 	fails += packet_path_selftest();
+ 	fails += spatial_queue_selftest();
++	fails += spatial_gap_selftest();
+ 
+ 	/* ---------- WMD3: frequency-scoped interference ---------- */
+ 	t.num_stas = 4;
