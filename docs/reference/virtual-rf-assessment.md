@@ -60,13 +60,11 @@ The highest-value findings are:
    An ACK lost over RF differs from a kernel injection rejection; submission
    still does not prove native receiver acceptance.
 
-7. Current shared optimizer snapshots are RCPI/band/association oriented.
-   Adding load to an AP report alone would not make that optimizer load-aware.
+7. Default optimizer snapshots remain signal-based. Opt-in schema 2 adds native
+   AP load/activity, guarded balancing and reasons; section 12.6 scopes qualification.
 
-**Recommendation:** preserve survey/reporting safeguards and declare signal
-provenance before adding load-aware policy. Reservations and reverse ACKs
-need scoped qualification; calibrated PHY service and hidden nodes remain
-future work.
+**Recommendation:** preserve survey/reporting safeguards and signal provenance.
+Calibrated PHY service, hidden nodes and demand/capacity remain future work.
 
 ## 2. Evidence and deployed architecture
 
@@ -566,9 +564,8 @@ do not accumulate overrides for every historical channel indefinitely.
 
 Repository paths below are relative to the RDK repository root. R01/R02 are
 implemented; the existing R03 translation and periodic R04 AP metrics are
-exercised. R04's full reporting-policy matrix and R05–R07 remain separate
-qualification work. R08 build/service integration is in source; no new thin
-release was made for this milestone.
+exercised. R04's full policy matrix and R05/R06 remain separate qualification.
+R07's scoped policy and R08 build/service integration are implemented.
 
 | ID | Location / responsibility | Required work |
 | --- | --- | --- |
@@ -578,7 +575,7 @@ release was made for this milestone.
 | R04 | `recipes-ccsp/unified-wifi-mesh/unified-wifi-mesh/` | Verify query/periodic/threshold-crossing AP reports and native model persistence; fix demonstrated field/age/encoding errors |
 | R05 | HAL associated/candidate providers and native rate storage | Audit 64-bit counters, 16/32-bit bitrate fallback, units and signed range; add reception-backed candidate mode without leaking matrix truth |
 | R06 | Native scan/channel-control paths | Preserve neighbor load presence and local scan utilization separately; verify actual channel change, VAP sharing and backhaul continuity |
-| R07 | `gen/optimizer/`, `gen/demo/room_demo/`, native web UI | Version load-aware snapshots only after R01-R06 gates; expose validity and decision reasons |
+| R07 | `gen/optimizer/`, `gen/demo/room_demo/`, native web UI | Schema-2 load/activity and guarded policy implemented; general channel-control integration remains separate |
 | R08 | `gen/hwsim/`, `gen/wmediumd/`, `gen/vm/` packaging | Pin rebuilt module/daemon/HAL compatibility; include conformance tests and safe rollback in future artifacts |
 
 A standard survey response may identify a channel on a shared wiphy but not
@@ -695,10 +692,8 @@ not removal of every meaningful timing mechanism.
 
 ## 10. Phased delivery
 
-Effort labels are relative: **S** is bounded adapter/configuration work,
-**M** crosses components, **L** changes core model behavior. They are not
-calendar commitments. Every phase ends with a working baseline and explicit
-unsupported capabilities, not a partly enabled production experiment.
+Effort: **S** bounded adapter work, **M** cross-component, **L** core model;
+not calendar commitments. Unsupported capabilities stay explicit.
 
 | Phase | Scope and dependencies | Owners | Effort | Exit gate |
 | --- | --- | --- | --- | --- |
@@ -706,21 +701,17 @@ unsupported capabilities, not a partly enabled production experiment.
 | 1: Reporting-only — implemented | Explicit fixed BSS Load test; native beacon/scan/report round-trip; availability and unit fixes | C09, R02-R04, P03-P06 | S-M | F1 field tests pass on both stacks; no congestion claim |
 | 2: Modeled airtime — implemented | C02-C04; declared legacy20 surrogate, occupancy/wait separation, both HAL paths | Common plus R01-R04/P01-P05 | M-L | Idle/load/channel controls pass within one declared contention domain |
 | 3: Credible contention | Visibility-aware scheduling, reverse ACK/receiver outcomes, interference power tests, truthful PHY metadata/service time | C05-C07, R05/P02 | L | Same-channel spatial reuse and asymmetric-link tests pass; no transport-error masking |
-| 4: Load-aware policy | Native observations, client demand/backhaul costs, optional neighbor actors, reason reporting | C08-C10, R06-R07/P05-P07 | M-L | Both policies evaluated separately with traceable improvement and no oscillation |
+| 4: Load-aware policy — scoped implementation | Native load/activity, hop guard and reasons; demand/capacity and neighbor actors remain future work | C08-C10, R06-R07/P05-P07 | M-L | Separate two-client native BTM qualifies on both stacks; default signal policy unchanged |
 | 5: Advanced RF | Calibrated HT/VHT/HE/EHT models, correlated fading, width/overlap, non-Wi-Fi energy; kernel-backend parity as separately justified | Common/platform specialists | L | Per-feature conformance and physical-reference comparison |
 
-Phases 1–2 passed the scoped reporting/native-traffic gates. Phase 3 adds
-legacy timing, reverse ACK and conservative reservations; section 12.5 lists
-its remaining qualification gates. Neither phase validates against hardware.
+Phases 1–2 pass reporting/native-traffic gates; section 12.5 qualifies legacy
+timing, reverse ACK and conservative reservations, not hardware fidelity.
 
-**Next gate:** resolve Phase 3 repeatability and host limitations before
-load-aware policy. Retain twenty clients and existing mesh roles; no extra
-VM, neighbor-room UI or soak is required.
+Load-policy qualification retains twenty clients/mesh roles; demand/capacity
+modeling remains outside scope.
 
-A shared scenario and independent RDK/prpl runs are preferable to forcing both
-systems to share a medium process. Run in parallel only after reserving enough
-host CPU and memory. Host capacity is its own fixable issue, not a reason to
-weaken RF or measurement correctness.
+Run independent labs in parallel only with sufficient host headroom.
+Capacity constraints never justify weaker correctness gates.
 
 ## 11. Correctness and performance qualification
 
@@ -1084,7 +1075,7 @@ The room's **Modeled channel activity** card uses read-only
 not per-AP capacity. A true zero stays zero; missing, synthetic or >1-second-old
 data becomes —. Hover exposes frequency, age and window. Its three fixed rows
 do not replace DOM nodes on updates. Static/replay viewers do not fetch live
-load. The network topology and optimizer have not gained load-aware policy.
+load. Default topology/optimizer operation remains signal-based.
 
 #### Repeatable short checks
 
@@ -1139,19 +1130,10 @@ Cleanup removes temporary routes/address/TCP rule and restores medium,
 matrices, associations and services. Retain JSON and verify readiness.
 Failed/inconclusive trials exit nonzero.
 
-Use `--daemon /absolute/candidate` for temporary replacement. `--diagnostics`
-retains native rates, TCP state and Console counters, labeling cached data.
-Qualification leaves diagnostics off.
-
-The visibility calendar fills independent reservation gaps while retaining
-sender FIFO and multicast/hidden-receiver exclusion. A subsequent **common
-scheduler bug** affected both profiles: inserting a later packet rearmed the
-wallclock timer for that packet, postponing earlier completions. RDK **0026** /
-prpl **0027** now request the pending queue's earliest deadline.
-
-Scheduler regression fails before and passes after. A timerfd fixture delivers
-a 20-ms job at **250.062 ms before / 20.063 ms after** when later work arrives.
-Clean builds and sanitizers pass.
+The visibility calendar preserves FIFO and multicast/hidden-receiver
+exclusion. RDK **0026** / prpl **0027** prevent later work from postponing
+earlier deadlines. The 20-ms regression completes at **20.063 ms**, formerly
+250.062 ms; clean builds and sanitizers pass.
 Run `bash gen/wmediumd/tests/test-scheduler-deadline.sh /patched/source/wmediumd`
 on RDK; omit `gen/` on prpl. No native rate, buffer, steering or VM-limit changes.
 
@@ -1167,20 +1149,12 @@ tracing/diagnostics and retains unchanged gates:
 | prpl, 12 s | 9.678 / 19.390 / 9.624 | 2.003 | 0.994 | 1.78% | Pass |
 | prpl, 20 s | 9.631 / 19.383 / 9.684 | 2.013 | 1.005 | 0.96% | Pass |
 
-Association/readback/survey and restoration pass. Earlier RDK 11.10/8.98/14.82%
-inconclusive runs remain retained. Timer-only RDK passes 1.73/2.11% spread,
-but prpl's 20-second run remains **20.66% inconclusive**, with native TX stuck
-at 1 Mbit/s and only 9–10 accounted packets despite thousands transmitted.
-
-Tracing confirms ACKed aggregation requests lack aggregate status:
-[Minstrel ignores AMPDU requests without
-AMPDU status](https://github.com/torvalds/linux/blob/v7.0/net/mac80211/rc80211_minstrel_ht.c).
-Common hwsim **0010** completes singleton status in both TX paths, using the
-real ACK outcome. This restores native rate adaptation, not physical
-aggregation or forced rates. Three helper regressions and clean kernel builds
-pass. Live 16-ping probes advance Minstrel counters **52→70 RDK / 21→41 prpl**;
-ACKed aggregation requests now carry aggregate status. Monitor ACK checks pass.
-prpl's builder now includes four-digit patches beyond 0009.
+Common hwsim **0010** completes singleton aggregate status using real ACK
+outcomes, restoring native rate adaptation rather than forcing rates or
+modeling aggregation. [Minstrel requires that
+status](https://github.com/torvalds/linux/blob/v7.0/net/mac80211/rc80211_minstrel_ht.c).
+Helper regressions, clean builds, live counter progression and monitor ACK
+checks pass. prpl's builder accepts four-digit patches beyond 0009.
 
 For module maintenance, stop the room, bridge, console and lab before unload;
 preserve module options and rollback binary. On RDK, restart
@@ -1188,13 +1162,42 @@ preserve module options and rollback binary. On RDK, restart
 oneshot otherwise retains obsolete state while radios are newly named wlanN.
 Never reload a live room's radio pool.
 
-Complete RF host sampling: RDK CPU ≤21.49%, RAM ≥51.41 GiB, 76°C,
-zero throttle increments; prpl CPU ≤17.95%, RAM ≥14.53 GiB, 74.13°C, throttle
-counter unsupported. Catalog thermal evidence remains separate. rev140 exposes
-100°C CPU critical temperature and 40/64-W power limits, but no fan RPM.
-Do not increase VM resources or silently change host power policy.
+See [current thermal findings](../testing/room-acceptance.md#host-headroom-and-restoration)
+before changing host placement or resources. Unsupported counters are not zero.
 
-Modern PHY/DCF, live collisions/interference, reception-backed candidates,
-calibration and Phase 4 load-aware policy remain open. Raw evidence on rev150:
-`/home/rev/work/profiling-gates-0912/`; prior evidence remains under
-`/home/rev/work/qualification-fixes-0912/`. No thin tar or box is made.
+### 12.6 Opt-in native-load policy
+
+`optimizer/configs/load-aware-policy.yaml` enables schema-2 native AP-load
+and STA packet-activity observations. Default signal policy is unchanged.
+Only different-channel, same-band targets with viable RF, fresh matching
+reports and no additional wireless hop qualify. Holds, one-client batching,
+settling and cooldown prevent mass movement; unknown load never means idle.
+Packet activity is not offered demand; hop count is not backhaul capacity.
+The receiver uses bridge metadata only for provenance/epoch, never as a load
+oracle. RDK captures Ethernet; prpl subscribes to its native broker, including
+colocated AP reports with conservative native timestamps.
+See [coverage qualification](../testing/room-acceptance.md#native-load-coverage) and the package README.
+
+Channels and client `freq_list` are prerequisites, not policy side effects.
+RDK uses single-radio retunes without restarting agents. Its staggered reports
+require five-second skew/freshness and a ten-second hold; prpl uses one-second
+skew/five-second hold. Neither changes native cadence or default room gates.
+See [UDP/BTM qualification and restoration](../testing/room-acceptance.md#opt-in-load-policy-qualification)
+for measured outcomes and retained failures. Missing telemetry never means idle.
+RDK association publication and ready-command dispatch are event-driven;
+[extender-loss qualification](../testing/room-acceptance.md#extender-loss-repair-and-attribution)
+passes without changing security timers.
+
+prpl HAL **0015** preserves candidate socket identity across interruptions;
+it does not replace idealized candidates with reception-backed measurements.
+See [repair qualification](../testing/room-acceptance.md#prpl-snapshot-coherence-and-candidate-diagnosis)
+and [native RCPI → room presentation profiling](../testing/room-acceptance.md#room-webgl-presentation),
+which excludes RF generation and physical scanout.
+The pinned prpl ubus dependency also receives a
+[reentrant-dispatch backport](../testing/room-acceptance.md#prpl-libubus-reentrancy);
+this changes message coordination, not RF or steering policy.
+
+Modern PHY/DCF, live collisions/interference, reception-backed candidates
+and physical calibration remain open. Evidence:
+`/home/rev/work/policy-profiling-0912/`; RF baseline:
+`/home/rev/work/profiling-gates-0912/`. No thin tar or box is made.

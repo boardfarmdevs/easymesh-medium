@@ -16,6 +16,31 @@ from .rf_qualify import MediumRestarter, association_identity, qualification_pas
 from .rf_validate import command, scan_for_roam, stop_process
 
 
+def private_channels(text):
+    result = {}
+    for block in re.split(r"\bInterface ", text)[1:]:
+        if not re.search(r"\bssid private_ssid\s", block) or not re.search(r"\btype AP\s", block):
+            continue
+        address = re.search(r"\baddr ([0-9a-f:]{17})", block)
+        operating = re.search(r"\((\d+) MHz\), width: (\d+) MHz", block)
+        if address is None or operating is None:
+            raise RuntimeError("private AP has no complete operating channel")
+        frequency, width = map(int, operating.groups())
+        if frequency == 2484:
+            channel = 14
+        elif 2412 <= frequency <= 2472 and (frequency - 2407) % 5 == 0:
+            channel = (frequency - 2407) // 5
+        elif 5000 < frequency <= 5895 and frequency % 5 == 0:
+            channel = (frequency - 5000) // 5
+        elif 5955 <= frequency <= 7115 and (frequency - 5950) % 5 == 0:
+            channel = (frequency - 5950) // 5
+        else:
+            raise RuntimeError("unsupported private AP frequency")
+        result[block.splitlines()[0].strip()] = {"frequency": frequency, "channel": channel,
+                                                 "width": width, "bssid": address[1]}
+    return result
+
+
 def private_radio(text):
     selected = None
     for block in re.split(r"\bInterface ", text)[1:]:

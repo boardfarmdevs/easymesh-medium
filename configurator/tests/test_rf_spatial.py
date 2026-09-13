@@ -3,10 +3,32 @@ import json
 import unittest
 from unittest.mock import patch
 
-from wmdcfg.rf_spatial import compare_trials, diagnostic_sample, fixture_links, private_radio, registered_radio, roam_client
+from wmdcfg.rf_spatial import compare_trials, diagnostic_sample, fixture_links, private_channels, private_radio, registered_radio, roam_client
 
 
 class SpatialQualificationTests(unittest.TestCase):
+    def test_private_channel_snapshot_uses_frequency_not_old_iw_channel_labels(self):
+        text = """Interface wifi2
+    addr 02:00:00:00:02:00
+    ssid private_ssid
+    type AP
+    channel 227 (6135 MHz), width: 20 MHz, center1: 6135 MHz
+Interface wifi1
+    addr 02:00:00:00:01:00
+    ssid private_ssid
+    type AP
+    channel 36 (5180 MHz), width: 20 MHz, center1: 5180 MHz
+"""
+        radios = private_channels(text)
+        self.assertEqual(radios['wifi2'], {'frequency': 6135, 'channel': 37, 'width': 20,
+                                           'bssid': '02:00:00:00:02:00'})
+        self.assertEqual(radios['wifi1']['channel'], 36)
+        self.assertEqual(private_channels(text.replace('private_ssid', 'mesh_backhaul')), {})
+        with self.assertRaisesRegex(RuntimeError, 'complete operating channel'):
+            private_channels(text.replace('6135 MHz), width: 20 MHz', '6135 MHz)'))
+        with self.assertRaisesRegex(RuntimeError, 'unsupported private AP frequency'):
+            private_channels(text.replace('6135 MHz', '9999 MHz'))
+
     def test_diagnostics_read_native_rates_and_keep_console_capture_identity(self):
         snapshot = {"captured_at": "2026-09-12T00:00:00Z", "daemon": {"instance_id": "native", "generation": 3},
                     "packet_metrics": {"summary": {"queue_depth": 5}}, "radio_frequencies": []}

@@ -645,12 +645,12 @@
     return body;
   }
   function applyInteractionSnapshot(snapshot) {
+    if (snapshot.playback && !applyPlaybackUpdate(snapshot)) return;
     interaction.backhaulPolicy = snapshot.backhaul_policy;
     interaction.apiEnabled = !!snapshot.enabled;
     interaction.presenceRoles = (snapshot.presence_roles || []).slice();
     interaction.movableRoles = (snapshot.movable_roles || []).slice();
-    interaction.revision = Number(snapshot.revision || 0);
-    if (snapshot.playback) applyPlaybackSnapshot(snapshot.playback);
+    interaction.revision = Math.max(interaction.revision, Number(snapshot.revision || 0));
     if (interactiveLiveMode && snapshot.world_switch_enabled) {
       $('#worldSwitch').hidden = false;
       setWorldControlsBusy(applyingWorld);
@@ -664,7 +664,7 @@
       interaction.initialRoles = JSON.parse(JSON.stringify(snapshot.roles || {}));
     }
     if (interactiveLiveMode) {
-      for (const [role, state] of Object.entries(snapshot.roles || {})) {
+      for (const [role, state] of Object.entries(snapshot.playback ? {} : snapshot.roles || {})) {
         if (!canControlRole(role)) continue;
         interaction.overrides[role] = {
           position: state.position.slice(), present: !!state.present,
@@ -1281,6 +1281,7 @@
   const frameTimings = new URLSearchParams(location.search).get('profile') === '1' ? [] : null;
   let receivedNetworkFrame = null;
   let updatedNetworkFrame = null;
+  let frameObserver = null;
   function update() {
     renderStats.requests++;
     if (updateQueued) return;
@@ -1300,6 +1301,8 @@
   function renderScene() {
     if (!world3d) return;
     renderer.render(scene, camera);
+    if (frameObserver) frameObserver({renderer, nodes: world3d.nodes, actual: world3d.actual,
+      network: networkState, frame: updatedNetworkFrame, clock: liveClock});
     sceneRenderDirty = false;
     if (frameTimings && updatedNetworkFrame && updatedNetworkFrame !== renderStats.lastNetworkFrame) {
       renderStats.lastNetworkFrame = updatedNetworkFrame;
@@ -1338,9 +1341,7 @@
         setSpriteLabel(n.tag, meshNode && meshNode.name
           ? meshNode.name : displayRole(role), '#' + new THREE.Color(n.color).getHexString());
       } else if (observed) {
-        const suffix = observed.sta_mac.split(':')[4];
-        const label = (observed.cohort === 'iot' ? 'iot-' : 'sta-') + suffix;
-        setSpriteLabel(n.tag, label, observed.cohort === 'iot' ? '#256f3f' : '#225ca8');
+        setSpriteLabel(n.tag, displayRole(role), observed.cohort === 'iot' ? '#256f3f' : '#225ca8');
       }
       n.tag.visible = true;
       n.tag.material.opacity = present ? 1 : 0.4;
@@ -1499,6 +1500,7 @@
     if (role === 'gateway') return 'Agent-1';
     if (role.startsWith('extender_')) return 'Extender-' + role.slice(9);
     const observed = observedClient(role);
+    if (observed && observed.display_name) return observed.display_name;
     if (observed && observed.sta_mac) {
       const suffix = observed.sta_mac.split(':')[4];
       return (observed.cohort === 'iot' ? 'iot-' : 'sta-') + suffix;
@@ -1940,7 +1942,7 @@
         const controllerName = hero.connected_device_name && hero.connected_device_name !== servingName
           ? ' <span class="sub">(controller label ' + esc(hero.connected_device_name) + ')</span>' : '';
         $('#heroMetrics').innerHTML =
-          '<div class="hero-name">' + (hero.cohort === 'iot' ? 'iot-' : 'sta-') + esc(hero.sta_mac.split(':')[4]) +
+          '<div class="hero-name">' + esc(displayRole(hero.role)) +
           ' <span class="phase">traffic probe · ' + esc(hero.band) + ' GHz</span></div>' +
           '<div class="hero-line">' + esc(servingName) + controllerName + ' · ' + esc(hero.connected_bssid) + '</div>' +
           '<div class="metric-grid"><span>Signal</span><b>' + (hero.rssi_dbm == null ? 'N/A' : esc(hero.rssi_dbm) + ' dBm / RCPI ' + esc(hero.rcpi)) + '</b>' +
@@ -2160,6 +2162,7 @@
   function loadWorld(w) {
     if (replayMode && replayDurationMs) w = Object.assign({}, w, {duration_ms: replayDurationMs});
     world = w; tMs = 0; selected = null; playing = false; $('#play').textContent = 'Play';
+    interaction.playbackRevision = -1;
     showPlaybackCheckpoint(null);
     for (const role of Object.keys(interaction.overrides)) delete interaction.overrides[role];
     for (const role of Object.keys(interaction.previewPositions)) delete interaction.previewPositions[role];
@@ -2290,6 +2293,31 @@
       $('#play').title = 'Play scripted positions and presence in the live lab at 1×; drag a device to keep it under manual control. Pause to let the optimizer converge.';
     }
   }
+  function applyPlaybackUpdate(payload) {
+    const revision = Number(payload.revision);
+    const previousRevision = interaction.playbackRevision ?? -1;
+    if (!payload.playback || !Number.isSafeInteger(revision) || revision < 0 ||
+        revision < previousRevision || revision === previousRevision &&
+        Number(payload.playback.time_ms) < Number(livePlayback && livePlayback.time_ms || 0)) return false;
+    interaction.playbackRevision = revision;
+    interaction.revision = Math.max(interaction.revision, revision);
+    for (const [role, value] of Object.entries(payload.roles || {})) {
+      if (!world.roles[role]) continue;
+      const dragging = interaction.leaseToken && interaction.drag && interaction.drag.role === role;
+      const prior = interaction.overrides[role] || {};
+      interaction.overrides[role] = {
+        position: dragging && prior.position ? prior.position : value.position.slice(),
+        present: !!value.present,
+      };
+      const preview = interaction.previewPositions[role];
+      if (!interaction.drag && preview &&
+          Math.hypot(preview[0] - value.position[0], preview[1] - value.position[1]) < 0.001) {
+        delete interaction.previewPositions[role];
+      }
+    }
+    applyPlaybackSnapshot(payload.playback);
+    return true;
+  }
   async function togglePlay() {
     if (!world || playbackBusy) return;
     if (liveMode) {
@@ -2301,7 +2329,7 @@
         const result = await sendControl('/api/demo/playback', 'POST', {
           action: livePlayback.status === 'playing' ? 'pause' : 'play',
         });
-        if (result) applyPlaybackSnapshot(result.playback);
+        if (result) applyPlaybackUpdate(result);
       } finally {
         playbackBusy = false;
         applyPlaybackSnapshot(livePlayback);
@@ -2641,6 +2669,7 @@
       const payload = event.payload;
       loadWorld(payload.world);
       livePlayback = null;
+      interaction.playbackRevision = Number(payload.revision || 0);
       selectCurrentLiveWorld();
       worldSwitchError = false;
       networkState = optimizerState = trafficState = healthState = null;
@@ -2653,17 +2682,7 @@
         expected_online_clients: payload.expected_online_clients});
       if (interactiveLiveMode && !applyingWorld) $('#worldSwitchStatus').textContent += ' Waiting for controller convergence.';
     } else if (event.kind.startsWith('interaction.playback.')) {
-      interaction.revision = Math.max(interaction.revision, Number(event.payload.revision || 0));
-      for (const [role, value] of Object.entries(event.payload.roles || {})) {
-        if (!world.roles[role]) continue;
-        const dragging = interaction.leaseToken && interaction.drag && interaction.drag.role === role;
-        const prior = interaction.overrides[role] || {};
-        interaction.overrides[role] = {
-          position: dragging && prior.position ? prior.position : value.position.slice(),
-          present: !!value.present,
-        };
-      }
-      applyPlaybackSnapshot(event.payload.playback);
+      applyPlaybackUpdate(event.payload);
     } else if (event.kind === 'network.snapshot') {
       networkState = event.payload;
       if (frameTimings) receivedNetworkFrame = {sequence: event.sequence, received_at: performance.now(),
@@ -2915,6 +2934,7 @@
   window.__scene = scene; window.__viewer = {
     renderStats,
     frameTimings,
+    observeFrames: frameTimings ? (observer) => { frameObserver = observer; } : null,
     loadWorld, update, frameAt: (t) => frameAt(t),
     bestServing: (g) => bestServing(g),
     setTime: (t) => { tMs = t; update(); },
