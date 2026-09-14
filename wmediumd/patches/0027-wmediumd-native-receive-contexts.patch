@@ -1,0 +1,185 @@
+Subject: [PATCH] wmediumd: consume native receive-channel context snapshots
+
+Use bounded kernel-origin radio contexts rather than the last transmitted
+frequency when available. Passive scans do not transmit probe requests.
+Keep TX-learned VIF ownership and legacy-kernel behavior separate. Reject
+malformed and stale updates; an empty context disables all reception.
+
+Upstream-Status: Inappropriate [experimental paired laboratory protocol]
+
+--- a/wmediumd/wmediumd.h
++++ b/wmediumd/wmediumd.h
+@@ -105,10 +105,14 @@
+ 	HWSIM_ATTR_FREQ,
+ 	HWSIM_ATTR_PAD,
+ 	HWSIM_ATTR_TX_INFO_FLAGS,
++	HWSIM_ATTR_RX_CONTEXT = 255,
+ 	__HWSIM_ATTR_MAX,
+ };
+ #define HWSIM_ATTR_MAX (__HWSIM_ATTR_MAX - 1)
+ 
++#define HWSIM_CMD_REPORT_RX_CONTEXT 128
++#define HWSIM_RX_FREQUENCIES 10
++
+ #define VERSION_NR 1
+ 
+ #define SNR_DEFAULT 30
+@@ -126,6 +130,12 @@
+ typedef uint32_t u32;
+ typedef uint64_t u64;
+ 
++struct hwsim_rx_context_report {
++	u64 sequence;
++	u32 version, count;
++	u32 frequencies[HWSIM_RX_FREQUENCIES];
++};
++
+ #define TIME_FMT "%lld.%06lld"
+ #define TIME_ARGS(a) ((unsigned long long)(a)->tv_sec), ((unsigned long long)(a)->tv_nsec/1000)
+ 
+@@ -163,6 +173,9 @@
+ 	struct client *client;
+ 	unsigned int n_addrs;
+ 	struct addr *addrs;
++	uint64_t rx_context_sequence;
++	unsigned int rx_frequency_count;
++	u32 rx_frequencies[HWSIM_RX_FREQUENCIES];
+ };
+ 
+ enum client_type {
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -473,10 +473,43 @@
+  * any frequency learned for the receiving radio, not blindly clone every
+  * beacon to every hwsim radio.  Unknown radios first transmit while scanning;
+  * that frame teaches their active frequency before a response is delivered. */
++static bool mc_receive_context(struct station *station, const void *payload, size_t length)
++{
++	struct hwsim_rx_context_report report;
++	uint64_t sequence;
++	unsigned int count, index;
++	if (length != sizeof(report))
++		return false;
++	memcpy(&report, payload, sizeof(report));
++	sequence = be64toh(report.sequence);
++	count = be32toh(report.count);
++	if (be32toh(report.version) != 1 || !sequence || count > HWSIM_RX_FREQUENCIES)
++		return false;
++	for (index = 0; index < count; index++) {
++		u32 frequency = be32toh(report.frequencies[index]);
++		if (frequency < 2000 || frequency > 7500)
++			return false;
++	}
++	if (sequence <= station->rx_context_sequence)
++		return true;
++	for (index = 0; index < count; index++)
++		station->rx_frequencies[index] = be32toh(report.frequencies[index]);
++	station->rx_frequency_count = count;
++	station->rx_context_sequence = sequence;
++	return true;
++}
++
+ static int mc_station_receives_freq(struct station *station, u32 freq)
+ {
+ 	size_t i;
+ 
++	if (station->rx_context_sequence) {
++		for (unsigned int index = 0; index < station->rx_frequency_count; index++)
++			if (station->rx_frequencies[index] == freq)
++				return 1;
++		return 0;
++	}
++
+ 	for (i = 0; i < mc_n_vifs; i++) {
+ 		if (!mc_vifs[i].freq_known || mc_vifs[i].owner != station)
+ 			continue;
+@@ -501,7 +534,9 @@
+ static enum ack_eligibility mc_receiver_ack_eligibility(struct wmediumd *ctx, const u8 *dest, u32 tx_freq)
+ {
+ 	u32 dfreq;
+-	(void)ctx;
++	struct station *station = get_station_by_used_addr(ctx, (u8 *)dest);
++	if (station && station->rx_context_sequence)
++		return mc_station_receives_freq(station, tx_freq) ? ACK_ELIGIBLE : ACK_OFFCHANNEL;
+ 	if (!mc_lookup_owned_vif(dest, &dfreq)) return ACK_FREQ_UNKNOWN;
+ 	if (dfreq != tx_freq) return ACK_OFFCHANNEL;
+ 	return ACK_ELIGIBLE;
+@@ -1359,6 +1394,7 @@
+ 	struct nlattr *attrs[HWSIM_ATTR_MAX+1];
+ 	/* netlink header */
+ 	struct nlmsghdr *nlh = nlmsg_hdr(msg);
++	struct sockaddr_nl *origin = nlmsg_get_src(msg);
+ 	/* generic netlink header*/
+ 	struct genlmsghdr *gnlh = nlmsg_data(nlh);
+ 
+@@ -1369,7 +1405,19 @@
+ 	void *new;
+ 	unsigned int i;
+ 
+-	genlmsg_parse(nlh, 0, attrs, HWSIM_ATTR_MAX, NULL);
++	if (genlmsg_parse(nlh, 0, attrs, HWSIM_ATTR_MAX, NULL))
++		return;
++	if (client == &ctx->nl_client && origin && origin->nl_pid == 0 && nlh->nlmsg_pid == 0 &&
++	    (gnlh->cmd == HWSIM_CMD_REPORT_RX_CONTEXT || gnlh->cmd == HWSIM_CMD_FRAME) &&
++	    attrs[HWSIM_ATTR_RX_CONTEXT] && attrs[HWSIM_ATTR_ADDR_TRANSMITTER] &&
++	    nla_len(attrs[HWSIM_ATTR_ADDR_TRANSMITTER]) == ETH_ALEN) {
++		sender = get_station_by_addr(ctx, nla_data(attrs[HWSIM_ATTR_ADDR_TRANSMITTER]));
++		if (sender && mc_receive_context(sender, nla_data(attrs[HWSIM_ATTR_RX_CONTEXT]),
++						nla_len(attrs[HWSIM_ATTR_RX_CONTEXT])) && !sender->client) {
++			sender->client = client;
++			memcpy(sender->hwaddr, sender->addr, ETH_ALEN);
++		}
++	}
+ 
+ 	switch (gnlh->cmd) {
+ 	case HWSIM_CMD_FRAME:
+@@ -2091,6 +2139,41 @@
+ 	return failures;
+ }
+ 
++static int receive_context_selftest(void)
++{
++	struct station station = {};
++	struct hwsim_rx_context_report report = {
++		.sequence = htobe64(1), .version = htobe32(1), .count = htobe32(2),
++		.frequencies = {htobe32(2437), htobe32(5180)},
++	};
++	int failures = 0;
++	failures += !mc_receive_context(&station, &report, sizeof(report));
++	failures += !mc_station_receives_freq(&station, 2437) || !mc_station_receives_freq(&station, 5180);
++	failures += mc_station_receives_freq(&station, 5975);
++	report.sequence = htobe64(2);
++	report.count = htobe32(1);
++	failures += !mc_receive_context(&station, &report, sizeof(report));
++	failures += mc_station_receives_freq(&station, 5180);
++	report.sequence = htobe64(1);
++	report.count = htobe32(2);
++	failures += !mc_receive_context(&station, &report, sizeof(report));
++	failures += station.rx_frequency_count != 1;
++	report.sequence = htobe64(3);
++	report.count = htobe32(HWSIM_RX_FREQUENCIES + 1);
++	failures += mc_receive_context(&station, &report, sizeof(report));
++	failures += mc_receive_context(&station, &report, sizeof(report) - 1);
++	report.count = htobe32(1);
++	report.frequencies[0] = htobe32(9999);
++	failures += mc_receive_context(&station, &report, sizeof(report));
++	failures += station.rx_context_sequence != 2 || !mc_station_receives_freq(&station, 2437);
++	report.count = 0;
++	failures += !mc_receive_context(&station, &report, sizeof(report));
++	failures += mc_station_receives_freq(&station, 2437);
++	printf("%s native receive contexts: passive scan channels, stop, ordering, malformed reports and channel isolation\n",
++		failures ? "FAIL" : "PASS");
++	return failures;
++}
++
+ static int wmd_selftest(void)
+ {
+ 	int fails = 0, i, j;
+@@ -2102,6 +2185,7 @@
+ 	fails += spatial_queue_selftest();
+ 	fails += spatial_gap_selftest();
+ 	fails += scheduler_deadline_selftest();
++	fails += receive_context_selftest();
+ 
+ 	/* ---------- WMD3: frequency-scoped interference ---------- */
+ 	t.num_stas = 4;

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import copy
 import json
 from pathlib import Path
 import re
@@ -244,6 +245,9 @@ def compile_world(layout: dict[str, Any], mobility: dict[str, Any]) -> dict[str,
     pauses = playback_pause_points(mobility)
     if pauses:
         result["pause_at_ms"] = list(pauses)
+    for key in ("band_steering", "band_steering_expectations"):
+        if key in mobility:
+            result[key] = copy.deepcopy(mobility[key])
     result["golden_sha256"] = _hash(result)
     # Keep the serialized artifact byte-stable across jq/Python versions.
     # Some serializers preserve an exact float as ``5.0`` while others emit

@@ -1,0 +1,30 @@
+Subject: [PATCH] wifi: cfg80211: scope netlink owner release to the radio namespace
+
+Netlink port IDs are only unique within a network namespace. Releasing a
+GENERIC socket in another namespace must not destroy owned interfaces,
+disconnect stations or unregister management subscriptions on this radio.
+
+diff --git a/net/wireless/nl80211.c b/net/wireless/nl80211.c
+--- a/net/wireless/nl80211.c
++++ b/net/wireless/nl80211.c
+@@ -21620,6 +21620,9 @@ static int nl80211_netlink_notify(struct notifier_block * nb,
+ 	list_for_each_entry_rcu(rdev, &cfg80211_rdev_list, list) {
+ 		struct cfg80211_sched_scan_request *sched_scan_req;
+ 
++		if (!net_eq(wiphy_net(&rdev->wiphy), notify->net))
++			continue;
++
+ 		list_for_each_entry_rcu(sched_scan_req,
+ 					&rdev->sched_scan_req_list,
+ 					list) {
+diff --git a/net/wireless/core.c b/net/wireless/core.c
+--- a/net/wireless/core.c
++++ b/net/wireless/core.c
+@@ -40,6 +40,7 @@
+ MODULE_AUTHOR("Johannes Berg");
+ MODULE_LICENSE("GPL");
+ MODULE_DESCRIPTION("wireless configuration support");
++MODULE_VERSION("lab-netns-owner-1");
+ MODULE_ALIAS_GENL_FAMILY(NL80211_GENL_NAME);
+ 
+ /* RCU-protected (and RTNL for writers) */

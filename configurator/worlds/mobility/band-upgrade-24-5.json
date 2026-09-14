@@ -1,0 +1,135 @@
+{
+  "schema": "wmdcfg.mobility.v1",
+  "name": "band-upgrade-24-5",
+  "tags": [
+    "band-steering",
+    "quick-demo",
+    "upgrade-fallback",
+    "pinned-iot"
+  ],
+  "duration_ms": 30000,
+  "tick_ms": 1000,
+  "seed": 1913,
+  "pause_at_ms": [
+    12000
+  ],
+  "band_steering": {
+    "sta_static_01": {
+      "allowed_bands": [
+        "2.4",
+        "5"
+      ],
+      "initial_band": "2.4"
+    },
+    "sta_static_02": {
+      "allowed_bands": [
+        "2.4"
+      ],
+      "initial_band": "2.4"
+    }
+  },
+  "band_steering_expectations": [
+    {
+      "time_ms": 0,
+      "roles": {
+        "sta_static_01": {
+          "band": "5",
+          "ap": "gateway"
+        },
+        "sta_static_02": {
+          "band": "2.4",
+          "ap": "gateway"
+        }
+      }
+    },
+    {
+      "time_ms": 12000,
+      "roles": {
+        "sta_static_01": {
+          "band": "2.4",
+          "ap": "gateway"
+        },
+        "sta_static_02": {
+          "band": "2.4",
+          "ap": "gateway"
+        }
+      }
+    },
+    {
+      "time_ms": 30000,
+      "roles": {
+        "sta_static_01": {
+          "band": "5",
+          "ap": "gateway"
+        },
+        "sta_static_02": {
+          "band": "2.4",
+          "ap": "gateway"
+        }
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "role": "sta_static_01",
+      "path": [
+        {
+          "time_ms": 0,
+          "position": [
+            8.5,
+            12
+          ]
+        },
+        {
+          "time_ms": 2000,
+          "position": [
+            8.5,
+            12
+          ]
+        },
+        {
+          "time_ms": 10000,
+          "position": [
+            16,
+            12
+          ]
+        },
+        {
+          "time_ms": 14000,
+          "position": [
+            16,
+            12
+          ]
+        },
+        {
+          "time_ms": 16000,
+          "position": [
+            16.1,
+            12
+          ]
+        },
+        {
+          "time_ms": 18000,
+          "position": [
+            15.9,
+            12
+          ]
+        },
+        {
+          "time_ms": 20000,
+          "position": [
+            16,
+            12
+          ]
+        },
+        {
+          "time_ms": 28000,
+          "position": [
+            8.5,
+            12
+          ]
+        }
+      ]
+    }
+  ]
+}

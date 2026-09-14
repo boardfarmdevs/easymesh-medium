@@ -6,12 +6,20 @@
 See [operation, supported profile and acceptance](#124-implemented-phases-12-survey-and-native-bss-load).
 The supported model remains legacy-rate, 20 MHz. The Phase 3 visibility profile
 is opt-in and conservative, not calibrated physical capacity or full DCF.
-This shared RDK/prpl assessment targets `codex/0908-clean`. Keep both repository
-copies synchronized, not separate backlogs.
+The measurements originated on `codex/0908-clean`; the shared assessment is
+maintained on `codex/0913-clean`. Keep both copies synchronized, not separate backlogs.
 
 Evidence extends through 2026-09-11 Pacific / 2026-09-12 UTC. Phases 1–2 deploy
 the module, daemon and native providers, testing fixed fields, traffic, retunes,
 failure and recovery. No soak or physical-capacity qualification was run.
+
+For subsequent client cross-band work, see [band steering and dedicated-room
+qualification](../optimizer/band-steering.md): capability-aware passive scans,
+native receive-channel reporting, and independent signal/load telemetry. Its
+room results do not replace the RF-capacity qualification limits in this assessment.
+
+0913 requires [namespace-safe cfg80211 socket cleanup](../../../../gen/hwsim/cfg80211/README.md).
+Its live regression passes on both labs; room convergence remains a separate gate.
 
 ## Navigation
 

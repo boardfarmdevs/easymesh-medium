@@ -1,5 +1,9 @@
 # hwsim module build
 
+The builder also installs the required namespace-safe `cfg80211.ko` companion.
+See [socket ownership isolation](cfg80211/README.md) for the source pin, VM
+restart requirement and bounded live regression test.
+
 `build-hwsim.sh` first requests the source matching the running Ubuntu kernel,
 falling back to the available HWE source when that version is no longer indexed.
 It applies the lab patches and builds an out-of-tree `mac80211_hwsim.ko` against

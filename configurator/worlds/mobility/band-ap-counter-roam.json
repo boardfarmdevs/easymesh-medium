@@ -1,0 +1,191 @@
+{
+  "schema": "wmdcfg.mobility.v1",
+  "name": "band-ap-counter-roam",
+  "tags": [
+    "band-steering",
+    "quick-demo",
+    "opposite-direction",
+    "ap-and-band"
+  ],
+  "duration_ms": 40000,
+  "tick_ms": 1000,
+  "seed": 1914,
+  "pause_at_ms": [
+    16000,
+    30000
+  ],
+  "band_steering": {
+    "sta_static_01": {
+      "allowed_bands": [
+        "2.4",
+        "5"
+      ],
+      "initial_band": "2.4"
+    },
+    "sta_static_03": {
+      "allowed_bands": [
+        "2.4",
+        "5"
+      ],
+      "initial_band": "2.4"
+    },
+    "sta_static_02": {
+      "allowed_bands": [
+        "2.4"
+      ],
+      "initial_band": "2.4"
+    }
+  },
+  "band_steering_expectations": [
+    {
+      "time_ms": 0,
+      "roles": {
+        "sta_static_01": {
+          "band": "5",
+          "ap": "gateway"
+        },
+        "sta_static_03": {
+          "band": "5",
+          "ap": "extender_1"
+        },
+        "sta_static_02": {
+          "band": "2.4",
+          "ap": "gateway"
+        }
+      }
+    },
+    {
+      "time_ms": 16000,
+      "roles": {
+        "sta_static_01": {
+          "band": "2.4",
+          "ap": "extender_1"
+        },
+        "sta_static_03": {
+          "band": "2.4",
+          "ap": "gateway"
+        },
+        "sta_static_02": {
+          "band": "2.4",
+          "ap": "gateway"
+        }
+      }
+    },
+    {
+      "time_ms": 30000,
+      "roles": {
+        "sta_static_01": {
+          "band": "5",
+          "ap": "extender_1"
+        },
+        "sta_static_03": {
+          "band": "5",
+          "ap": "gateway"
+        },
+        "sta_static_02": {
+          "band": "2.4",
+          "ap": "gateway"
+        }
+      }
+    },
+    {
+      "time_ms": 40000,
+      "roles": {
+        "sta_static_01": {
+          "band": "5",
+          "ap": "extender_1"
+        },
+        "sta_static_03": {
+          "band": "5",
+          "ap": "gateway"
+        },
+        "sta_static_02": {
+          "band": "2.4",
+          "ap": "gateway"
+        }
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "role": "sta_static_01",
+      "path": [
+        {
+          "time_ms": 0,
+          "position": [
+            8.5,
+            12
+          ]
+        },
+        {
+          "time_ms": 2000,
+          "position": [
+            8.5,
+            12
+          ]
+        },
+        {
+          "time_ms": 14000,
+          "position": [
+            27,
+            4
+          ]
+        },
+        {
+          "time_ms": 18000,
+          "position": [
+            27,
+            4
+          ]
+        },
+        {
+          "time_ms": 28000,
+          "position": [
+            35.5,
+            4
+          ]
+        }
+      ]
+    },
+    {
+      "role": "sta_static_03",
+      "path": [
+        {
+          "time_ms": 0,
+          "position": [
+            35.5,
+            4
+          ]
+        },
+        {
+          "time_ms": 2000,
+          "position": [
+            35.5,
+            4
+          ]
+        },
+        {
+          "time_ms": 14000,
+          "position": [
+            16,
+            12
+          ]
+        },
+        {
+          "time_ms": 18000,
+          "position": [
+            16,
+            12
+          ]
+        },
+        {
+          "time_ms": 28000,
+          "position": [
+            8.5,
+            12
+          ]
+        }
+      ]
+    }
+  ]
+}

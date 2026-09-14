@@ -317,12 +317,14 @@
 
   // ---- configuration -------------------------------------------------------
   const GOLDEN = [
+    'fifty-client-counter-roam',
     'home-a-stationary', 'home-a-slow-walk-ten', 'home-b-slow-walk-ten',
     'home-a-border-hover', 'home-a-fast-transit', 'home-a-disappear-reappear',
     'home-a-extender-loss-recovery', 'home-a-flash-crowd', 'home-a-asymmetric-link',
     'home-a-band-walk-small', 'home-a-private-client-room-walk',
     'home-a-one-client-handover', 'large-room-perimeter-counter-roam',
     'large-room-extender-evacuation',
+    'band-upgrade-24-5', 'band-upgrade-5-6', 'band-ap-counter-roam',
   ];
   const GOLDEN_DIR = '../golden/';
   const AP_H = 2.2, STA_H = 0.9, WALL_H = 2.6;
@@ -406,6 +408,30 @@
 
   // Orbit camera: spherical coords around a target. World y is up; plan x -> x, plan y -> -z.
   const orbit = { target: new THREE.Vector3(10, 0, -7), r: 30, theta: -0.9, phi: 0.95 };
+  let autoFitCamera = true, fittedRoomRadius = 30;
+  function roomCameraRadius(size, aspect, fieldOfView, theta, phi) {
+    const vertical = Math.tan(fieldOfView * Math.PI / 360) / 1.08;
+    const horizontal = vertical * Math.max(0.1, aspect);
+    const markerHeight = 3.5 * Math.max(1, Math.min(2, Math.max(size.width, size.height) / 20));
+    let radius = 6;
+    for (const offsetX of [-size.width / 2, size.width / 2]) {
+      for (const offsetZ of [-size.height / 2, size.height / 2]) {
+        for (const offsetY of [0, markerHeight]) {
+          const right = offsetX * Math.cos(theta) - offsetZ * Math.sin(theta);
+          const up = -offsetX * Math.cos(phi) * Math.sin(theta) + offsetY * Math.sin(phi) - offsetZ * Math.cos(phi) * Math.cos(theta);
+          const depth = offsetX * Math.sin(phi) * Math.sin(theta) + offsetY * Math.cos(phi) + offsetZ * Math.sin(phi) * Math.cos(theta);
+          radius = Math.max(radius, depth + Math.abs(right) / horizontal, depth + Math.abs(up) / vertical);
+        }
+      }
+    }
+    return radius;
+  }
+  function fitWorldCamera() {
+    if (!world || !autoFitCamera) return;
+    fittedRoomRadius = roomCameraRadius(interactionModel.roomSize(world), camera.aspect, camera.fov, orbit.theta, orbit.phi);
+    orbit.r = fittedRoomRadius;
+    placeCamera();
+  }
   function placeCamera() {
     const { target, r, theta, phi } = orbit;
     camera.position.set(
@@ -413,6 +439,8 @@
       target.y + r * Math.cos(phi),
       target.z + r * Math.sin(phi) * Math.cos(theta));
     camera.lookAt(target);
+    camera.far = Math.max(500, r * 4);
+    camera.updateProjectionMatrix();
     sceneRenderDirty = true;
   }
   (function bindOrbit() {
@@ -473,6 +501,7 @@
         return;
       }
       if (!drag) return;
+      autoFitCamera = false;
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
       if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
       if (drag.pan) {
@@ -510,7 +539,7 @@
       main.classList.remove('dragging');
       update();
     });
-    el.addEventListener('wheel', (e) => { e.preventDefault(); orbit.r = Math.min(90, Math.max(6, orbit.r * (1 + e.deltaY * 0.0012))); placeCamera(); }, { passive: false });
+    el.addEventListener('wheel', (e) => { e.preventDefault(); autoFitCamera = false; orbit.r = Math.min(Math.max(90, fittedRoomRadius * 3), Math.max(6, orbit.r * (1 + e.deltaY * 0.0012))); placeCamera(); }, { passive: false });
     el.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       const role = pickedRole(e);
@@ -526,6 +555,7 @@
     const w = main.clientWidth, h = main.clientHeight;
     renderer.setSize(w, h, false);
     camera.aspect = w / h; camera.updateProjectionMatrix();
+    fitWorldCamera();
     sceneRenderDirty = true;
   }
   window.addEventListener('resize', resize);
@@ -1165,7 +1195,7 @@
 
     scene.add(root);
     world3d = { root, nodes, pickables, walls, links, actual, target, backhaul, backhaulOccluded, simulatedBackhaul, simulatedBackhaulOccluded, trails, preview, movePath, destination, W, H };
-    orbit.target.set(W / 2, 0, -H / 2); orbit.r = Math.max(W, H) * 1.5; placeCamera();
+    orbit.target.set(W / 2, 0, -H / 2); autoFitCamera = true; fitWorldCamera();
   }
 
   // ---- per-frame update ----------------------------------------------------
@@ -1803,7 +1833,7 @@
     const fresh = Number.isFinite(age) && age >= 0 && age <= 60 && status.status !== 'unavailable' &&
       (!progress || progress.kind === 'optimizer.progress');
     const healthy = fresh && (!healthState || healthState.healthy !== false);
-    const settled = ['candidate_gain_too_small', 'current_link_acceptable'].includes((status.decision || {}).reason);
+    const settled = ['candidate_gain_too_small', 'current_link_acceptable', 'no_safe_band_upgrade'].includes((status.decision || {}).reason);
     return {
       phase: !fresh ? 'unknown' : phase === 'stable' ? (healthy && settled ? 'healthy' : 'waiting') : phaseClass(phase),
       mode: !status.automatic_actuation ? '' : !fresh ? 'unknown' :
@@ -1819,6 +1849,11 @@
       steer_failure_backoff: 'Waiting before retrying a failed move',
       candidate_gain_too_small: 'No sufficiently stronger measured AP',
       current_link_acceptable: 'Current link meets policy',
+      no_safe_band_upgrade: 'Current band meets policy; no safe higher-band move',
+      band_preference_hold_satisfied: 'Preferred band confirmed; ready to steer',
+      band_waiting_for_new_scan: 'Confirming the preferred band with a new received scan',
+      band_measurement_direction_mismatch: 'Blocked: serving and candidate signal directions differ',
+      current_band_unknown: 'Blocked: current band is unknown',
       current_metric_missing: 'Blocked: current signal is missing',
       current_metric_freshness_unknown: 'Blocked: current signal age is unknown',
       current_metric_stale: 'Blocked: current signal is stale',
@@ -1884,9 +1919,11 @@
     } else if (healthState && healthState.healthy === false) {
       heading = 'Waiting for lab health recovery';
       detail = 'The latest health check is degraded; convergence is not confirmed.';
-    } else if (fleet.converged && freshEvaluation && fleet.roster_complete !== false && fleet.measurement_complete !== false) {
+    } else if (fleet.converged && freshEvaluation && fleet.roster_complete !== false && fleet.measurement_complete !== false && fleet.band_measurements_complete !== false) {
       heading = 'Converged: all clients checked';
-      detail = 'Last check: all clients were within ' + (Number(fleet.minimum_gain_rcpi || 1) / 2) + ' dB of their strongest measured AP. Monitoring continues.';
+      detail = fleet.policy === 'received-scan-band-preference-v1'
+        ? 'Last check: clients meet the AP and band policy, using fresh client-received scans for band comparisons. A preferred band can have a weaker signal. Monitoring continues.'
+        : 'Last check: all clients were within ' + (Number(fleet.minimum_gain_rcpi || 1) / 2) + ' dB of their strongest measured AP. Monitoring continues.';
     } else if (blocked.length) {
       heading = blocked.length + ' clients waiting or blocked';
       const counts = {};
@@ -1929,7 +1966,8 @@
       const shape = mesh.available ? (multihop ? 'multihop' : 'star') : 'waiting';
       $('#labMetrics').innerHTML =
         '<span>Mesh devices</span><b>' + esc(api.mesh_devices) + ' / 5</b>' +
-        '<span>Clients</span><b>' + esc(api.clients) + ' / 20</b>' +
+        '<span>Online clients</span><b>' + esc(api.clients) + ' / ' + esc(h.expected_online_clients ?? (world && world.counts && world.counts.stations)) + '</b>' +
+        '<span>Client capacity</span><b>' + esc(h.pool_clients ?? '—') + '</b>' +
         '<span>Private / IoT</span><b>' + esc(cohorts.private) + ' / ' + esc(cohorts.iot) + '</b>' +
         '<span>Actual topology</span><b>' + esc(shape) + ' · ' + esc(backhaulCount) + ' backhaul links</b>' +
         (mesh.backhaul_control ? '<span>Lab backhaul</span><b title="' + esc(mesh.backhaul_control.reason) + '">' +

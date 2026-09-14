@@ -1,0 +1,114 @@
+{
+  "schema": "wmdcfg.mobility.v1",
+  "name": "fifty-client-counter-roam",
+  "tags": [
+    "50-clients",
+    "quick-demo",
+    "counter-roam",
+    "unified-capacity"
+  ],
+  "duration_ms": 36000,
+  "tick_ms": 6000,
+  "seed": 191350,
+  "pause_at_ms": [
+    18000
+  ],
+  "nodes": [
+    {
+      "role": "sta_mobile_01",
+      "kind": "station",
+      "path": [
+        {
+          "time_ms": 0,
+          "position": [
+            5,
+            5
+          ]
+        },
+        {
+          "time_ms": 6000,
+          "position": [
+            5,
+            5
+          ]
+        },
+        {
+          "time_ms": 12000,
+          "position": [
+            35,
+            5
+          ]
+        },
+        {
+          "time_ms": 24000,
+          "position": [
+            35,
+            5
+          ]
+        },
+        {
+          "time_ms": 30000,
+          "position": [
+            5,
+            5
+          ]
+        },
+        {
+          "time_ms": 36000,
+          "position": [
+            5,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "role": "sta_pool_022",
+      "kind": "station",
+      "path": [
+        {
+          "time_ms": 0,
+          "position": [
+            35,
+            5
+          ]
+        },
+        {
+          "time_ms": 6000,
+          "position": [
+            35,
+            5
+          ]
+        },
+        {
+          "time_ms": 12000,
+          "position": [
+            5,
+            5
+          ]
+        },
+        {
+          "time_ms": 24000,
+          "position": [
+            5,
+            5
+          ]
+        },
+        {
+          "time_ms": 30000,
+          "position": [
+            35,
+            5
+          ]
+        },
+        {
+          "time_ms": 36000,
+          "position": [
+            35,
+            5
+          ]
+        }
+      ]
+    }
+  ]
+}

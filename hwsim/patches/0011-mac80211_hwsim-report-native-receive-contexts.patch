@@ -1,0 +1,172 @@
+Subject: [PATCH] hwsim: report native receive contexts during passive scans
+
+Report the actual home and temporary receive channels in a bounded versioned
+lab extension. Channel changes produce one-way notifications; transmitted
+frames carry the same snapshot to recover from missed notifications. Keep
+VIF ownership separate from radio receive eligibility. Linux 7.0 only.
+
+Upstream-Status: Inappropriate [experimental paired laboratory protocol]
+
+--- a/drivers/net/wireless/virtual/mac80211_hwsim.c
++++ b/drivers/net/wireless/virtual/mac80211_hwsim.c
+@@ -750,6 +750,20 @@
+ 
+ #define HWSIM_RF_CONTEXTS 8
+ 
++#define HWSIM_CMD_REPORT_RX_CONTEXT 128
++#define HWSIM_ATTR_RX_CONTEXT 255
++#define HWSIM_RX_FREQUENCIES (HWSIM_RF_CONTEXTS + 2)
++
++static bool rx_context_reports = true;
++module_param(rx_context_reports, bool, 0444);
++MODULE_PARM_DESC(rx_context_reports, "Report native receive channels, including passive scans, to the laboratory medium");
++
++struct hwsim_rx_context_report {
++	__be64 sequence;
++	__be32 version, count;
++	__be32 frequencies[HWSIM_RX_FREQUENCIES];
++};
++
+ static bool survey_cache;
+ module_param(survey_cache, bool, 0644);
+ MODULE_PARM_DESC(survey_cache, "Use the bounded userspace RF survey cache instead of dummy scan counters");
+@@ -815,6 +829,7 @@
+ 	struct mutex mutex;
+ 	spinlock_t rf_survey_lock;
+ 	u64 rf_epoch;
++	u64 rx_context_sequence;
+ 	struct hwsim_rf_context rf_contexts[HWSIM_RF_CONTEXTS];
+ 	enum ps_mode {
+ 		PS_DISABLED, PS_ENABLED, PS_AUTO_POLL, PS_MANUAL_POLL
+@@ -1345,6 +1360,8 @@
+ 			 hwsim_fops_rx_rssi_read, hwsim_fops_rx_rssi_write,
+ 			 "%lld\n");
+ 
++static void hwsim_notify_rx_context(struct ieee80211_hw *hw);
++
+ static void hwsim_rf_reset(struct mac80211_hwsim_data *data)
+ {
+ 	unsigned long flags;
+@@ -1355,6 +1372,7 @@
+ 		data->rf_contexts[slot].epoch = ++data->rf_epoch;
+ 	}
+ 	spin_unlock_irqrestore(&data->rf_survey_lock, flags);
++	hwsim_notify_rx_context(data->hw);
+ }
+ 
+ static void hwsim_rf_context_update(struct ieee80211_hw *hw,
+@@ -1398,6 +1416,7 @@
+ 		}
+ 	}
+ 	spin_unlock_irqrestore(&data->rf_survey_lock, flags);
++	hwsim_notify_rx_context(hw);
+ }
+ 
+ static bool hwsim_rf_available(struct mac80211_hwsim_data *data)
+@@ -2129,6 +2148,65 @@
+ 	nlmsg_free(skb);
+ }
+ 
++static int hwsim_rx_context_put(struct sk_buff *skb, struct ieee80211_hw *hw)
++{
++	struct mac80211_hwsim_data *data = hw->priv;
++	struct hwsim_rx_context_report report = {};
++	struct ieee80211_channel *temporary;
++	unsigned long flags;
++	unsigned int slot, count = 0;
++
++	spin_lock_irqsave(&data->rf_survey_lock, flags);
++	report.sequence = cpu_to_be64(++data->rx_context_sequence);
++	report.version = cpu_to_be32(1);
++	temporary = READ_ONCE(data->tmp_chan);
++	if (READ_ONCE(data->started) && (!READ_ONCE(data->idle) || temporary)) {
++		if (temporary)
++			report.frequencies[count++] = cpu_to_be32(temporary->center_freq);
++		if (!data->use_chanctx && data->channel && data->channel != temporary)
++			report.frequencies[count++] = cpu_to_be32(data->channel->center_freq);
++		for (slot = 0; data->use_chanctx && slot < HWSIM_RF_CONTEXTS; slot++) {
++			struct hwsim_rf_context *context = &data->rf_contexts[slot];
++			unsigned int previous;
++			if (!context->users || !context->channel)
++				continue;
++			for (previous = 0; previous < count; previous++)
++				if (be32_to_cpu(report.frequencies[previous]) == context->channel->center_freq)
++					break;
++			if (previous == count)
++				report.frequencies[count++] = cpu_to_be32(context->channel->center_freq);
++		}
++	}
++	report.count = cpu_to_be32(count);
++	spin_unlock_irqrestore(&data->rf_survey_lock, flags);
++	return nla_put(skb, HWSIM_ATTR_RX_CONTEXT, sizeof(report), &report);
++}
++
++static void hwsim_notify_rx_context(struct ieee80211_hw *hw)
++{
++	struct mac80211_hwsim_data *data = hw->priv;
++	u32 portid = READ_ONCE(data->wmediumd);
++	struct sk_buff *skb;
++	void *header;
++
++	if (!rx_context_reports || (!portid && !hwsim_virtio_enabled))
++		return;
++	skb = genlmsg_new(GENLMSG_DEFAULT_SIZE, GFP_ATOMIC);
++	if (!skb)
++		return;
++	header = genlmsg_put(skb, 0, 0, &hwsim_genl_family, 0, HWSIM_CMD_REPORT_RX_CONTEXT);
++	if (!header || nla_put(skb, HWSIM_ATTR_ADDR_TRANSMITTER, ETH_ALEN, data->addresses[1].addr) ||
++	    hwsim_rx_context_put(skb, hw)) {
++		nlmsg_free(skb);
++		return;
++	}
++	genlmsg_end(skb, header);
++	if (hwsim_virtio_enabled)
++		hwsim_tx_virtio(data, skb);
++	else
++		hwsim_unicast_netgroup(data, skb, portid);
++}
++
+ static inline u16 trans_tx_rate_flags_ieee2hwsim(struct ieee80211_tx_rate *rate)
+ {
+ 	u16 result = 0;
+@@ -2219,6 +2297,8 @@
+ 
+ 	if (nla_put_u32(skb, HWSIM_ATTR_FREQ, channel->center_freq))
+ 		goto nla_put_failure;
++	if (rx_context_reports && hwsim_rx_context_put(skb, hw))
++		goto nla_put_failure;
+ 
+ 	/* We get the tx control (rate and retries) info*/
+ 
+@@ -3316,6 +3396,7 @@
+ 	}
+ 	mutex_unlock(&data->mutex);
+ 
++	hwsim_notify_rx_context(hw);
+ 	for (idx = 0; idx < ARRAY_SIZE(data->link_data); idx++) {
+ 		struct mac80211_hwsim_link_data *link_data =
+ 			&data->link_data[idx];
+@@ -3809,6 +3890,7 @@
+ 		hwsim->hw_scan_request = NULL;
+ 		hwsim->hw_scan_vif = NULL;
+ 		hwsim->tmp_chan = NULL;
++		hwsim_notify_rx_context(hwsim->hw);
+ 		mutex_unlock(&hwsim->mutex);
+ 		mac80211_hwsim_config_mac_nl(hwsim->hw, hwsim->scan_addr,
+ 					     false);
+@@ -3819,6 +3901,7 @@
+ 		  req->channels[hwsim->scan_chan_idx]->center_freq);
+ 
+ 	hwsim->tmp_chan = req->channels[hwsim->scan_chan_idx];
++	hwsim_notify_rx_context(hwsim->hw);
+ 	if (hwsim->tmp_chan->flags & (IEEE80211_CHAN_NO_IR |
+ 				      IEEE80211_CHAN_RADAR) ||
+ 	    !req->n_ssids) {
+@@ -3921,6 +4004,7 @@
+ 	ieee80211_scan_completed(hwsim->hw, &info);
+ 	hwsim->tmp_chan = NULL;
+ 	hwsim->hw_scan_request = NULL;
++	hwsim_notify_rx_context(hw);
+ 	hwsim->hw_scan_vif = NULL;
+ 	mutex_unlock(&hwsim->mutex);
+ }

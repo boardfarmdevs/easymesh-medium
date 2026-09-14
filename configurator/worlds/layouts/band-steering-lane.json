@@ -1,0 +1,148 @@
+{
+  "schema": "wmdcfg.world-layout.v1",
+  "name": "band-steering-lane",
+  "tags": [
+    "band-steering",
+    "dedicated-qualification",
+    "clients-10"
+  ],
+  "space": {
+    "width_m": 50,
+    "height_m": 24
+  },
+  "propagation": {
+    "reference_distance_m": 1,
+    "reference_snr_db_by_band": {
+      "5": 50,
+      "6": 47,
+      "2.4": 54
+    },
+    "path_loss_exponent": 2.2,
+    "shadowing_stddev_db": 0,
+    "minimum_snr_db": -20,
+    "maximum_snr_db": 60
+  },
+  "walls": [],
+  "nodes": [
+    {
+      "role": "gateway",
+      "kind": "fronthaul_ap",
+      "position": [
+        8,
+        12
+      ]
+    },
+    {
+      "role": "extender_1",
+      "kind": "fronthaul_ap",
+      "position": [
+        35,
+        4
+      ]
+    },
+    {
+      "role": "extender_2",
+      "kind": "fronthaul_ap",
+      "position": [
+        45,
+        4
+      ]
+    },
+    {
+      "role": "extender_3",
+      "kind": "fronthaul_ap",
+      "position": [
+        35,
+        20
+      ]
+    },
+    {
+      "role": "extender_4",
+      "kind": "fronthaul_ap",
+      "position": [
+        45,
+        20
+      ]
+    },
+    {
+      "role": "sta_static_01",
+      "kind": "station",
+      "position": [
+        8.5,
+        12
+      ]
+    },
+    {
+      "role": "sta_static_02",
+      "kind": "station",
+      "position": [
+        8.5,
+        12.5
+      ]
+    },
+    {
+      "role": "sta_static_03",
+      "kind": "station",
+      "position": [
+        35.5,
+        4
+      ]
+    },
+    {
+      "role": "sta_static_04",
+      "kind": "station",
+      "position": [
+        44.5,
+        4
+      ]
+    },
+    {
+      "role": "sta_static_05",
+      "kind": "station",
+      "position": [
+        45,
+        4.5
+      ]
+    },
+    {
+      "role": "sta_static_06",
+      "kind": "station",
+      "position": [
+        35.5,
+        20
+      ]
+    },
+    {
+      "role": "sta_static_07",
+      "kind": "station",
+      "position": [
+        35,
+        20.5
+      ]
+    },
+    {
+      "role": "sta_static_08",
+      "kind": "station",
+      "position": [
+        45.5,
+        20
+      ]
+    },
+    {
+      "role": "sta_static_09",
+      "kind": "station",
+      "position": [
+        45,
+        20.5
+      ]
+    },
+    {
+      "role": "sta_static_10",
+      "kind": "station",
+      "position": [
+        8,
+        12.5
+      ]
+    }
+  ]
+}

@@ -1,0 +1,398 @@
+Subject: [PATCH] wmediumd: admit queued frames per transmitter frequency
+
+Reserve only the head of each transmitter/frequency FIFO, instead of allowing
+an entire sender backlog to reserve future medium time and precompute stale
+receive eligibility. Preserve kernel arrival order across access categories,
+independent frequency operation on multi-channel hwsim PHYs, packet rates,
+retry counts, contention windows, airtime accounting and directed visibility.
+Account pending frames from ingress, retain original client ownership and
+cancel active and pending jobs when their client disconnects.
+
+Self-tests cover a 32-frame backlog, bounded peer admission, same-PHY
+frequency independence, FIFO across categories, deferred receive eligibility,
+and removal of active/pending frames with mixed client ownership. Run those
+cases with both global contention and opt-in visibility reservations.
+
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -52,6 +52,7 @@
+ USFSTL_SCHEDULER(scheduler);
+ 
+ static void wmediumd_deliver_frame(struct usfstl_job *job);
++static void send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame);
+ 
+ enum {
+ 	HWSIM_VQ_TX,
+@@ -100,6 +101,7 @@
+ 
+ void station_init_queues(struct station *station)
+ {
++	INIT_LIST_HEAD(&station->radio_queues);
+ 	wqueue_init(&station->queues[IEEE80211_AC_BK], 15, 1023);
+ 	wqueue_init(&station->queues[IEEE80211_AC_BE], 15, 1023);
+ 	wqueue_init(&station->queues[IEEE80211_AC_VI], 7, 15);
+@@ -786,6 +788,7 @@
+ static void queue_frame(struct wmediumd *ctx, struct station *station,
+ 			struct frame *frame)
+ {
++	wmd_telemetry_frame_queued(ctx, frame);
+ 	struct ieee80211_hdr *hdr = (void *)frame->data;
+ 	u8 *dest = hdr->addr1;
+ 	uint64_t target;
+@@ -987,11 +990,12 @@
+ 	target += send_time;
+ 
+ 	frame->duration = send_time;
+-	frame->src = station->client;
++	if (!frame->radio_queue)
++		frame->src = station->client;
+ 	wmd_telemetry_record_tx(ctx, frame, deststa, ac, retries,
+ 		noack || !retries ? 0 : retries - 1, is_acked, noack,
+ 		mc_elig == ACK_OFFCHANNEL, snr, error_prob,
+-		target - scheduler.current_time);
++		target - frame->queued_at);
+ 
+ 	if (ctx->need_start_notify) {
+ 		frame->start_job.start = target - send_time;
+@@ -1010,6 +1014,52 @@
+ 	list_add_tail(&frame->list, &queue->frames);
+ }
+ 
++static void schedule_next_radio_frame(struct wmediumd *ctx, struct radio_queue *radio)
++{
++	struct frame *frame;
++	if (radio->active_frame)
++		return;
++	if (list_empty(&radio->pending_frames)) {
++		list_del(&radio->list);
++		free(radio);
++		return;
++	}
++	frame = list_first_entry(&radio->pending_frames, struct frame, list);
++	list_del(&frame->list);
++	radio->active_frame = frame;
++	queue_frame(ctx, frame->sender, frame);
++}
++
++static void enqueue_radio_frame(struct wmediumd *ctx, struct station *station,
++				struct frame *frame)
++{
++	struct radio_queue *radio;
++	frame->radio_queue = NULL;
++	frame->src = station->client;
++	list_for_each_entry(radio, &station->radio_queues, list) {
++		if (radio->frequency == frame->freq) {
++			frame->radio_queue = radio;
++			break;
++		}
++	}
++	if (!frame->radio_queue) {
++		radio = calloc(1, sizeof(*radio));
++		if (!radio) {
++			frame->flags &= ~HWSIM_TX_STAT_ACK;
++			send_tx_info_frame_nl(ctx, frame);
++			free(frame);
++			return;
++		}
++		radio->frequency = frame->freq;
++		INIT_LIST_HEAD(&radio->pending_frames);
++		list_add_tail(&radio->list, &station->radio_queues);
++		frame->radio_queue = radio;
++	}
++	wmd_telemetry_frame_queued(ctx, frame);
++	list_add_tail(&frame->list, &radio->pending_frames);
++	schedule_next_radio_frame(ctx, radio);
++}
++
+ static void wmediumd_send_to_client(struct wmediumd *ctx,
+ 				    struct client *client,
+ 				    struct nl_msg *msg)
+@@ -1045,6 +1095,7 @@
+ 	struct frame *frame, *tmp;
+ 	struct wqueue *queue;
+ 	struct station *station;
++	struct radio_queue *radio, *next_radio;
+ 	int ac;
+ 
+ 	list_for_each_entry(station, &ctx->stations, list) {
+@@ -1058,14 +1109,27 @@
+ 			list_for_each_entry_safe(frame, tmp, &queue->frames,
+ 						 list) {
+ 				if (frame->src == client) {
++					if (frame->radio_queue)
++						frame->radio_queue->active_frame = NULL;
+ 					rf_release_frame(frame);
+ 					list_del(&frame->list);
+ 					usfstl_sched_del_job(&frame->job);
++					usfstl_sched_del_job(&frame->start_job);
+ 					wmd_telemetry_frame_done(ctx);
+ 					free(frame);
+ 				}
+ 			}
+ 		}
++		list_for_each_entry_safe(radio, next_radio, &station->radio_queues, list) {
++			list_for_each_entry_safe(frame, tmp, &radio->pending_frames, list) {
++				if (frame->src != client)
++					continue;
++				list_del(&frame->list);
++				wmd_telemetry_frame_done(ctx);
++				free(frame);
++			}
++			schedule_next_radio_frame(ctx, radio);
++		}
+ 	}
+ 
+ 	if (!list_empty(&client->list))
+@@ -1320,6 +1384,10 @@
+ 
+ 	send_tx_info_frame_nl(ctx, frame);
+ 	wmd_telemetry_frame_done(ctx);
++	if (frame->radio_queue) {
++		frame->radio_queue->active_frame = NULL;
++		schedule_next_radio_frame(ctx, frame->radio_queue);
++	}
+ 
+ 	free(frame);
+ }
+@@ -1494,7 +1562,7 @@
+ 				memcpy(frame->tx_rate_flags, tx_rate_flags,
+ 				       min(tx_rate_flags_len,
+ 					   sizeof(frame->tx_rate_flags)));
+-			queue_frame(ctx, sender, frame);
++			enqueue_radio_frame(ctx, sender, frame);
+ 		}
+ 		break;
+ 	case HWSIM_CMD_ADD_MAC_ADDR:
+@@ -1899,6 +1967,141 @@
+ 	return snr < 5 ? 1 : 0;
+ }
+ 
++static void packet_test_complete_radio(struct wmediumd *ctx, struct radio_queue *radio)
++{
++	struct frame *frame = radio->active_frame;
++	rf_release_frame(frame);
++	list_del(&frame->list);
++	usfstl_sched_del_job(&frame->job);
++	usfstl_sched_del_job(&frame->start_job);
++	wmd_telemetry_frame_done(ctx);
++	radio->active_frame = NULL;
++	free(frame);
++	schedule_next_radio_frame(ctx, radio);
++}
++
++static int radio_head_selftest(bool visibility)
++{
++	struct wmediumd test = {0};
++	struct station stations[3] = {0};
++	struct station *pointers[3];
++	struct client client = {0};
++	struct client replacement = {0};
++	struct frame *replacement_frame;
++	struct frame *frames[36];
++	struct radio_queue *primary_radio;
++	u8 other_band[ETH_ALEN] = {0x02, 0xdd, 0, 0, 1, 2};
++	int matrix[9];
++	int failures = 0;
++	INIT_LIST_HEAD(&test.stations);
++	INIT_LIST_HEAD(&test.clients_to_free);
++	INIT_LIST_HEAD(&client.list);
++	INIT_LIST_HEAD(&replacement.list);
++	test.sta_array = pointers;
++	test.num_stas = 3;
++	test.snr_matrix = matrix;
++	test.get_link_snr = selftest_pair_snr;
++	test.get_error_prob = packet_test_per;
++	test.get_fading_signal = packet_test_fading;
++	test.visibility_contention = visibility;
++	test.survey_disabled = true;
++	test.need_start_notify = 1;
++	for (int index = 0; index < 9; index++)
++		matrix[index] = 40;
++	for (int index = 0; index < 3; index++) {
++		pointers[index] = &stations[index];
++		stations[index].index = index;
++		stations[index].client = &client;
++		stations[index].addr[0] = 0x02;
++		stations[index].addr[1] = 0xdd;
++		stations[index].addr[5] = index;
++		station_init_queues(&stations[index]);
++		list_add_tail(&stations[index].list, &test.stations);
++		mc_update_vif_owner(&test, &stations[index], stations[index].addr, 5180);
++	}
++	mc_update_vif_owner(&test, &stations[2], other_band, 5200);
++	for (int index = 0; index < 36; index++) {
++		struct frame *frame = calloc(1, sizeof(*frame) + 1000);
++		struct ieee80211_hdr *header = (void *)frame->data;
++		frames[index] = frame;
++		frame->sender = &stations[index == 32 ? 1 : 0];
++		frame->freq = index >= 34 ? 5200 : 5180;
++		frame->data_len = 1000;
++		frame->tx_rates_count = 1;
++		frame->tx_rates[0].idx = 7;
++		frame->tx_rates[0].count = 3;
++		header->frame_control[0] = index == 33 ? 0xb0 : 0x08;
++		memcpy(header->addr1, index >= 34 ? other_band : stations[2].addr, ETH_ALEN);
++		memcpy(header->addr2, frame->sender->addr, ETH_ALEN);
++		enqueue_radio_frame(&test, frame->sender, frame);
++	}
++	replacement_frame = calloc(1, sizeof(*replacement_frame) + 1000);
++	replacement_frame->sender = &stations[0];
++	replacement_frame->freq = 5180;
++	replacement_frame->data_len = 1000;
++	replacement_frame->tx_rates_count = 1;
++	replacement_frame->tx_rates[0].idx = 7;
++	replacement_frame->tx_rates[0].count = 3;
++	struct ieee80211_hdr *replacement_header = (void *)replacement_frame->data;
++	replacement_header->frame_control[0] = 0x08;
++	memcpy(replacement_header->addr1, stations[2].addr, ETH_ALEN);
++	memcpy(replacement_header->addr2, stations[0].addr, ETH_ALEN);
++	stations[0].client = &replacement;
++	enqueue_radio_frame(&test, &stations[0], replacement_frame);
++	stations[0].client = &client;
++	primary_radio = frames[0]->radio_queue;
++	failures += primary_radio->active_frame != frames[0];
++	failures += frames[32]->radio_queue->active_frame != frames[32];
++	failures += frames[34]->radio_queue == primary_radio;
++	failures += frames[34]->radio_queue->active_frame != frames[34];
++	failures += frames[34]->job.start != scheduler.current_time + frames[34]->duration;
++	failures += !(frames[34]->flags & HWSIM_TX_STAT_ACK);
++	failures += frames[35]->job.callback != NULL;
++	failures += frames[1]->job.callback != NULL || frames[33]->job.callback != NULL;
++	failures += frames[32]->job.start > frames[0]->job.start + frames[32]->duration;
++	printf("radio peer reservation: first=%llu us, peer=%llu us, backlog=32 frames\n",
++		(unsigned long long)(frames[0]->job.start - scheduler.current_time),
++		(unsigned long long)(frames[32]->job.start - scheduler.current_time));
++	if (failures)
++		goto cleanup;
++	mc_update_vif_owner(&test, &stations[2], stations[2].addr, 2437);
++	packet_test_complete_radio(&test, primary_radio);
++	failures += primary_radio->active_frame != frames[1];
++	failures += !!(frames[1]->flags & HWSIM_TX_STAT_ACK) || frames[1]->forward_received;
++	failures += frames[1]->tx_rates[0].count != 3;
++	if (failures)
++		goto cleanup;
++	mc_update_vif_owner(&test, &stations[2], stations[2].addr, 5180);
++	packet_test_complete_radio(&test, frames[34]->radio_queue);
++	failures += frames[35]->radio_queue->active_frame != frames[35];
++	failures += !(frames[35]->flags & HWSIM_TX_STAT_ACK);
++	packet_test_complete_radio(&test, frames[35]->radio_queue);
++	packet_test_complete_radio(&test, primary_radio);
++	for (int index = 2; index < 16; index++) {
++		failures += primary_radio->active_frame != frames[index];
++		if (failures)
++			goto cleanup;
++		packet_test_complete_radio(&test, primary_radio);
++	}
++cleanup:
++	wmediumd_remove_client(&test, &client);
++	failures += replacement_frame->src != &replacement;
++	failures += replacement_frame->radio_queue->active_frame != replacement_frame;
++	failures += stations[0].client != NULL;
++	wmediumd_remove_client(&test, &replacement);
++	failures += !usfstl_list_empty(&scheduler.joblist);
++	failures += !usfstl_list_empty(&scheduler.pending_jobs);
++	for (int index = 0; index < 3; index++) {
++		failures += !list_empty(&stations[index].radio_queues);
++		for (int category = 0; category < IEEE80211_NUM_ACS; category++) {
++			failures += !list_empty(&stations[index].queues[category].frames);
++		}
++	}
++	printf("%s radio head admission (%s): bounded peer reservation, per-frequency concurrency, kernel-order FIFO across access categories, deferred receive eligibility and pending-client ownership/removal\n",
++		failures ? "FAIL" : "PASS", visibility ? "visibility" : "global");
++	return failures;
++}
++
+ static int packet_path_selftest(void)
+ {
+ 	int failures = 0;
+@@ -2246,6 +2449,8 @@
+ 
+ 	printf("=== wmediumd multichannel + Linux 7 rate-flags self-test ===\n");
+ 	fails += packet_path_selftest();
++	fails += radio_head_selftest(false);
++	fails += radio_head_selftest(true);
+ 	fails += spatial_queue_selftest();
+ 	fails += spatial_gap_selftest();
+ 	fails += scheduler_deadline_selftest();
+--- a/wmediumd/wmediumd.h
++++ b/wmediumd/wmediumd.h
+@@ -161,6 +161,13 @@
+ 	u8 addr[ETH_ALEN];
+ };
+ 
++struct radio_queue {
++	struct list_head list;
++	struct list_head pending_frames;
++	struct frame *active_frame;
++	u32 frequency;
++};
++
+ struct station {
+ 	int index;
+ 	u8 addr[ETH_ALEN];		/* virtual interface mac address */
+@@ -169,6 +176,7 @@
+ 	double dir_x, dir_y;		/* direction of the station [meter per MOVE_INTERVAL] */
+ 	int tx_power;			/* transmission power [dBm] */
+ 	struct wqueue queues[IEEE80211_NUM_ACS];
++	struct list_head radio_queues;
+ 	struct list_head list;
+ 	struct client *client;
+ 	unsigned int n_addrs;
+@@ -294,6 +302,9 @@
+ 	struct list_head rf_reservation;
+ 	struct usfstl_job job;
+ 	struct usfstl_job start_job;
++	uint64_t queued_at;
++	bool queue_accounted;
++	struct radio_queue *radio_queue;
+ 	struct client *src;
+ 	bool acked;
+ 	u64 cookie;
+@@ -368,6 +379,7 @@
+ 			     enum wmd_telemetry_outcome outcome,
+ 			     int signal_dbm, int snr_db, double error_prob);
+ void wmd_telemetry_frame_done(struct wmediumd *ctx);
++void wmd_telemetry_frame_queued(struct wmediumd *ctx, struct frame *frame);
+ void wmd_telemetry_vif_update(struct wmediumd *ctx, const u8 *vif,
+ 			      struct station *owner, u32 frequency_mhz,
+ 			      bool changed);
+--- a/wmediumd/control.c
++++ b/wmediumd/control.c
+@@ -629,6 +629,19 @@
+ 	return ctx->get_link_snr(ctx, sender, receiver);
+ }
+ 
++void wmd_telemetry_frame_queued(struct wmediumd *ctx, struct frame *frame)
++{
++	if (frame->queue_accounted)
++		return;
++	frame->queue_accounted = true;
++	frame->queued_at = scheduler.current_time;
++	if (ctx->telemetry) {
++		ctx->telemetry->queue_depth++;
++		if (ctx->telemetry->queue_depth > ctx->telemetry->queue_depth_max)
++			ctx->telemetry->queue_depth_max = ctx->telemetry->queue_depth;
++	}
++}
++
+ void wmd_telemetry_record_tx(struct wmediumd *ctx, struct frame *frame,
+ 			     struct station *destination, int access_category,
+ 			     unsigned int attempts, unsigned int retries,
+@@ -642,6 +655,7 @@
+ 	uint8_t type;
+ 	bool multicast;
+ 
++	wmd_telemetry_frame_queued(ctx, frame);
+ 	association_record_tx(ctx, frame, destination, acked, no_ack);
+ 	if (!telemetry)
+ 		return;
+@@ -667,9 +681,6 @@
+ 		telemetry->tx_acked += acked;
+ 		telemetry->tx_no_ack += !acked;
+ 	}
+-	telemetry->queue_depth++;
+-	if (telemetry->queue_depth > telemetry->queue_depth_max)
+-		telemetry->queue_depth_max = telemetry->queue_depth;
+ 	telemetry->queue_delay_usec_last = queue_delay_usec;
+ 	if (queue_delay_usec > telemetry->queue_delay_usec_max)
+ 		telemetry->queue_delay_usec_max = queue_delay_usec;

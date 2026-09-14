@@ -3,7 +3,7 @@
 #
 # Base: upstream wmediumd (github.com/bcopeland/wmediumd), the v0.3.1 line, which
 # already carries per-frame HWSIM_ATTR_FREQ on frames received from hwsim. On
-# top of it we apply a nineteen-patch series: per-frequency interference and scheduling, learned VIF
+# top of it we apply a patch series: per-frequency interference and scheduling, learned VIF
 # ownership, removal of hot-path file I/O, Linux 7 HT/VHT rate flags,
 # frequency-filtered multicast, a larger netlink receive buffer, the atomic
 # scenario-control socket, configured default-SNR handling, and evidence-based

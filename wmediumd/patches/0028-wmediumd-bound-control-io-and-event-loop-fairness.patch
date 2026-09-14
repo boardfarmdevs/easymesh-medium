@@ -1,0 +1,203 @@
+Subject: [PATCH] wmediumd: bound observer I/O and fairly service ready descriptors
+
+Initialize listener priorities, rotate ready descriptors within the same priority,
+and close backpressured control peers instead of blocking radio processing.
+Preserve priority ordering, atomic replies and all RF scheduling parameters.
+Self-tests exercise continuously readable peers, callback removal, initialized
+listeners and healthy/stalled/disconnected readers. No simulated timing claims.
+
+--- a/wmediumd/lib/uds.c
++++ b/wmediumd/lib/uds.c
+@@ -40,7 +40,7 @@
+ 				   void (*connected)(int, void *),
+ 				   void *data, int type)
+ {
+-	struct usfstl_uds_server *uds = malloc(sizeof(*uds) + strlen(path) + 1);
++	struct usfstl_uds_server *uds = calloc(1, sizeof(*uds) + strlen(path) + 1);
+ 	struct stat buf;
+ 	int ret = stat(path, &buf), fd;
+ 	struct sockaddr_un un = {
+--- a/wmediumd/lib/loop.c
++++ b/wmediumd/lib/loop.c
+@@ -44,6 +44,19 @@
+ 	usfstl_list_item_remove(&entry->list);
+ }
+ 
++static void usfstl_loop_rotate(struct usfstl_loop_entry *entry)
++{
++	struct usfstl_loop_entry *candidate, *tail = entry;
++	usfstl_loop_for_each_entry(candidate) {
++		if (candidate->priority == entry->priority)
++			tail = candidate;
++	}
++	if (tail != entry) {
++		usfstl_list_item_remove(&entry->list);
++		usfstl_list_insert_before(tail->list.next, &entry->list);
++	}
++}
++
+ void usfstl_loop_wait_and_handle(void)
+ {
+ 	while (true) {
+@@ -71,6 +84,7 @@
+ 			    !FD_ISSET(tmp->fd, &exc_set))
+ 				continue;
+ 
++			usfstl_loop_rotate(tmp);
+ 			if (g_usfstl_loop_pre_handler_fn)
+ 				g_usfstl_loop_pre_handler_fn(data);
+ 			tmp->handler(tmp);
+--- a/wmediumd/control.c
++++ b/wmediumd/control.c
+@@ -557,7 +557,7 @@
+ 	header->generation = htobe64(generation);
+ 	if (payload_len)
+ 		memcpy(frame + sizeof(*header), payload, payload_len);
+-	sent = send(fd, frame, sizeof(*header) + payload_len, MSG_NOSIGNAL);
++	sent = send(fd, frame, sizeof(*header) + payload_len, MSG_NOSIGNAL | MSG_DONTWAIT);
+ 	free(frame);
+ 	return sent == (ssize_t)(sizeof(*header) + payload_len) ? 0 : -1;
+ }
+@@ -1792,15 +1792,17 @@
+ 	if (length < (ssize_t)sizeof(*header) ||
+ 	    be32toh(header->magic) != WMDC_MAGIC ||
+ 	    be16toh(header->version) != WMDC_VERSION) {
+-		send_response(entry->fd, 0, WMDC_ERR_PROTOCOL,
+-			      client->ctx->control_generation, NULL, 0);
++		if (send_response(entry->fd, 0, WMDC_ERR_PROTOCOL,
++				  client->ctx->control_generation, NULL, 0) < 0)
++			control_disconnect(client);
+ 		return;
+ 	}
+ 	payload_len = be32toh(header->payload_len);
+ 	opcode = be16toh(header->opcode);
+ 	if (payload_len != (uint32_t)(length - sizeof(*header))) {
+-		send_response(entry->fd, opcode, WMDC_ERR_LENGTH,
+-			      client->ctx->control_generation, NULL, 0);
++		if (send_response(entry->fd, opcode, WMDC_ERR_LENGTH,
++				  client->ctx->control_generation, NULL, 0) < 0)
++			control_disconnect(client);
+ 		return;
+ 	}
+ 	switch (opcode) {
+@@ -1996,6 +1998,30 @@
+ 	control_listener_start(ctx, path, true, true);
+ }
+ 
++static int control_response_selftest(void)
++{
++	int sockets[2], failures = 0, buffer_size = 4096;
++	char payload[1024] = {};
++	struct wmdc_header header = {};
++	if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sockets))
++		return 1;
++	failures += send_response(sockets[0], WMDC_OP_STATUS, WMDC_OK, 42, NULL, 0) != 0;
++	failures += recv(sockets[1], &header, sizeof(header), MSG_DONTWAIT) != sizeof(header);
++	failures += be64toh(header.generation) != 42 || be16toh(header.opcode) != WMDC_OP_STATUS;
++	setsockopt(sockets[0], SOL_SOCKET, SO_SNDBUF, &buffer_size, sizeof(buffer_size));
++	while (send(sockets[0], payload, sizeof(payload), MSG_DONTWAIT | MSG_NOSIGNAL) > 0) {}
++	alarm(2);
++	failures += send_response(sockets[0], WMDC_OP_STATUS, WMDC_OK, 43, NULL, 0) != -1;
++	failures += errno != EAGAIN && errno != EWOULDBLOCK;
++	alarm(0);
++	close(sockets[1]);
++	failures += send_response(sockets[0], WMDC_OP_STATUS, WMDC_OK, 44, NULL, 0) != -1;
++	close(sockets[0]);
++	printf("%s control responses: healthy, stalled and disconnected readers cannot block the medium\n",
++		failures ? "FAIL" : "PASS");
++	return failures;
++}
++
+ int wmd_telemetry_selftest(void)
+ {
+ 	struct wmediumd ctx = {.num_stas = 3};
+@@ -2006,7 +2032,7 @@
+ 	struct frame *frame;
+ 	uint8_t vif[6] = {0x02, 0, 0, 0, 0, 1};
+ 	uint8_t unknown_vif[6] = {0x02, 0, 0, 0, 0, 9};
+-	int failures = 0;
++	int failures = control_response_selftest();
+ 
+ 	source.addr[5] = 1;
+ 	source.addr[0] = 0x42;
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -2174,6 +2174,70 @@
+ 	return failures;
+ }
+ 
++struct loop_test_reader {
++	struct usfstl_loop_entry entry;
++	unsigned int calls;
++	bool remove;
++};
++
++static void loop_test_ready(struct usfstl_loop_entry *entry)
++{
++	struct loop_test_reader *reader = container_of(entry, struct loop_test_reader, entry);
++	reader->calls++;
++	if (reader->remove)
++		usfstl_loop_unregister(entry);
++}
++
++static void loop_test_connected(int descriptor, void *data)
++{
++	(void)data;
++	close(descriptor);
++}
++
++static int event_loop_selftest(void)
++{
++	struct loop_test_reader readers[3] = {};
++	int pipes[3][2], failures = 0;
++	struct usfstl_loop_entry *entry;
++	char directory[] = "/tmp/wmediumd-loop-XXXXXX", path[108];
++	if (!usfstl_list_empty(&g_usfstl_loop_entries))
++		return 1;
++	for (unsigned int index = 0; index < 3; index++) {
++		assert(pipe(pipes[index]) == 0);
++		assert(write(pipes[index][1], "ready", 5) == 5);
++		readers[index].entry.fd = pipes[index][0];
++		readers[index].entry.handler = loop_test_ready;
++		readers[index].entry.priority = index == 0 ? 1 : 0;
++		readers[index].remove = index == 0;
++		usfstl_loop_register(&readers[index].entry);
++	}
++	usfstl_loop_wait_and_handle();
++	failures += readers[0].calls != 1 || readers[1].calls != 0 || readers[2].calls != 0;
++	usfstl_loop_wait_and_handle();
++	usfstl_loop_wait_and_handle();
++	failures += readers[1].calls != 1 || readers[2].calls != 1;
++	readers[1].remove = true;
++	for (unsigned int index = 0; index < 4; index++)
++		usfstl_loop_wait_and_handle();
++	failures += readers[1].entry.list.next != NULL || readers[1].calls != 2;
++	for (unsigned int index = 0; index < 3; index++) {
++		if (readers[index].entry.list.next)
++			usfstl_loop_unregister(&readers[index].entry);
++		close(pipes[index][0]);
++		close(pipes[index][1]);
++	}
++	assert(mkdtemp(directory));
++	snprintf(path, sizeof(path), "%s/control", directory);
++	usfstl_uds_create_seqpacket(path, loop_test_connected, NULL);
++	usfstl_loop_for_each_entry(entry)
++		failures += entry->priority != 0 || entry->data != NULL;
++	usfstl_uds_remove(path);
++	rmdir(directory);
++	printf("%s event loop: priority order, equal-priority fairness, callback removal and initialized listener state\n",
++		failures ? "FAIL" : "PASS");
++	return failures;
++}
++
+ static int wmd_selftest(void)
+ {
+ 	int fails = 0, i, j;
+@@ -2185,6 +2249,7 @@
+ 	fails += spatial_queue_selftest();
+ 	fails += spatial_gap_selftest();
+ 	fails += scheduler_deadline_selftest();
++	fails += event_loop_selftest();
+ 	fails += receive_context_selftest();
+ 
+ 	/* ---------- WMD3: frequency-scoped interference ---------- */

@@ -511,6 +511,11 @@ applies fourteen patches in `gen/wmediumd/patches/`:
 | `0012` | Adds frequency-qualified SNR set/clear, readback, sparse dump and pair fallback |
 | `0013` | Adds the multi-client read-only `-R` pair/frequency metrics endpoint used by the hwsim HAL |
 | `0014` | Adds bounded packet/outcome, radio/frequency, active-link, VIF and event telemetry on host-only `-O` |
+| `0015`–`0019` | Indexed control/telemetry lookups, protocol-positive association ownership, learned-VIF queries, large paged dumps and TX-status frequency |
+| `0020`–`0023` | Channel airtime surveys, PHY timing metadata, independent reverse ACK loss and opt-in visibility reservations |
+| `0024`–`0027` | Confirmed client departures, spatial reservation gaps, earliest scheduler deadlines and native receive contexts |
+| `0028` | Nonblocking observer replies and fair servicing of ready event-loop descriptors |
+| `0029` | One admitted queue head per transmitter/frequency; deferred receive decisions and pending-frame lifecycle accounting |
 
 The launcher executes `wmediumd.patched -T` before every start. That suite
 checks multichannel interference isolation, frequency override/fallback,
@@ -518,8 +523,25 @@ ownership/filter invariants, frequency-filtered multicast, independent
 scheduling, Linux 7 rate mapping, bounded telemetry and the related regression
 cases.
 
-The current patch-`0014` prebuilt binary has SHA-256
-`f8fb9d668c8bfc1964728f8db620254817ff4bce3de3493f7e5166dcb576641f`.
+Use `sha256sum gen/wmediumd/wmediumd.patched` to identify the checkout's
+binary. `/run/meta-cmf-wmediumd/wmediumd-binary.sha256` records the running
+PID, binary hash and selected path. The room identity audit verifies this
+against `/proc/PID/exe`, command/config and process start time; a filename
+alone is not runtime provenance.
+
+Pending frames keep their original client ownership and FIFO order within
+each transmitter/frequency. Only that queue's head reserves the medium and
+evaluates current receive eligibility; peers do not wait behind another
+transmitter's entire future backlog. A mesh hwsim PHY carries simultaneous
+2.4/5/6-GHz VIFs, so these queues must be frequency-specific, not one FIFO for
+the whole PHY. Disconnect cleanup cancels active and pending work.
+
+The compiled tests cover both global and visibility modes, independent
+frequencies on the same PHY, mixed-client cleanup and deferred receive
+eligibility. Rates, retry limits, contention windows and loss policy remain
+unchanged. This is not a claim of zero latency: a busy transmitter can still
+accumulate a substantial queue during large presence transitions. Inspect
+queue and netlink counters alongside convergence measurements.
 
 Interference accounting is not enabled by the current generated config. If it
 is enabled manually, the patch keeps exact-frequency buckets and writes bounded
@@ -578,7 +600,8 @@ increase in those diagnostics is a regression.
   and recovery without stopping a container.
 - [client carousel](../../experiments/README.md) exercises repeated
   client movement visible in the live topology.
-- [client scale](../../experiments/README.md) defines the 20/50/100-client profiles,
-  pair-state growth, measured wmediumd cost and overload gates.
+- [client scale](../../experiments/README.md) covers larger online cohorts within
+  the fixed 100-client pool; [performance diagnostics](../testing/performance.md)
+  covers measured wmediumd cost and overload gates.
 - [patch set](../platform/patch-set.md) places the wmediumd and kernel patches in the
   complete component ownership model.

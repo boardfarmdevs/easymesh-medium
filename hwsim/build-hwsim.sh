@@ -103,6 +103,9 @@ else
     echo ">> modeled survey cache requires Linux 7.0; retaining signal-only support"
 fi
 apply "$HERE/patches/0010-mac80211_hwsim-complete-aggregation-feedback.patch"
+if [ "$GEN" = 7.0 ]; then
+    apply "$HERE/patches/0011-mac80211_hwsim-report-native-receive-contexts.patch"
+fi
 grep -q 'EXPERIMENTAL wmediumd' "$SRCDIR/mac80211_hwsim.c" \
     || { echo "patch 0001 did not apply -- check source version" >&2; exit 1; }
 
@@ -110,6 +113,12 @@ grep -q 'EXPERIMENTAL wmediumd' "$SRCDIR/mac80211_hwsim.c" \
 echo 'obj-m += mac80211_hwsim.o' > "$SRCDIR/Makefile"
 make -C "$KBUILD" M="$SRCDIR" modules
 echo ">> built $SRCDIR/mac80211_hwsim.ko"
+
+cfg80211_options=()
+if [ "$DO_INSTALL" = 1 ]; then
+    cfg80211_options+=(--install)
+fi
+bash "$HERE/cfg80211/build-cfg80211.sh" "$SRCDIR/cfg80211" "${cfg80211_options[@]}"
 
 if [ "$DO_INSTALL" = 1 ]; then
     DEST=/lib/modules/$KVER/updates
@@ -119,6 +128,11 @@ if [ "$DO_INSTALL" = 1 ]; then
 fi
 
 if [ "$DO_LOAD" = 1 ]; then
+    sudo modprobe cfg80211
+    if [ "$(cat /sys/module/cfg80211/version 2>/dev/null)" != lab-netns-owner-1 ]; then
+        echo "Reboot the lab VM to load namespace-safe cfg80211 before loading hwsim." >&2
+        exit 1
+    fi
     # 32 covers the target small profile: five mesh nodes, twenty client
     # radios and spare capacity for controlled replacement/tests. Medium uses
     # 64 and the optional stress profile uses the patched 128-radio bound.

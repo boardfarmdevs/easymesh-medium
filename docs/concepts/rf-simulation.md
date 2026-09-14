@@ -34,6 +34,12 @@ configuration identity, and bounded typed controls. It does not replace the
 scenario runner or optimizer.
 ```
 
+The medium initializes socket priorities and fairly rotates ready descriptors
+within each priority. Slow control/observer readers are disconnected instead
+of blocking radio processing; higher-priority timers keep precedence.
+`wmediumd -T` tests this coordination without changing modeled RF airtime,
+retry limits or convergence deadlines.
+
 The separation is deliberate:
 
 - wmediumd applies RF conditions and handles frames;
