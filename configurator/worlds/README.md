@@ -33,6 +33,18 @@ are local visualization overrides and do not change wmediumd.
 The public viewer is published as a static site from the repository's
 `gh-pages` branch:
 
+To refresh it, use `python3 stage-pages.py /path/to/clean/gh-pages-checkout`.
+This replaces only the generated `viewer/` and `golden/` trees, preserves the
+landing page/explorer, and requires a disconnected default. Test the staged
+site before committing and pushing `gh-pages`; no live endpoints belong in
+the public viewer's startup path.
+
+Run `node gen/tests/viewer-public-site-browser-test.js SITE_BASE_URL` from
+the repository root with Playwright Core/Chromium configured. It loads and
+briefly plays all 21 room previews, checks the guide/fullscreen controls, and
+rejects backend, cross-origin and write requests. This checks the disconnected
+presentation, not native convergence.
+
 <https://boardfarmdevs.github.io/meta-cmf-bananapi-vcpe/viewer/>
 
 Static hosting defaults to the explicitly disconnected sandbox without a

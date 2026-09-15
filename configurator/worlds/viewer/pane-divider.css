@@ -1,0 +1,27 @@
+.pane-divider {
+  position: relative;
+  flex: 0 0 8px;
+  width: 8px;
+  min-width: 8px;
+  align-self: stretch;
+  background: #e2e5e9;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  z-index: 30;
+}
+.pane-divider::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: calc(50% - 24px);
+  width: 2px;
+  height: 48px;
+  border-radius: 2px;
+  background: #8a939f;
+}
+.pane-divider:hover, .pane-divider:focus-visible { background: #cbd1d9; }
+.pane-divider:focus-visible { outline: 2px solid #64748b; outline-offset: -2px; }
+.pane-resizing, .pane-resizing * { cursor: col-resize !important; user-select: none !important; }
+.pane-resizing iframe { pointer-events: none; }
+@media print { .pane-divider { display: none; } }

@@ -55,6 +55,25 @@ def _mobility():
 
 
 class WorldTests(unittest.TestCase):
+    def test_backhaul_rf_policy_is_validated_signed_and_preserved(self):
+        for policy in ("fixed", "geometry"):
+            mobility = {**_mobility(), "backhaul_rf": policy}
+            world = compile_world(_layout(), mobility)
+            self.assertEqual(world["backhaul_rf"], policy)
+            verify_world_plan(world)
+            exported = export_wmd(world, "all")
+            if policy == "geometry":
+                self.assertIn("this DSL export contains fronthaul only", exported)
+            world["backhaul_rf"] = "other"
+            world.pop("golden_sha256")
+            world["golden_sha256"] = _hash(world)
+            with self.assertRaisesRegex(ScenarioError, "backhaul_rf"):
+                verify_world_plan(world)
+        for policy in (None, {}, [], True, "other"):
+            with self.assertRaisesRegex(ScenarioError, "backhaul_rf"):
+                compile_world(_layout(), {**_mobility(), "backhaul_rf": policy})
+        self.assertNotIn("backhaul_rf", compile_world(_layout(), _mobility()))
+
     def test_public_geometry_is_quantized_directional_and_names_crossed_walls(self):
         layout = _layout()
         nodes = {item["role"]: item for item in layout["nodes"]}

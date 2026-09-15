@@ -8,6 +8,34 @@ ROOT = Path(__file__).resolve().parents[1] / "worlds"
 
 
 class QuickDemoWorldTests(unittest.TestCase):
+    def test_geometry_backhaul_rooms_offer_real_stimuli_and_return(self):
+        for name in ("backhaul-branch-formation", "backhaul-parent-handover", "backhaul-isolation-recovery"):
+            world = self.world(name)
+            self.assertEqual(world["backhaul_rf"], "geometry")
+            self.assertEqual(world["duration_ms"], 24000)
+            self.assertEqual(world["pause_at_ms"], [12000])
+            self.assertEqual(world["counts"]["stations"], 10)
+            self.assertEqual(world["generations"][0]["positions"], world["generations"][-1]["positions"])
+            midpoint = world["generations"][12]
+            def snr(source, destination, frame=midpoint):
+                return next(link["snr_db_by_band"]["5"] for link in frame["links"]
+                            if link["source_role"] == source and link["destination_role"] == destination)
+            if name == "backhaul-branch-formation":
+                for relay, child in (("extender_1", "extender_3"), ("extender_2", "extender_4")):
+                    self.assertGreaterEqual(snr(relay, child) - snr("gateway", child), 10)
+                    self.assertGreaterEqual(snr("gateway", relay), 10)
+            elif name == "backhaul-parent-handover":
+                self.assertGreater(snr("extender_2", "extender_3"), snr("extender_1", "extender_3") + 10)
+                self.assertGreater(snr("extender_1", "extender_3", world["generations"][0]),
+                                   snr("extender_2", "extender_3", world["generations"][0]) + 10)
+                self.assertGreaterEqual(snr("extender_3", "sta_static_09"), 40)
+            else:
+                self.assertGreaterEqual(snr("gateway", "extender_4", world["generations"][0]), 20)
+                for peer in ("gateway", "extender_1", "extender_2", "extender_3"):
+                    self.assertEqual(snr(peer, "extender_4"), -20)
+                    self.assertEqual(snr("extender_4", peer), -20)
+                self.assertGreaterEqual(snr("extender_4", "sta_static_10"), 40)
+
     def world(self, name):
         world = load_json(ROOT / "golden" / f"{name}.world.json")
         verify_world_plan(world)

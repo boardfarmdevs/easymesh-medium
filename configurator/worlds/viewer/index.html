@@ -24,10 +24,11 @@
     color: var(--ink);
     background: var(--paper);
     display: grid;
-    grid-template-columns: var(--panel-w) 1fr;
+    grid-template-columns: minmax(0, var(--panel-w)) 8px minmax(0, 1fr);
     overflow: hidden;
   }
   aside {
+    min-width: 0;
     border-right: 1px solid var(--rule);
     padding: 18px 18px 24px;
     overflow-y: auto;
@@ -129,6 +130,7 @@
   main { position: relative; overflow: hidden; }
   main:fullscreen { width: 100vw; height: 100dvh; background: var(--paper); }
   #sceneToolbar { position: absolute; top: 10px; left: 12px; z-index: 25; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; max-width: calc(100% - 300px); }
+  #roomName { flex: 0 0 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 18px; font-weight: 650; line-height: 28px; }
   #fullscreenStatus { font-size: 12px; background: var(--paper); }
   .fullscreen-only { display: none; }
   main:fullscreen .fullscreen-only { display: inline-block; }
@@ -159,32 +161,26 @@
   #roleMenu button:hover { background: #eee7f3; }
   main canvas { cursor: default; touch-action: none; }
   @media (max-width: 760px) {
+    #roomPanelDivider { display: none; }
     #sceneToolbar { max-width: calc(100% - 24px); }
     body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
     aside { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 45vh; }
   }
+  .optimizer-heading { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 28px; }
+  #resumeSteering { flex: 0 0 auto; min-width: 112px; margin: 0; padding: 5px 7px; font-size: 11px; }
 </style>
+<link rel="stylesheet" href="room-guide.css?v=1">
+<link rel="stylesheet" href="room-convergence.css?v=1">
+<link rel="stylesheet" href="pane-divider.css?v=1">
 </head>
 <body>
-<aside>
+<aside id="roomSidebar">
   <h1 id="viewerTitle">wmediumd world viewer</h1>
   <a class="manual-link" id="openManual" href="manual.html" aria-haspopup="dialog">Manual &amp; Help</a>
-  <div class="sub" id="worldmeta">Loading…</div>
-  <div id="liveStatus" role="status" aria-live="polite"></div>
-  <div id="profilingAuthority" class="hint" role="status"></div>
-  <div class="sub" id="liveRun"></div>
-
-  <div class="live-only">
-    <div class="card" id="rfLoadCard"><h2>Modeled channel activity</h2><div id="rfLoad" class="metric-grid"></div><div class="sub">Frequency-wide busy time, not SNR or available capacity. Hover for age and window; — means unavailable.</div></div>
-    <div class="card" id="storyCard"><h2>Scenario</h2><div id="storyText">Waiting for the conductor…</div></div>
-    <div class="card" id="labCard"><h2>Whole lab</h2><div id="labMetrics" class="metric-grid"><span>Status</span><b>waiting</b></div></div>
-    <div class="card" id="heroCard"><h2>Traffic probe · cyan ring</h2><div id="heroMetrics">Waiting for controller telemetry…</div><div class="sub">Ctrl-click any client</div></div>
-    <div class="card" id="optimizerCard"><h2>External optimizer</h2><div id="optimizerStatus" class="live-scroll" tabindex="0" role="status" aria-label="Optimizer result" aria-live="polite">Waiting for live status…</div><details id="optimizerActivity"><summary>Background measurement details</summary><div id="optimizerActivityDetails" class="live-scroll" tabindex="0" role="region" aria-label="Background measurement activity">Waiting for measurements…</div></details><div id="optimizerMetrics" class="live-scroll" tabindex="0" role="region" aria-label="Optimizer metrics">No evaluation yet.</div><details id="optimizerClients"><summary>Per-client decisions</summary><div id="optimizerClientRows" class="live-scroll" tabindex="0" role="region" aria-label="Per-client decisions"></div></details></div>
-    <div class="card"><h2>Recent events</h2><div id="eventRibbon" class="live-scroll" tabindex="0" role="region" aria-label="Recent events"></div></div>
-  </div>
-
   <label class="field" for="world">World</label>
   <select id="world"></select>
+  <button id="openRoomGuide" type="button" aria-haspopup="dialog" aria-controls="roomGuide">Browse rooms · RF &amp; optimizer guide</button>
+  <div class="card" id="backhaulPolicyCard" role="status"><strong id="backhaulPolicyTitle">Backhaul policy</strong><p class="sub" id="backhaulPolicyDetail">Waiting for room configuration.</p></div>
   <label class="field" for="file">…or open a local .world.json</label>
   <input type="file" id="file" accept=".json,application/json">
   <div id="worldSwitch" hidden>
@@ -193,6 +189,20 @@
     </div>
     <p class="sub">Selecting or opening a world immediately updates the live lab.</p>
     <p id="worldSwitchStatus" role="status" aria-live="polite">Containers stay running; unused clients become RF-offline.</p>
+  </div>
+  <div class="sub" id="worldmeta">Loading…</div>
+  <div id="liveStatus" role="status" aria-live="polite"></div>
+  <div id="profilingAuthority" class="hint" role="status"></div>
+  <div class="sub" id="liveRun"></div>
+
+  <div class="live-only">
+    <details class="card" id="rfInspectorCard"><summary>RF inspector · selected device</summary><select id="rfInspectorView" aria-label="RF evidence view"><option value="native">Native observations</option><option value="configured">Configured stimulus</option><option value="decision">Optimizer decision</option><option value="traffic">Traffic experiment</option></select><pre id="rfInspector" class="live-scroll" style="height:220px;white-space:pre-wrap;overflow-wrap:anywhere" tabindex="0" aria-label="Selected device RF evidence">Waiting for data…</pre></details>
+    <div class="card" id="rfLoadCard"><h2>Modeled channel activity</h2><div id="rfLoad" class="metric-grid"></div><div class="sub">Frequency-wide busy time, not SNR or available capacity. Hover for age and window; — means unavailable.</div></div>
+    <div class="card" id="storyCard"><h2>Scenario</h2><div id="storyText">Waiting for the conductor…</div></div>
+    <div class="card" id="labCard"><h2>Whole lab</h2><div id="labMetrics" class="metric-grid"><span>Status</span><b>waiting</b></div></div>
+    <div class="card" id="heroCard"><h2>Traffic probe · cyan ring</h2><div id="heroMetrics">Waiting for controller telemetry…</div><div class="sub">Ctrl-click any client</div></div>
+    <div class="card" id="optimizerCard"><h2 class="optimizer-heading">External optimizer<button id="resumeSteering" type="button" disabled>Resume steering</button></h2><div id="optimizerStatus" class="live-scroll" tabindex="0" role="status" aria-label="Optimizer result" aria-live="polite">Waiting for live status…</div><details id="optimizerActivity"><summary>Background measurement details</summary><div id="optimizerActivityDetails" class="live-scroll" tabindex="0" role="region" aria-label="Background measurement activity">Waiting for measurements…</div></details><div id="optimizerMetrics" class="live-scroll" tabindex="0" role="region" aria-label="Optimizer metrics">No evaluation yet.</div><details id="optimizerClients"><summary>Per-client decisions</summary><div id="optimizerClientRows" class="live-scroll" tabindex="0" role="region" aria-label="Per-client decisions"></div></details></div>
+    <div class="card"><h2>Recent events</h2><div id="eventRibbon" class="live-scroll" tabindex="0" role="region" aria-label="Recent events"></div></div>
   </div>
 
   <label class="field">Time</label>
@@ -208,6 +218,7 @@
     </span>
   </div>
 
+  <div id="playConvergence" class="room-convergence" data-state="unknown"><strong data-room-state>— CHECKING</strong><span data-room-counts>Waiting for live measurements</span></div>
   <div id="playbackCheckpoint" class="sub" role="status" hidden></div>
 
   <label class="field">Band for link colours</label>
@@ -271,13 +282,16 @@
     Labels: <b>gw</b> gateway, <b>e1</b> extender_1, <b>m01</b> sta_mobile_01, <b>s01</b> sta_static_01.
   </div>
 </aside>
+<div id="roomPanelDivider" class="pane-divider" role="separator" aria-orientation="vertical" aria-label="Resize room controls" aria-controls="roomSidebar" tabindex="0" title="Drag to resize panels. Arrow keys adjust; double-click resets."></div>
 <main id="roomView">
   <div id="sceneToolbar">
+    <div id="roomName">Room: Waiting for room</div>
     <button type="button" id="roomFullscreen" aria-pressed="false">Full screen</button>
     <button type="button" id="fullscreenPlay" class="fullscreen-only">Play</button>
     <span id="fullscreenTime" class="fullscreen-only"></span>
     <span id="fullscreenAuthority" class="fullscreen-only"></span>
     <span id="fullscreenStatus" role="status" aria-live="polite"></span>
+    <section id="roomConvergence" class="room-convergence" data-state="unknown" role="status" aria-live="polite" aria-atomic="true" tabindex="0"><small>CLIENT CONVERGENCE</small><strong data-room-state>— CHECKING</strong><span data-room-counts>Waiting for live measurements</span><div data-room-detail>Wait for CONVERGED before playing or continuing a checkpoint.</div></section>
   </div>
   <div id="hint">drag devices to move · drag empty space to orbit · Shift-drag to pan · scroll to zoom · Space plays</div>
   <div id="spatialHud" tabindex="0" role="region" aria-label="Device properties. Drag to reposition; arrow keys move; Home resets." title="Drag to reposition · double-click the heading to reset"></div>
@@ -299,11 +313,44 @@
   <iframe id="manualFrame" title="Searchable room viewer manual"></iframe>
 </dialog>
 <script src="manual-dialog.js"></script>
+<dialog id="roomGuide" aria-labelledby="roomGuideTitle" aria-describedby="roomGuideHelp">
+  <header>
+    <div class="row"><h2 id="roomGuideTitle">Choose a room · RF &amp; optimizer guide</h2><button id="closeRoomGuide" type="button" autofocus>Close</button></div>
+    <p id="roomGuideHelp">Hover, focus or tap a room to read its guide. Browsing never changes the lab. Use ↑/↓ to explore the list.</p>
+  </header>
+  <div class="room-guide-body">
+    <nav id="roomGuideList" aria-label="Available rooms"></nav>
+    <section id="roomGuideDetails" tabindex="0" aria-labelledby="roomGuideRoomTitle">
+      <h3 id="roomGuideRoomTitle">Room guide</h3>
+      <code id="roomGuideRoomId"></code><p id="roomGuideMeta"></p>
+      <h4>Simulated RF</h4><p id="roomGuide-rf"></p>
+      <h4>Expected optimizer behavior</h4><p id="roomGuide-optimizer"></p>
+      <h4>Evidence to check in both views</h4><p id="roomGuide-watch"></p>
+      <h4>What this does not prove</h4><p id="roomGuide-limits"></p>
+      <details><summary>Shared RF model &amp; proof boundaries</summary>
+        <h4>Simulated inputs</h4><p id="roomGuideShared-rf"></p>
+        <h4>How to verify</h4><p id="roomGuideShared-evidence"></p>
+        <h4>Model and policy limits</h4><p id="roomGuideShared-limits"></p>
+      </details>
+    </section>
+  </div>
+  <footer><button id="loadGuideRoom" type="button" disabled>Load room</button><p id="roomGuideStatus" role="status"></p></footer>
+</dialog>
+<script src="room-guide.js?v=3"></script>
+<script src="room-name.js?v=1"></script>
+<script src="room-projection.js?v=1"></script>
+<script src="pane-divider.js?v=1"></script>
+<script>
+  PaneDivider.attach({container: document.body, handle: document.getElementById('roomPanelDivider'),
+    property: '--panel-w', storageKey: 'easymesh.room-panel-width', initial: 380, minimum: 220});
+</script>
+<script src="room-convergence.js?v=3"></script>
 <script src="fullscreen-control.js?v=fullscreen-1"></script>
 <script src="vendor/three.min.js"></script>
 <script src="interaction-model.js"></script>
 <script src="signal-meter.js?v=signal-meter-1"></script>
 <script src="rf-load.js?v=1"></script>
+<script src="rf-inspector.js?v=1"></script>
 <script>
   if (document.querySelector('meta[name="room-viewer-mode"]').content === 'interactive') {
     RoomRFLoad.start(document.getElementById('rfLoad'), '/api/demo/rf-load');
@@ -325,6 +372,9 @@
     'home-a-one-client-handover', 'large-room-perimeter-counter-roam',
     'large-room-extender-evacuation',
     'band-upgrade-24-5', 'band-upgrade-5-6', 'band-ap-counter-roam',
+    'traffic-low-high-off', 'traffic-quieter-ap',
+    'received-same-band-roam', 'received-discovery-recovery',
+    'backhaul-branch-formation', 'backhaul-parent-handover', 'backhaul-isolation-recovery',
   ];
   const GOLDEN_DIR = '../golden/';
   const AP_H = 2.2, STA_H = 0.9, WALL_H = 2.6;
@@ -359,6 +409,8 @@
   let liveSource = null;
   let liveTerminal = false;
   let networkState = null, optimizerState = null, trafficState = null;
+  let rfCapabilitiesState = null;
+  let trafficExperimentState = null;
   let profilingState = null;
   let trafficProbeState = null, liveClock = null;
   let healthState = null, actionState = null, verificationState = null;
@@ -407,7 +459,7 @@
   const sun = new THREE.DirectionalLight(0xffffff, 0.55); sun.position.set(-8, 25, 14); scene.add(sun);
 
   // Orbit camera: spherical coords around a target. World y is up; plan x -> x, plan y -> -z.
-  const orbit = { target: new THREE.Vector3(10, 0, -7), r: 30, theta: -0.9, phi: 0.95 };
+  const orbit = { target: new THREE.Vector3(10, 0, -7), r: 30, ...RoomProjection.defaultAngles };
   let autoFitCamera = true, fittedRoomRadius = 30;
   function roomCameraRadius(size, aspect, fieldOfView, theta, phi) {
     const vertical = Math.tan(fieldOfView * Math.PI / 360) / 1.08;
@@ -676,7 +728,10 @@
   }
   function applyInteractionSnapshot(snapshot) {
     if (snapshot.playback && !applyPlaybackUpdate(snapshot)) return;
+    if (Number.isSafeInteger(snapshot.environment_epoch)) interaction.environmentEpoch = snapshot.environment_epoch;
+    interaction.fault = snapshot.fault || null;
     interaction.backhaulPolicy = snapshot.backhaul_policy;
+    renderBackhaulPolicy(snapshot.backhaul_policy);
     interaction.apiEnabled = !!snapshot.enabled;
     interaction.presenceRoles = (snapshot.presence_roles || []).slice();
     interaction.movableRoles = (snapshot.movable_roles || []).slice();
@@ -687,7 +742,8 @@
       if (!applyingWorld && !worldSwitchError) {
         $('#worldSwitchStatus').textContent = 'Fixed pool: ' + snapshot.pool_clients +
           ' clients; target ' + snapshot.expected_online_clients + ' online. ' +
-          (snapshot.backhaul_policy === 'adaptive-rdk' ? 'Mesh RF and parent selection follow the room.' : 'Startup mesh backhaul is protected.');
+          (snapshot.backhaul_policy === 'adaptive-rdk' ? 'Geometry RF; externally assisted parent selection.' :
+            snapshot.backhaul_policy === 'modeled' ? 'Geometry RF; native parent selection. Outages are observable, not hidden.' : 'Startup mesh backhaul is protected.');
       }
     }
     if (!Object.keys(interaction.initialRoles).length) {
@@ -1345,6 +1401,7 @@
     }
   }
   function updateFrame() {
+    renderRoomConvergence();
     if (!world3d) return;
     $('#fullscreenTime').textContent = (tMs / 1000).toFixed(1) + ' / ' + (world.duration_ms / 1000) + ' s';
     const fr = frameAt(tMs), g = fr.g;
@@ -1717,7 +1774,9 @@
         '<div class="candidate">Bars: fresh measured uplink RSSI. RF dB: verified wmediumd SNR on the actual parent link, not measured SNR.<br>' +
         (interaction.backhaulPolicy === 'adaptive-rdk'
           ? 'Moving mesh nodes updates RF; lab parent selection waits for settling and a worthwhile loop-free improvement.'
-          : 'Startup backhaul may be protected; preview geometry alone does not select a parent.') + '<br>Modeled mesh peers: ' +
+          : interaction.backhaulPolicy === 'modeled'
+            ? 'Mesh RF follows geometry; native software owns parent selection. Weak uplinks may lose connectivity.'
+            : 'Startup backhaul may be protected; preview geometry alone does not select a parent.') + '<br>Modeled mesh peers: ' +
         preview.candidates.slice(0, 4).map((item) => esc(displayRole(item.role)) + ' ' + item.snr_db + ' dB').join(' · ') + '</div>';
       hud.style.display = 'block';
       return;
@@ -1824,6 +1883,41 @@
     const phase = String(value || 'stable').toLowerCase();
     return /failed|error|timeout/.test(phase) ? 'failed' : phase;
   }
+  function renderSteeringResume() {
+    const button = $('#resumeSteering'), safety = optimizerState?.steering_safety || {};
+    const paused = (safety.paused_clients || []).length;
+    button.disabled = !interactiveLiveMode || !interaction.apiEnabled || !!interaction.fault ||
+      !safety.resume_supported || !paused || !!interaction.resumingSteering;
+    button.textContent = interaction.resumingSteering ? 'Resuming…' : 'Resume steering';
+    button.title = paused ? 'Clear client failure/oscillation pauses without resetting the room, cooldowns or rate window.'
+      : 'No clients paused. Rate limits recover automatically; no restart is needed.';
+  }
+  async function resumeSteering() {
+    if (!interactiveLiveMode || !interaction.apiEnabled || interaction.resumingSteering) return;
+    interaction.resumingSteering = true;
+    renderSteeringResume();
+    try {
+      if (!await acquireInteractionLease()) return;
+      const safety = await apiJson('/api/demo/optimizer/safety');
+      const accepted = await sendControl('/api/demo/optimizer/resume', 'POST', {
+        expected_pause_revision: safety.pause_revision,
+      });
+      if (accepted) {
+        optimizerState = RoomConvergence.withSafety(optimizerState, {
+          ...(optimizerState || {}), steering_safety: accepted.steering_safety,
+        });
+        interactionMessage('Steering resumed; room, cooldowns and rate window unchanged.');
+        renderLivePanels();
+        update();
+      }
+    } catch (error) {
+      interactionMessage(error.message, true);
+    } finally {
+      interaction.resumingSteering = false;
+      renderSteeringResume();
+    }
+  }
+  $('#resumeSteering').addEventListener('click', resumeSteering);
   function optimizerBadgeClasses(phase) {
     const status = optimizerState || {}, progress = status.progress;
     const now = liveMode
@@ -1837,12 +1931,18 @@
     return {
       phase: !fresh ? 'unknown' : phase === 'stable' ? (healthy && settled ? 'healthy' : 'waiting') : phaseClass(phase),
       mode: !status.automatic_actuation ? '' : !fresh ? 'unknown' :
-        healthy && status.automatic_actuation_ready && Number(status.actions_used || 0) < Number(status.maximum_actions || 0)
+        healthy && status.automatic_actuation_ready && !RoomConvergence.budgetDetail(status) &&
+          !RoomConvergence.protectionDetail(status)
           ? 'healthy' : 'waiting',
     };
   }
   function optimizerReason(reason) {
     const reasons = {
+      steering_failures_paused: 'Paused: repeated steering failures; use Resume steering',
+      steering_oscillation_paused: 'Paused: repeated AP reversals; use Resume steering',
+      steering_rate_limited: 'Rolling request limit; retries resume automatically',
+      steering_client_cooldown: 'Waiting for per-client request spacing',
+      steering_request_pending: 'Waiting for the submitted move to finish',
       minimum_dwell_not_met: 'Waiting for association dwell time',
       condition_hold_not_met: 'Confirming that the better AP stays better',
       post_steer_cooldown: 'Cooldown after a verified move',
@@ -1875,6 +1975,7 @@
     return reasons[reason] || String(reason || 'Waiting for evaluation').replace(/_/g, ' ');
   }
   function renderOptimizerStatus() {
+    renderSteeringResume();
     if (profilingState && profilingState.mode === 'native-observation') {
       $('#optimizerStatus').innerHTML = '<b>Native observation · no lab steering</b><p>Only the room RF stimulus is applied. No external candidate queries, client steering or backhaul-parent selection.</p>';
       $('#optimizerActivityDetails').textContent = 'External candidate collection is disabled in native observation.';
@@ -1918,12 +2019,25 @@
         : 'Evaluation age is unknown; convergence is not confirmed.';
     } else if (healthState && healthState.healthy === false) {
       heading = 'Waiting for lab health recovery';
-      detail = 'The latest health check is degraded; convergence is not confirmed.';
+      detail = healthState.topology_nodes < healthState.expected_topology_nodes
+        ? 'Only ' + healthState.topology_nodes + ' / ' + healthState.expected_topology_nodes +
+          ' mesh nodes are reported. Missing extenders may have lost backhaul; client steering waits for mesh recovery. Resume Play to reach the return positions, or restore Default.'
+        : RoomConvergence.healthDetail(healthState);
+      if (RoomConvergence.budgetDetail(status)) detail += ' ' + RoomConvergence.budgetDetail(status);
+    } else if ((status.steering_safety?.paused_clients || []).length) {
+      heading = 'Some clients paused by steering protection';
+      detail = RoomConvergence.protectionDetail(status);
     } else if (fleet.converged && freshEvaluation && fleet.roster_complete !== false && fleet.measurement_complete !== false && fleet.band_measurements_complete !== false) {
       heading = 'Converged: all clients checked';
       detail = fleet.policy === 'received-scan-band-preference-v1'
         ? 'Last check: clients meet the AP and band policy, using fresh client-received scans for band comparisons. A preferred band can have a weaker signal. Monitoring continues.'
         : 'Last check: all clients were within ' + (Number(fleet.minimum_gain_rcpi || 1) / 2) + ' dB of their strongest measured AP. Monitoring continues.';
+    } else if (status.steering_safety?.rate_retry_seconds > 0) {
+      heading = 'Waiting for the rolling request window';
+      detail = RoomConvergence.protectionDetail(status);
+    } else if (RoomConvergence.budgetDetail(status)) {
+      heading = 'Automatic steering paused: action limit reached';
+      detail = RoomConvergence.budgetDetail(status);
     } else if (blocked.length) {
       heading = blocked.length + ' clients waiting or blocked';
       const counts = {};
@@ -1955,8 +2069,21 @@
       (row.wait_remaining_seconds ? ' · wait ' + esc(row.wait_remaining_seconds) + ' s at evaluation' : '') +
       '</span></td></tr>').join('') + '</tbody></table>' : 'No current per-client evaluation yet.';
   }
+  function renderRFInspector() {
+    RoomRFInspector.render($('#rfInspector'), {selected, world, network: networkState,
+      optimizer: optimizerState, capabilities: rfCapabilitiesState, traffic: trafficExperimentState,
+      view: $('#rfInspectorView').value,
+      now: liveMode
+        ? liveClock ? liveClock.serverMs + Math.max(0, performance.now() - liveClock.receivedMs) : NaN
+        : Date.parse(networkState?.observed_at || optimizerState?.evaluated_at || '')});
+  }
+  $('#rfInspectorView').addEventListener('change', renderRFInspector);
+  $('#rfInspectorCard').addEventListener('toggle', () => {
+    if ($('#rfInspectorCard')?.open) renderRFInspector();
+  });
   function renderLivePanels() {
     if (!liveMode && !replayMode) return;
+    if ($('#rfInspectorCard')?.open) renderRFInspector();
     $('#storyText').textContent = storyState;
     if (networkState) {
       const h = healthState || {}, api = networkState.health || {}, cohorts = networkState.cohorts || {};
@@ -2018,7 +2145,8 @@
       const scores = (optimizerState.candidates || []).slice().sort((a, b) => (b.rcpi || -1) - (a.rcpi || -1));
       const automatic = !!optimizerState.automatic_actuation;
       const used = Number(optimizerState.actions_used || 0);
-      const limit = Number(optimizerState.maximum_actions || 0);
+      const limit = optimizerState.maximum_actions;
+      const safety = optimizerState.steering_safety || {}, paused = (safety.paused_clients || []).length;
       const fleet = optimizerState.fleet || {};
       const assisted = optimizerState.actuation_path === 'room_serialized_rf_assist_btm';
       const stronger = Number(fleet.clients_with_stronger_ap || 0);
@@ -2042,11 +2170,15 @@
         '<span>Stronger AP available</span><b>' + esc(stronger) + (fleet.measurement_complete ? '' : ' · incomplete check') + '</b>' +
         '<span>Next measured batch</span><b>' + esc(optimizerState.action_batch_size || 0) +
           ' / ' + esc(optimizerState.action_batch_limit || 1) + '</b>' +
-        '<span>Action budget</span><b>' + esc(used) + ' / ' + esc(limit || '—') + '</b>' +
+        '<span>Total requests</span><b>' + esc(used) + (limit == null ? ' · no lifetime cap' : ' / ' + esc(limit)) + '</b>' +
+        (safety.enabled ? '<span>Rolling window</span><b>' + esc(safety.requests_in_window) + ' / ' +
+          esc(safety.request_limit) + ' per ' + esc(safety.window_seconds) + ' s</b>' +
+          '<span>Paused clients</span><b>' + esc(paused) + '</b>' : '') +
         '<span>Actuation path</span><b>' + (assisted
           ? 'serialized RF assist + BTM' : 'BTM request') + '</b>' +
         '<span>Automatic steering</span><b>' + (automatic
-          ? (used >= limit ? 'limit reached' : fleet.converged ? 'fleet converged' :
+          ? (paused ? paused + ' paused; others continue' : safety.rate_retry_seconds > 0 ? 'rate limited · automatic retry' :
+            limit != null && used >= limit ? 'limit reached' : fleet.converged ? 'fleet converged' :
             optimizerState.automatic_actuation_ready ? 'reconciling fleet' : 'waiting')
           : 'recommend only') + '</b>' +
         '<span>Action window</span><b>' + (optimizerState.action_window_kind === 'stable_interactive_environment'
@@ -2197,9 +2329,18 @@
   }
 
   // ---- loading -------------------------------------------------------------
+  function renderBackhaulPolicy(policy) {
+    const description = RoomGuide.backhaulDescription(policy, noConnectMode);
+    if ($('#backhaulPolicyTitle').textContent !== description.title) $('#backhaulPolicyTitle').textContent = description.title;
+    if ($('#backhaulPolicyDetail').textContent !== description.detail) $('#backhaulPolicyDetail').textContent = description.detail;
+    $('#backhaulPolicyCard').dataset.policy = policy || 'unknown';
+  }
   function loadWorld(w) {
+    $('#roomName').textContent = 'Room: ' + RoomName.format(w.name);
+    $('#roomName').title = String(w.name || '');
     if (replayMode && replayDurationMs) w = Object.assign({}, w, {duration_ms: replayDurationMs});
     world = w; tMs = 0; selected = null; playing = false; $('#play').textContent = 'Play';
+    renderBackhaulPolicy(w.interaction?.backhaul_policy || (liveMode ? null : w.backhaul_rf === 'geometry' ? 'modeled' : 'fixed-startup-mesh'));
     interaction.playbackRevision = -1;
     showPlaybackCheckpoint(null);
     for (const role of Object.keys(interaction.overrides)) delete interaction.overrides[role];
@@ -2382,7 +2523,7 @@
     if (playing && tMs >= world.duration_ms) tMs = 0;
   }
   $('#play').addEventListener('click', togglePlay);
-  document.addEventListener('keydown', (event) => { if (!$('#viewerManual').open && event.code === 'Space' && !/INPUT|SELECT|BUTTON|SUMMARY/.test(document.activeElement.tagName) && !document.activeElement.closest('.live-scroll')) { event.preventDefault(); togglePlay(); } });
+  document.addEventListener('keydown', (event) => { if (!document.querySelector('dialog[open]') && event.code === 'Space' && !/INPUT|SELECT|BUTTON|SUMMARY/.test(document.activeElement.tagName) && !document.activeElement.closest('.live-scroll')) { event.preventDefault(); togglePlay(); } });
   document.querySelectorAll('[data-speed]').forEach((b) => b.addEventListener('click', () => {
     speed = +b.dataset.speed; document.querySelectorAll('[data-speed]').forEach((x) => x.setAttribute('aria-pressed', x === b));
   }));
@@ -2598,7 +2739,7 @@
     }
   });
   document.addEventListener('keydown', (event) => {
-    if ($('#viewerManual').open) return;
+    if (document.querySelector('dialog[open]')) return;
     if (event.key !== 'Escape') return;
     hideRoleMenu();
     interaction.awaitingDestination = null;
@@ -2609,14 +2750,34 @@
     update();
   });
 
+  function renderRoomConvergence() {
+    const now = liveClock ? liveClock.serverMs + Math.max(0, performance.now() - liveClock.receivedMs) : NaN;
+    const status = RoomConvergence.describe({
+      mode: replayMode ? 'replay' : liveMode ? 'live' : 'preview',
+      connection: $('#liveStatus').dataset.state, now,
+      optimizer: optimizerState, network: networkState, health: healthState,
+      environmentEpoch: interaction.environmentEpoch,
+      canPlay: interactiveLiveMode && interaction.apiEnabled, fault: interaction.fault,
+      nativeObservation: profilingState && profilingState.mode === 'native-observation',
+      loading: applyingWorld, checkpoint: livePlayback && livePlayback.checkpoint_ms != null,
+      moving: livePlayback && livePlayback.status === 'playing' || interaction.drag ||
+        Object.keys(interaction.previewPositions).length > 0 || interaction.movement && interaction.movement.status === 'running',
+    });
+    RoomConvergence.render($('#roomConvergence'), status);
+    RoomConvergence.render($('#playConvergence'), status);
+  }
   function setLiveStatus(state, detail = '') {
     const badge = $('#liveStatus');
     badge.dataset.state = state;
     badge.textContent = (replayMode ? 'REPLAY' : 'LIVE') + ' · ' + state.toUpperCase() + (detail ? ' · ' + detail : '');
+    renderRoomConvergence();
   }
   function resetEventState() {
+    rfCapabilitiesState = null;
+    trafficExperimentState = null;
     networkState = optimizerState = trafficState = healthState = actionState = verificationState = null;
     trafficProbeState = liveClock = null;
+    interaction.environmentEpoch = null;
     storyState = 'Waiting for the scenario…';
     recentEvents = [];
   }
@@ -2683,6 +2844,14 @@
     return null;
   }
   function applyDemoEvent(event, advanceClock = true) {
+    if (event.kind === 'rf.capabilities') rfCapabilitiesState = event.payload;
+    if (event.kind === 'traffic.experiment' &&
+        (!event.payload.world_sha256 || event.payload.world_sha256 === world.golden_sha256)) {
+      trafficExperimentState = event.payload;
+    }
+    if (Number.isSafeInteger(event.payload?.environment_epoch)) {
+      interaction.environmentEpoch = Math.max(interaction.environmentEpoch ?? 0, event.payload.environment_epoch);
+    }
     const recordedAt = Date.parse(event.recorded_at || '');
     if (liveMode && Number.isFinite(recordedAt)) {
       const receivedMs = performance.now();
@@ -2711,6 +2880,7 @@
       selectCurrentLiveWorld();
       worldSwitchError = false;
       networkState = optimizerState = trafficState = healthState = null;
+      trafficExperimentState = null;
       interaction.initialRoles = {};
       const roles = Object.keys(payload.world.roles);
       applyInteractionSnapshot({enabled: interactiveLiveMode, revision: payload.revision,
@@ -2732,7 +2902,12 @@
       interaction.revision = Math.max(interaction.revision, Number(event.payload.revision || 0));
     }
     else if (event.kind === 'optimizer.evaluation' ||
-             event.kind === 'optimizer.measurement.unavailable') optimizerState = event.payload;
+             event.kind === 'optimizer.measurement.unavailable') optimizerState = RoomConvergence.withSafety(optimizerState, event.payload);
+    else if (event.kind === 'optimizer.safety') {
+      optimizerState = RoomConvergence.withSafety(optimizerState, {
+        ...(optimizerState || {}), steering_safety: event.payload.steering_safety,
+      });
+    }
     else if (['optimizer.progress', 'optimizer.measurement.waiting', 'optimizer.environment.changed', 'observation.inconsistent_rf_epoch'].includes(event.kind)) {
       optimizerState = {...(optimizerState || {}), progress: {...event.payload, kind: event.kind, recorded_at: event.recorded_at}};
       if (event.kind !== 'optimizer.progress') {
@@ -2751,7 +2926,7 @@
       }
     }
     else if (event.kind === 'health.sample') {
-      healthState = event.payload;
+      healthState = {...event.payload, observed_at: event.recorded_at};
       if (interactiveLiveMode && healthState.expected_online_clients != null && !applyingWorld && !worldSwitchError) {
         $('#worldSwitchStatus').textContent = 'Controller: ' + healthState.api_active +
           '/' + healthState.expected_online_clients + ' expected online; pool ' + healthState.pool_clients +
@@ -2760,6 +2935,9 @@
     }
     else if (event.kind === 'optimizer.action') {
       actionState = event.payload;
+      optimizerState = RoomConvergence.withSafety(optimizerState, {
+        ...(optimizerState || {}), steering_safety: event.payload.steering_safety,
+      });
       if (optimizerState && event.payload.actions_used != null) {
         optimizerState.actions_used = event.payload.actions_used;
       }
@@ -2971,6 +3149,11 @@
   resize(); placeCamera(); requestAnimationFrame(loop);
   window.__scene = scene; window.__viewer = {
     renderStats,
+    projectFloor: (position) => {
+      camera.updateMatrixWorld();
+      const point = P(position[0], position[1], 0).project(camera);
+      return {x: point.x * main.clientWidth / 2, y: -point.y * main.clientHeight / 2};
+    },
     frameTimings,
     observeFrames: frameTimings ? (observer) => { frameObserver = observer; } : null,
     loadWorld, update, frameAt: (t) => frameAt(t),
@@ -2985,6 +3168,7 @@
 
   const initial = new URLSearchParams(location.search).get('world');
   if (initial && GOLDEN.includes(initial)) sel.value = initial;
+  RoomGuide.mount(document, sel, requestedMode);
   if (noConnectMode) {
     $('#viewerTitle').textContent = 'EasyMesh room sandbox';
     $('#interactionBadge').textContent = 'NO CONNECT';

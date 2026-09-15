@@ -1,0 +1,115 @@
+{
+  "schema": "wmdcfg.mobility.v1",
+  "name": "backhaul-parent-handover",
+  "tags": [
+    "backhaul",
+    "geometry",
+    "native-parent-selection",
+    "quick-demo"
+  ],
+  "backhaul_rf": "geometry",
+  "duration_ms": 24000,
+  "tick_ms": 1000,
+  "pause_at_ms": [
+    12000
+  ],
+  "seed": 1914,
+  "nodes": [
+    {
+      "role": "extender_3",
+      "kind": "fronthaul_ap",
+      "path": [
+        {
+          "time_ms": 0,
+          "position": [
+            28,
+            8
+          ]
+        },
+        {
+          "time_ms": 2000,
+          "position": [
+            28,
+            8
+          ]
+        },
+        {
+          "time_ms": 10000,
+          "position": [
+            28,
+            28
+          ]
+        },
+        {
+          "time_ms": 14000,
+          "position": [
+            28,
+            28
+          ]
+        },
+        {
+          "time_ms": 22000,
+          "position": [
+            28,
+            8
+          ]
+        },
+        {
+          "time_ms": 24000,
+          "position": [
+            28,
+            8
+          ]
+        }
+      ]
+    },
+    {
+      "role": "sta_static_09",
+      "kind": "station",
+      "path": [
+        {
+          "time_ms": 0,
+          "position": [
+            29,
+            8
+          ]
+        },
+        {
+          "time_ms": 2000,
+          "position": [
+            29,
+            8
+          ]
+        },
+        {
+          "time_ms": 10000,
+          "position": [
+            29,
+            28
+          ]
+        },
+        {
+          "time_ms": 14000,
+          "position": [
+            29,
+            28
+          ]
+        },
+        {
+          "time_ms": 22000,
+          "position": [
+            29,
+            8
+          ]
+        },
+        {
+          "time_ms": 24000,
+          "position": [
+            29,
+            8
+          ]
+        }
+      ]
+    }
+  ]
+}

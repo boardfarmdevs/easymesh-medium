@@ -68,8 +68,12 @@ def capability_manifest(backend: str, status=None) -> dict:
                 "reason": "Configured noise reference and scan/HAL placeholders are not measured noise.",
             },
             "rx_rate": {
-                "state": "unsupported", "unit": "Mbit/s",
-                "reason": "Injected RX rate and modeled PHY airtime are not qualified.",
+                "state": "missing" if modeled else "unsupported", "unit": "Mbit/s",
+                "reason": "Selected legacy RX metadata is implemented; this manifest cannot qualify a live rate or physical capacity.",
+            },
+            "received_candidate_rcpi": {
+                "state": "missing", "unit": "RCPI", "source_kind": "client_nl80211_received_scan",
+                "reason": "Opt-in client-received samples are separate from HAL matrix reports; require fresh matching scan evidence.",
             },
             "bss_load_utilization": {
                 "state": "missing" if modeled else "unsupported", "unit": "uint8/255",
@@ -90,6 +94,30 @@ def capability_manifest(backend: str, status=None) -> dict:
             "measured_airtime": False, "spatial_reuse": False,
             "reverse_ack": False, "physical_capacity": False,
             "kernel_backend_parity": False,
+        },
+        "support": {
+            "schema": "easymesh.rf-support.v1",
+            "scope": "Repository implementation and recorded profile evidence; not certification of the running binaries.",
+            "activation": {
+                "frequency_snr": "enabled" if "frequency_qualified_snr" in wire else "unknown",
+                "survey_api": "enabled" if modeled else "unavailable",
+                "visibility_reservations": "enabled" if "visibility_contention" in wire else "disabled",
+                "native_survey_provider": "unknown",
+                "received_scans": "per-client opt-in; kernel receive-context support also required",
+                "native_load_policy": "opt-in; not implied by survey support",
+            },
+            "implemented": [
+                "directed_frequency_snr", "native_survey_and_bss_load", "selected_legacy_rx_metadata",
+                "legacy20_airtime", "independent_reverse_ack", "conservative_visibility_reservations",
+                "client_received_passive_scans", "guarded_native_load_policy",
+            ] if backend == "userspace" else ["directed_snr"],
+            "recorded_profile_evidence": {
+                "legacy20_airtime_reverse_ack_reservations": "reference/radio/virtual-rf-assessment.md#125-phase-3-qualified-model-and-open-gates",
+                "received_band_scans": "reference/optimizer/band-steering.md",
+            } if backend == "userspace" else {},
+            "not_qualified": ["physical_capacity", "modern_phy_service", "receiver_local_collisions",
+                              "independent_noise", "adjacent_channel_overlap", "full_native_80211k"],
+            "current_run_qualification": "not established by capability flags",
         },
     }
 

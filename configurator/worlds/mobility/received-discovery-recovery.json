@@ -1,0 +1,83 @@
+{
+  "schema": "wmdcfg.mobility.v1",
+  "duration_ms": 36000,
+  "tick_ms": 1000,
+  "seed": 1916,
+  "name": "received-discovery-recovery",
+  "tags": [
+    "received-scan",
+    "same-band",
+    "discovery",
+    "clients-10"
+  ],
+  "pause_at_ms": [
+    12000,
+    24000
+  ],
+  "band_steering": {
+    "sta_static_01": {
+      "allowed_bands": [
+        "5"
+      ],
+      "initial_band": "5",
+      "measurement_mode": "received_same_band"
+    }
+  },
+  "nodes": [
+    {
+      "role": "extender_1",
+      "kind": "fronthaul_ap",
+      "position": [35, 4],
+      "presence": [
+        [
+          0,
+          4000
+        ],
+        [
+          16000,
+          36000
+        ]
+      ]
+    },
+    {
+      "role": "sta_static_01",
+      "path": [
+        {
+          "time_ms": 0,
+          "position": [
+            8.5,
+            12
+          ]
+        },
+        {
+          "time_ms": 3000,
+          "position": [
+            8.5,
+            12
+          ]
+        },
+        {
+          "time_ms": 10000,
+          "position": [
+            35.5,
+            4
+          ]
+        },
+        {
+          "time_ms": 26000,
+          "position": [
+            35.5,
+            4
+          ]
+        },
+        {
+          "time_ms": 34000,
+          "position": [
+            8.5,
+            12
+          ]
+        }
+      ]
+    }
+  ]
+}

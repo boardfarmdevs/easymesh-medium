@@ -1,0 +1,41 @@
+#openRoomGuide { margin-top: 6px; width: 100%; }
+#backhaulPolicyCard { border-left: 3px solid #897b68; }
+#backhaulPolicyCard[data-policy="modeled"] { border-left-color: #c65c25; background: #fff0df; }
+#backhaulPolicyCard p { margin: 6px 0 0; }
+#roomGuide {
+  width: min(1120px, calc(100vw - 24px)); height: min(840px, calc(100dvh - 24px));
+  max-width: none; max-height: none; padding: 0; border: 1px solid var(--rule);
+  border-radius: 10px; color: var(--ink); background: var(--paper);
+  box-shadow: 0 12px 50px #0005; font-size: 14px; line-height: 1.5;
+}
+#roomGuide[open] { display: flex; flex-direction: column; }
+#roomGuide::backdrop { background: #15110bc4; }
+#roomGuide header, #roomGuide footer { padding: 12px 18px; flex-shrink: 0; }
+#roomGuide header { border-bottom: 1px solid var(--rule); }
+#roomGuide header .row { justify-content: space-between; }
+#roomGuide h2 { margin: 0; font-size: 20px; text-transform: none; letter-spacing: normal; }
+#roomGuide header p, #roomGuideStatus { margin: 6px 0 0; font-size: 13px; }
+#roomGuide footer { border-top: 1px solid var(--rule); }
+#roomGuide button { font-size: 14px; }
+.room-guide-body { display: grid; grid-template-columns: minmax(240px, 34%) 1fr; min-height: 0; flex: 1; }
+#roomGuideList, #roomGuideDetails { overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+#roomGuideList { padding: 10px; border-right: 1px solid var(--rule); }
+#roomGuideList button { display: block; width: 100%; margin-bottom: 6px; padding: 10px; text-align: left; }
+#roomGuideList button strong, #roomGuideList button small { display: block; overflow-wrap: anywhere; }
+#roomGuideList button small { margin-top: 3px; color: #625a51; font-size: 12px; }
+#roomGuideList button[aria-pressed="true"] { background: #f6e3cf; border-color: #bb6530; }
+#roomGuideDetails { padding: 16px 22px; }
+#roomGuideDetails h3 { margin: 0 0 5px; font-size: 22px; }
+#roomGuideDetails h4 { margin: 20px 0 4px; font-size: 15px; }
+#roomGuideDetails p { margin: 0 0 10px; }
+#roomGuideRoomId { display: block; overflow-wrap: anywhere; font-size: 12px; }
+#roomGuideMeta { color: #625a51; font-size: 13px; margin-top: 6px !important; }
+#roomGuideDetails details { border-top: 1px solid var(--rule); margin-top: 20px; padding-top: 12px; }
+#roomGuideDetails summary { font-weight: 700; cursor: pointer; }
+#roomGuide :focus-visible { outline: 2px solid #b7531c; outline-offset: 2px; }
+@media (max-width: 640px) {
+  .room-guide-body { grid-template-columns: 1fr; grid-template-rows: minmax(90px, 28%) 1fr; }
+  #roomGuideList { border-right: 0; border-bottom: 1px solid var(--rule); }
+  #roomGuideDetails { padding: 12px 16px; }
+  #roomGuide header, #roomGuide footer { padding: 10px 14px; }
+}

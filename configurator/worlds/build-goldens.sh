@@ -48,8 +48,15 @@ emit home-five-agent.json private-client-room-walk.json home-a-private-client-ro
 emit band-steering-lane.json band-upgrade-24-5.json band-upgrade-24-5.world.json
 emit band-steering-lane.json band-upgrade-5-6.json band-upgrade-5-6.world.json
 emit band-steering-lane.json band-ap-counter-roam.json band-ap-counter-roam.world.json
+emit band-steering-lane.json traffic-low-high-off.json traffic-low-high-off.world.json
+emit load-comparison-lane.json traffic-quieter-ap.json traffic-quieter-ap.world.json
+emit band-steering-lane.json received-same-band-roam.json received-same-band-roam.world.json
+emit band-steering-lane.json received-discovery-recovery.json received-discovery-recovery.world.json
 emit home-five-agent.json one-client-handover.json home-a-one-client-handover.world.json
 emit large-room-five-agent.json perimeter-counter-roam.json large-room-perimeter-counter-roam.world.json
 emit large-room-client-cluster.json extender-evacuation.json large-room-extender-evacuation.world.json
+emit backhaul-courtyard.json backhaul-branch-formation.json backhaul-branch-formation.world.json
+emit backhaul-courtyard.json backhaul-parent-handover.json backhaul-parent-handover.world.json
+emit backhaul-courtyard.json backhaul-isolation-recovery.json backhaul-isolation-recovery.world.json
 
 echo "golden RF sequences: ${mode#--} passed"

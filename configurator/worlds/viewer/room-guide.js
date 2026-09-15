@@ -1,0 +1,328 @@
+(function (root) {
+  'use strict';
+
+  const shared = {
+    rf: 'All rooms use distance/logarithmic path loss, wall attenuation, per-band reference signal and seeded shadowing to produce directed SNR links. Presence and per-node transmit gain can change those links. wmediumd applies the RF matrix to hwsim frame delivery, losses, retries and modeled airtime. RSSI uses a fixed −91 dBm noise reference; ordinary same-band HAL candidate RCPI is synthesized from configured links. Explicit band-steering and received-scan rooms instead use AP→client passive reception for profiled clients.',
+    evidence: 'Start paused and wait for fresh measurements and the expected online roster. Then Play at 1×; at checkpoints, wait for convergence before continuing. Compare the room’s actual serving links with Network Topology, native client BSSID/frequency, optimizer reasons and traffic-probe delivery. Dashed best-link predictions and green bars alone do not prove a handover. Script duration excludes checkpoint waits and settling time.',
+    limits: 'These are expected checks, not recorded PASS results. In live RDK, steering decisions belong to the external lab optimizer; native BTM/association outcomes test the EasyMesh stack, not autonomous controller policy or certification. No-connect is geometry-only and cannot prove steering. Startup backhaul may be protected: geometry need not change the parent tree. Channel utilization/BSS Load can report modeled traffic, but only the explicit Traffic rooms schedule bounded ICMP traffic; ordinary rooms do not inject a controlled load test. Legacy-rate 20 MHz modeling does not prove calibrated throughput, modern PHY capacity or independently varying noise/interference.',
+  };
+
+  const entries = {
+    'traffic-low-high-off': {
+      title: 'Traffic · Low → High → Off', seconds: 30, clients: 10, pauses: [],
+      rf: 'Fixed geometry; sta_static_01 requests 10 ICMP packets/s during 5–10 s, then 200 packets/s during 10–23 s, using 1200-byte payloads through its existing wlan0. The first five and last seven seconds have no experimental traffic.',
+      optimizer: 'Default signal policy need not steer because traffic increased. With a deliberately enabled native-load policy, inspect actual AP reports and rejection reasons; requested packet rate is not a utilization input.',
+      watch: 'Open RF inspector → Traffic experiment for requested rate and end-of-phase transmitted/reply counts. Compare native AP utilization and sample age in Native observations with the separate modeled channel-activity panel. Topology should retain ten clients and accurate serving ownership.',
+      limits: 'Short live room checks pass on RDK and prplMesh (2026-09-15). ICMP echo is a bounded stimulus, not TCP/UDP goodput or saturation. Ordinary probes/beacons continue during the off phase. Pause, lease expiry, source offline or changing rooms stops the experiment.',
+    },
+    'traffic-quieter-ap': {
+      title: 'Traffic · Busy AP / Quieter Target', seconds: 30, clients: 10, pauses: [],
+      rf: 'Two extenders have similar strong coverage around sta_static_03. It requests 10 then 200 ICMP packets/s during 5–10 and 10–23 s. Geometry and channels are not changed by this schedule.',
+      optimizer: 'Default same-channel setup is a negative control: never load-balance onto a supposedly independent budget on the same radio/channel. For a positive comparison, prepare different native fronthaul channels, matching live bindings and client frequency permissions, and an explicit load-aware-policy session first. Steer only if native overload, activity, freshness, signal, hop and quieter-channel gates all pass.',
+      watch: 'Select sta_static_03; correlate generated/reply counts, current native utilization and each target exclusion in RF inspector. Confirm any actual roam in both views and native BSSID; retain ten clients. No overload or no safe target is a legitimate no-action result.',
+      limits: 'Short live room checks pass on RDK and prplMesh (2026-09-15). The room does not retune radios, enable the load policy, pin a BSSID or manufacture high utilization. A high requested rate alone does not guarantee a positive balancing demonstration.',
+    },
+    'received-same-band-roam': {
+      title: 'Received Scan · Same-Band Roam', seconds: 30, clients: 10, pauses: [16],
+      rf: 'sta_static_01 is explicitly profiled for received passive scans on 5 GHz. It moves from gateway to extender_1 during 4–12 s and returns during 20–28 s. sta_static_02 is a pinned 5 GHz control without the received-scan opt-in.',
+      optimizer: 'Use fresh AP→client reception for both serving and target RCPI, without band preference or HAL-matrix fallback for the profiled station. Expect gateway initially, extender_1 at the 16 s checkpoint, then gateway after return, subject to native visibility and signal-policy gates.',
+      watch: 'At each checkpoint inspect scan ID, timestamp, source, rejected BSSIDs and physical BSSID/frequency. Both views should agree on ten clients and eventual ownership. A second fresh scan is required across the hold; stale or missing scan evidence pauses steering.',
+      limits: 'Short live room checks pass on RDK and prplMesh (2026-09-15). Requires the existing hwsim receive-context support and working passive scanner. This is AP→client reception, not AP-heard uplink RCPI, native 802.11k completion or calibrated RF performance.',
+    },
+    'received-discovery-recovery': {
+      title: 'Received Scan · Discovery / Recovery', seconds: 36, clients: 10, pauses: [12, 24],
+      rf: 'The received-scan 5 GHz station walks toward extender_1 during 3–10 s. Extender_1 fronthaul is unavailable during 4–16 s, returns at 16 s, and the client returns to the gateway during 26–34 s. Backhaul and containers remain active.',
+      optimizer: 'At 12 s, an absent extender_1 must not retain an eligible fresh candidate from an old scan. If the serving beacon is also lost, wait rather than fill missing reception with modeled RCPI. At 24 s, fresh rediscovery should allow convergence to extender_1; after return prefer gateway when the normal signal margin permits.',
+      watch: 'Inspect not_received_in_fresh_scan, unavailable serving scans, new scan IDs after recovery and native association outcomes. Other clients may leave the disabled fronthaul. Keep ten clients represented once native associations recover; never infer actual ownership from the dashed best-link prediction.',
+      limits: 'Short live room checks pass on RDK and prplMesh (2026-09-15). This models RF visibility loss, not hostapd shutdown or a hidden SSID. Discovery timing follows actual beacon reception and bounded scan scheduling, not instantaneous geometry truth.',
+    },
+    'backhaul-branch-formation': {
+      title: 'Backhaul · Branch Formation', seconds: 24, clients: 10, pauses: [12], backhaul: 'geometry',
+      rf: 'Extender roles 3 and 4 leave the gateway area for the far courtyard corners. A partition weakens direct gateway paths while roles 1 and 2 offer stronger relay links. Two nearby clients move with those extenders. All AP-to-AP RF follows geometry.',
+      optimizer: 'Client steering remains the external lab policy; backhaul parent selection belongs to native software. At 12 s inspect whether roles 3 and 4 use roles 1 and 2 respectively. No target BSSID or parent is forced.',
+      watch: 'Compare applied bidirectional 5 GHz SNR, physical uplink BSSID, controller parents and gateway reachability at the 12 s pause. Resume to return by 22 s, finishing at 24 s. Report native reparenting or failure separately from correct RF application.',
+      limits: 'A stronger relay is an opportunity, not proof that native parent selection is implemented or converges. A persistent star or lost uplink is a recorded result. This room does not silently restore strong root links or run the assisted parent planner.',
+    },
+    'backhaul-parent-handover': {
+      title: 'Backhaul · Parent Handover', seconds: 24, clients: 10, pauses: [12], backhaul: 'geometry',
+      rf: 'Extender_3 moves from the upper relay region near extender_1 to the lower region near extender_2, then returns. sta_static_09 follows one metre beside it, keeping their local fronthaul strong while upstream opportunities change.',
+      optimizer: 'Observe native selection of the stronger upstream parent and any hold, reconnect or failure to adapt. The client optimizer may still steer clients, but it never supplies an extender parent in this room.',
+      watch: 'At the 12 s pause compare both relay link budgets, actual extender BSSID, the parent line in Network Topology and gateway traffic. After resuming, verify return RF and native reachability at 24 s. Strong client signal alone is insufficient.',
+      limits: 'Removing the RF freeze does not guarantee a parent change. Native hysteresis or absent native optimization may retain the original parent. Record this distinctly from a rendering or medium error; do not credit external BSSID assistance as native behavior.',
+    },
+    'backhaul-isolation-recovery': {
+      title: 'Backhaul · Isolation / Recovery', seconds: 24, clients: 10, pauses: [12], backhaul: 'geometry',
+      rf: 'Extender_4 and sta_static_10 travel behind a 70 dB isolation wall during 2–8 s, remain there through 16 s and return by 22 s. At 12 s all its modeled mesh-peer links reach −20 dB, but its nearby client retains a strong fronthaul link.',
+      optimizer: 'Observe an actual upstream outage and native recovery, not a fronthaul-disable command. Client policy must not claim successful end-to-end service from strong local RSSI or stale controller ownership while the uplink is isolated.',
+      watch: 'At the pause verify applied RF, physical uplink state, failed gateway traffic and how both views report missing/stale evidence. Resume and verify native association, fresh topology and traffic after the return; an immediate disconnect indication is not guaranteed.',
+      limits: 'All containers stay running. Strong fronthaul does not imply a working backhaul. Expected outage observations are not generic room-health failures, but failure to recover within the stated test window must remain a separate reported deficiency.',
+    },
+    'fifty-client-counter-roam': {
+      title: 'Fifty Client Counter-Roam', seconds: 36, clients: 50, pauses: [18],
+      rf: 'Fifty clients in a large room: two walkers exchange Ext-1/Ext-2 regions during 6–12 s and return during 24–30 s. Forty-eight reference clients stay fixed. Distance and band-dependent link budgets change for the walkers.',
+      optimizer: 'Evaluate both walkers independently and steer to eligible serving APs as their link advantage changes. Reference clients may settle after loading, but should not keep churning.',
+      watch: 'At the 18 s pause verify the exchanged serving regions; at 36 s verify the return. Both views should show exactly 50 online clients, not the other 50 provisioned stations. Restore default 20 should preserve all container and radio identities.',
+      limits: 'Demonstrates roster scaling and concurrent roaming, not a 50-client throughput or channel-utilization benchmark. More associated clients do not by themselves impose controlled traffic load.',
+    },
+    'band-upgrade-24-5': {
+      title: 'Band Upgrade · 2.4 ↔ 5 GHz', seconds: 30, clients: 10, pauses: [12],
+      rf: 'A dual-band client starts on 2.4 GHz near the gateway, moves farther away, then returns. Frequency-dependent SNR makes 5 GHz attractive nearby and 2.4 GHz safer farther away. A separate 2.4-only client is the capability control.',
+      optimizer: 'For sta_static_01, expect gateway/5 GHz after initial settling, gateway/2.4 GHz at the 12 s pause, and gateway/5 GHz at 30 s. sta_static_02 must remain on 2.4 GHz. Small boundary movements exercise upgrade safety and hysteresis.',
+      watch: 'Check physical frequency and BSSID, not just AP ownership: a same-AP band change may leave the AP name unchanged. Correlate band-policy reasons, native steering outcome and probe delivery at each checkpoint. Role IDs can differ from displayed station names.',
+      limits: 'Band capabilities and the initial band are configured, but the target BSSID is not pinned by the script. This demonstrates policy and native band transitions, not higher measured throughput on 5 GHz.',
+    },
+    'band-upgrade-5-6': {
+      title: 'Band Upgrade · 5 ↔ 6 GHz', seconds: 30, clients: 10, pauses: [12],
+      rf: 'A 5/6 GHz-capable client starts on 5 GHz, moves away from the gateway and returns. Separate per-frequency link budgets create upgrade and fallback conditions. A 2.4-only reference client stays capability-limited.',
+      optimizer: 'For sta_static_01, expect gateway/6 GHz after initial settling, gateway/5 GHz at 12 s, and gateway/6 GHz at 30 s. sta_static_02 stays on gateway/2.4 GHz. Unsafe upgrades should be withheld rather than forced.',
+      watch: 'At the pause and finish, compare the native BSSID and operating frequency with the optimizer’s band decision and room properties. Confirm actual traffic after the transition; an unchanged AP name is normal.',
+      limits: 'Requires the live lab’s supported 6 GHz configuration. A 6 GHz association proves neither calibrated Wi-Fi 6E capacity nor regulatory/AFC behavior. The link-color band selector does not steer radios.',
+    },
+    'band-ap-counter-roam': {
+      title: 'AP + Band Counter-Roam', seconds: 40, clients: 10, pauses: [16, 30],
+      rf: 'Two dual-band clients cross in opposite directions between gateway and extender_1 regions. Distance changes both the preferred AP and the safe band; one 2.4-only reference client remains near the gateway.',
+      optimizer: 'Initially sta_static_01 should settle on gateway/5 GHz and sta_static_03 on extender_1/5 GHz. At 16 s they exchange APs on 2.4 GHz; at 30 s and 40 s they retain the exchanged APs on 5 GHz. sta_static_02 stays on gateway/2.4 GHz.',
+      watch: 'At both pauses verify each client’s physical AP and frequency independently in addition to both views’ ownership. Inspect per-client decisions and traffic so one completed roam cannot mask the other client’s failure.',
+      limits: 'Exercises combined AP/band policy, not an instruction to roam simultaneously. The script changes position and capabilities, not target associations. Use stable role IDs when display labels differ.',
+    },
+    'home-a-stationary': {
+      title: 'Home A · Stationary', seconds: 60, clients: 10, pauses: [],
+      rf: 'Ten fixed clients and fixed AP geometry give a repeatable distance/wall-loss baseline. Play does not introduce intentional movement or presence changes.',
+      optimizer: 'Settle eligible clients after loading, then avoid unnecessary steering when fresh candidate gains do not justify a move. Stable, dwell and hysteresis decisions are useful outcomes, not missing activity.',
+      watch: 'Keep ten online clients in both views; compare serving ownership and per-client reasons before and after Play. Measurements should remain fresh without sustained AP ping-pong. Check probe traffic while the geometry is unchanged.',
+      limits: 'A stable topology alone does not prove metrics are fresh or the optimizer is running. This is a short stability baseline, not a soak test or a mobility/load benchmark.',
+    },
+    'home-a-one-client-handover': {
+      title: 'Home A · One Client Handover', seconds: 20, clients: 11, pauses: [],
+      rf: 'One walker moves from (2,2) toward (10,3), crossing wall-dependent coverage, while ten reference clients stay fixed. Most movement occurs during 2–18 s.',
+      optimizer: 'Recognize a sufficiently stronger eligible AP from fresh candidate measurements, issue steering when policy permits and verify the resulting association. Keep unrelated reference clients stable once settled.',
+      watch: 'Follow the moving client’s measured signal, optimizer reason/action, native BSSID and actual line in both views. Let the room settle after 20 s and verify probe delivery on the new serving AP.',
+      limits: 'A dashed candidate-line change is only a prediction. A moving dot or a nearest AP does not prove the native handover completed; hysteresis and settling can legitimately delay it.',
+    },
+    'large-room-extender-evacuation': {
+      title: 'Large Room · Extender Evacuation', seconds: 20, clients: 12, pauses: [],
+      rf: 'Twelve clients stay fixed in a 40×40 m room. Eight initially cluster near extender_1. During 4–18 s that extender moves from (8,8) to (36,32), weakening client-serving links without disabling the AP.',
+      optimizer: 'Initially serve the cluster through extender_1; after the move, steer the eight cluster clients toward Agent-1 where the RF is now stronger. Independent decisions should not be mistaken for one simultaneous bulk roam.',
+      watch: 'Compare each cluster client’s candidate and actual serving link, per-client reason and verified BSSID. At 20 s leave the lab running to settle; confirm all twelve clients remain present and check traffic after evacuation.',
+      limits: 'This is RF-driven evacuation, not an extender power failure. Protected startup backhaul can retain its parent despite the new geometry; a branch through another extender is not required in that mode.',
+    },
+    'large-room-perimeter-counter-roam': {
+      title: 'Large Room · Perimeter Counter-Roam', seconds: 60, clients: 12, pauses: [14, 28, 42],
+      rf: 'Two clients travel in opposite directions around the outer lanes of a 40×40 m room; ten clients stay fixed. Their changing distances favor different extender regions on each leg.',
+      optimizer: 'Follow independent eligible AP opportunities along role paths 1→2→4→3→1 and 1→3→4→2→1. Verify meaningful gains rather than chasing every small instantaneous difference.',
+      watch: 'At 14, 28 and 42 s wait for fresh measurements and verified serving ownership in both views before pressing Play again. Both walkers return by 56 s and finish at 60 s. Probe each walker separately when comparing continuity.',
+      limits: 'Extender role numbers may differ from display labels. Pauses do not assign an AP or automatically prove convergence; total wall-clock time includes all checkpoint waits.',
+    },
+    'home-a-asymmetric-link': {
+      title: 'Home A · Asymmetric Link', seconds: 60, clients: 11, pauses: [],
+      rf: 'One walker crosses the room with transmit-gain penalties of −7/−10/−12 dB on 2.4/5/6 GHz; ten clients stay fixed. Client-to-AP links are weaker than the reverse AP-to-client links.',
+      optimizer: 'Preserve the direction and frequency of candidate evidence through loading and playback. Inspect which direction the active policy uses; a strong downlink must not be described as proof of a strong uplink.',
+      watch: 'Compare directed RF values/readback, client and AP measurements, and bidirectional traffic while the walker moves. Verify native serving ownership and report any reachability loss independently of a favorable candidate score.',
+      limits: 'Shows whether asymmetric RF inputs survive the plumbing. It does not by itself prove a joint uplink/downlink optimizer: a policy using one candidate RCPI direction may not account for the other.',
+    },
+    'home-a-band-walk-small': {
+      title: 'Home A · Small Band Walk', seconds: 60, clients: 10, pauses: [],
+      rf: 'Ten clients move through Home A, changing distance and wall crossings on the modeled bands. This uses ordinary mobility, not the dedicated band-upgrade capability/checkpoint profiles.',
+      optimizer: 'Use fresh, eligible candidates as clients move while preserving each client’s SSID and supported bands. Inspect whether staying or roaming matches the active policy and available measurements.',
+      watch: 'Compare per-client AP ownership, actual operating frequency, freshness and traffic during motion and after settling at 60 s. The link-color band control can compare predicted RF but must not be confused with changing a radio.',
+      limits: 'The room name does not specify an exact sequence of native band transitions. Use the dedicated 2.4↔5 and 5↔6 rooms for explicit same-AP band-steering expectations.',
+    },
+    'home-a-border-hover': {
+      title: 'Home A · Border Hover', seconds: 60, clients: 12, pauses: [],
+      rf: 'Two walkers oscillate across nearby coverage boundaries every ten seconds while ten reference clients remain fixed. Small position changes repeatedly change marginal candidate advantages.',
+      optimizer: 'Apply gain thresholds, hysteresis, dwell and cooldown to avoid chasing insignificant improvements. Roam when a sustained eligible advantage warrants it, not on every boundary crossing.',
+      watch: 'Compare action history and per-client hold reasons with fresh serving/candidate values. Look for unnecessary repeated AP reversals and verify that legitimate holds still preserve traffic and acceptable service.',
+      limits: 'No roam can be correct here, but stale metrics are not a successful hysteresis test. A short oscillation script does not establish a long-term ping-pong rate.',
+    },
+    'home-a-disappear-reappear': {
+      title: 'Home A · Disappear / Reappear', seconds: 60, clients: 12, pauses: [],
+      rf: 'Two clients become RF-offline and return at fixed positions. Expected online counts are 12→11→10→11→12 at 16/24/32/40 s. Containers remain running; absent clients are disconnected and RF-isolated.',
+      optimizer: 'Exclude absent clients from steering and refresh the eligible roster when the same identities return. Resume useful evaluation after fresh associations and measurements appear.',
+      watch: 'Both views should lose and regain the same MAC/role identities after native updates, without ghosts or duplicates. Confirm returning clients are associated, measured and traffic-capable rather than merely drawn.',
+      limits: 'Native reattachment after presence restoration is not automatically an optimizer-triggered roam. This tests RF availability and roster lifecycle, not container restart or shutdown.',
+    },
+    'home-a-extender-loss-recovery': {
+      title: 'Home A · Extender Loss / Recovery', seconds: 90, clients: 10, pauses: [],
+      rf: 'Extender_4 fronthaul is unavailable from 20 to 60 s, then restored. The backhaul remains connected and all ten client containers remain available.',
+      optimizer: 'Do not choose the disabled fronthaul as a target. Help affected clients find eligible reachable APs, then reconsider the restored AP when fresh measurements and policy justify a return.',
+      watch: 'Look for fronthaul-disabled status, departures from that AP, recovery of client reachability and correct ownership in both views. After 60 s verify fresh restored-AP candidates; at 90 s check final convergence and traffic.',
+      limits: 'This is not full extender, backhaul or host power loss. Clients need not all return immediately or together; distinguish native reconnects from verified optimizer steering.',
+    },
+    'home-a-fast-transit': {
+      title: 'Home A · Fast Transit', seconds: 30, clients: 12, pauses: [],
+      rf: 'Two fast walkers cross Home A repeatedly over 30 s while ten clients stay fixed. Candidate ordering and wall losses can change again before a previous handover has completed.',
+      optimizer: 'Use fresh generations and avoid acting on superseded locations. Handle the two clients independently, then converge at their final positions once motion stops.',
+      watch: 'Correlate RF commit, measurement, decision, native association and rendering times. Report transient lag separately from final convergence and verify traffic rather than judging only the moving dots.',
+      limits: 'No promise of instant or simultaneous roaming. A final good association alone cannot establish low latency throughout motion; timing evidence is required.',
+    },
+    'home-a-flash-crowd': {
+      title: 'Home A · Flash Crowd', seconds: 60, clients: 20, pauses: [],
+      rf: 'Ten extra clients appear in the central area at 20 s and disappear at 50 s: online count 10→20→10. This changes RF presence and associations, not an explicit offered-traffic schedule.',
+      optimizer: 'Refresh the roster, evaluate newly available clients and exclude departing clients without disrupting established peers. Reconcile final ownership after each presence change.',
+      watch: 'Room and topology counts should follow 10→20→10 after native updates, without duplicate identities or stale associations. Inspect fresh metrics, decisions and probe reachability for both old and newly arrived clients.',
+      limits: 'More clients are not proof of channel congestion or load balancing. To test utilization/BSS Load policy, separately generate controlled traffic and verify fresh busy-time/native load measurements.',
+    },
+    'home-a-private-client-room-walk': {
+      title: 'Home A · Default Private Client Walk', seconds: 240, clients: 20, pauses: [],
+      rf: 'The default twenty-client room follows one private-SSID walker across Home A while nineteen reference clients stay fixed. The walker holds near (3,2) for 30 s and finishes near (18,12).',
+      optimizer: 'Track sustained signal opportunities along the narrated route while preserving the private SSID. Keep reference clients stable after initial settling and explain holds as well as steering actions.',
+      watch: 'Follow the walker’s actual serving AP, candidate measurements, decision reasons and traffic across both views. Compare final physical BSSID with controller ownership; elapsed scenario time is distinct from event age.',
+      limits: 'This is a longer guided mobility demonstration, not a full performance benchmark. The narration, highlighted client and dashed predictions are not native steering evidence.',
+    },
+    'home-a-slow-walk-ten': {
+      title: 'Home A · Ten Slow Walkers', seconds: 60, clients: 20, pauses: [],
+      rf: 'Ten walkers take independent paths through Home A while ten clients remain fixed. Distance, walls and per-band budgets change concurrently across the fleet.',
+      optimizer: 'Evaluate eligible improvements across all moving clients without starving one client behind another. Respect per-client SSID, capability and hold rules rather than enforcing identical decisions.',
+      watch: 'Inspect all twenty clients in both views, including per-client measurements and verification results. At 60 s allow final settling and check that no client is hidden by a fleet-level success summary.',
+      limits: 'Concurrent movement is not controlled concurrent traffic. Fleet convergence does not imply every client has maximum instantaneous SNR or that all handovers finish simultaneously.',
+    },
+    'home-b-slow-walk-ten': {
+      title: 'Home B · Ten Slow Walkers', seconds: 60, clients: 20, pauses: [],
+      rf: 'The same ten-walker/ten-reference workload uses shifted AP geometry in Home B. Changed distances and wall crossings alter eligible serving opportunities relative to Home A.',
+      optimizer: 'Re-evaluate clients against the new geometry instead of carrying over old AP assumptions. Make independent policy-qualified decisions for each moving client and settle the full roster.',
+      watch: 'Compare serving choices and fresh candidate margins with Home A. Verify all twenty native associations and traffic at the end, and compare the actual backhaul tree with the configured policy.',
+      limits: 'Shifted or chain-like geometry does not require a chain topology. Protected startup backhaul can remain unchanged; this room primarily tests client-serving decisions, not automatic extender-parent steering.',
+    },
+  };
+
+  function describe(id) {
+    return Object.prototype.hasOwnProperty.call(entries, id) ? entries[id] : {
+      title: 'Custom or unlisted room',
+      rf: 'No curated RF description is available for this room. Inspect its world file, layout, directed link generations, presence and mobility script.',
+      optimizer: 'Use the active policy and fresh native evidence to define expected behavior; do not borrow another room’s target APs or bands.',
+      watch: 'Verify expected online identities, actual BSSID/frequency, both views’ ownership and traffic before declaring convergence.',
+      limits: 'No room-specific optimizer result or timing expectation is claimed for uploaded or unlisted worlds.',
+    };
+  }
+
+  function metadata(entry) {
+    if (!entry.seconds) return 'Custom scenario · consult the world file';
+    return entry.clients + ' scenario clients · ' + entry.seconds + ' s script' +
+      (entry.pauses.length ? ' · pauses: ' + entry.pauses.join(', ') + ' s' : ' · no automatic pauses') +
+      (entry.backhaul === 'geometry' ? ' · geometry-driven backhaul' : ' · fixed backhaul by default');
+  }
+
+  function backhaulDescription(policy, preview = false) {
+    if (preview) return {title: 'Backhaul · disconnected preview',
+      detail: (policy === 'modeled' ? 'This room requests geometry-driven backhaul in the live lab. ' : 'This room defaults to protected startup backhaul in the live lab. ') +
+        'Here, all links are predictions; no native parents or live RF are controlled.'};
+    if (policy === 'modeled') return {title: 'Geometry-driven backhaul · native parent selection',
+      detail: 'AP-to-AP RF follows this room; no lab parent selection or forced reassociation. Controller membership can outlast a failed uplink: verify native links and gateway traffic, not just green health or signal bars.'};
+    if (policy === 'adaptive-rdk') return {title: 'Geometry-driven backhaul · lab-assisted parents',
+      detail: 'The external RDK lab planner selects parents. This is not native EasyMesh parent-policy evidence.'};
+    if (policy === 'fixed-startup-mesh') return {title: 'Fixed backhaul · client profiling',
+      detail: 'Startup AP-to-AP RF is protected. Client RF follows geometry; extender movement does not test backhaul adaptation. Verify native recovery after returning from a geometry room.'};
+    return {title: 'Backhaul policy · awaiting live state', detail: 'Do not infer the applied backhaul policy from the room drawing.'};
+  }
+
+  function tooltip(id) {
+    const entry = describe(id);
+    return entry.title + '\n' + metadata(entry) + '\n\nSimulated RF: ' + entry.rf +
+      '\n\nExpected optimizer behavior: ' + entry.optimizer + '\n\nEvidence to check: ' + entry.watch +
+      '\n\nLimits: ' + entry.limits;
+  }
+
+  function mount(document, select, mode) {
+    const dialog = document.getElementById('roomGuide');
+    const opener = document.getElementById('openRoomGuide');
+    const list = document.getElementById('roomGuideList');
+    const details = document.getElementById('roomGuideDetails');
+    const load = document.getElementById('loadGuideRoom');
+    const status = document.getElementById('roomGuideStatus');
+    let previewId = null;
+    let buttons = [];
+    const readOnly = mode !== 'interactive' && mode !== 'no-connect';
+
+    for (const [key, value] of Object.entries(shared)) {
+      document.getElementById('roomGuideShared-' + key).textContent = value;
+    }
+
+    function updateControls() {
+      const option = [...select.options].find(item => item.value === previewId);
+      load.disabled = readOnly || select.disabled || !option || option.disabled || !option.value || !!option.dataset.uploaded;
+      load.textContent = mode === 'no-connect' ? 'Load preview' : 'Load room';
+      status.textContent = readOnly ? 'Read-only view: browsing does not change the lab.' :
+        select.disabled ? 'Room loading is currently unavailable or busy. You can still browse the guide.' :
+        mode === 'no-connect' ? 'Geometry preview only: no lab, measurements or steering are connected.' :
+        'Load room immediately applies its initial RF state to the live lab and starts paused.';
+      select.title = tooltip(select.value);
+    }
+
+    function preview(id) {
+      previewId = id;
+      const entry = describe(id);
+      document.getElementById('roomGuideRoomTitle').textContent = entry.title;
+      document.getElementById('roomGuideRoomId').textContent = id || 'Uploaded world';
+      document.getElementById('roomGuideMeta').textContent = metadata(entry);
+      for (const key of ['rf', 'optimizer', 'watch', 'limits']) {
+        document.getElementById('roomGuide-' + key).textContent = entry[key];
+      }
+      for (const button of buttons) button.setAttribute('aria-pressed', String(button.dataset.world === id));
+      details.scrollTop = 0;
+      updateControls();
+    }
+
+    function refresh() {
+      for (const option of select.options) option.title = tooltip(option.value);
+      updateControls();
+      if (!dialog.open) return;
+      const previous = previewId;
+      const focusedId = list.contains(document.activeElement) ? document.activeElement.dataset.world : null;
+      list.replaceChildren();
+      buttons = [...select.options].map(option => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.world = option.value;
+        button.setAttribute('aria-controls', 'roomGuideDetails');
+        const title = document.createElement('strong');
+        title.textContent = describe(option.value).title;
+        const identifier = document.createElement('small');
+        identifier.textContent = option.textContent;
+        button.append(title, identifier);
+        button.addEventListener('pointermove', event => {
+          if (event.pointerType !== 'touch' && previewId !== option.value) preview(option.value);
+        });
+        button.addEventListener('focus', () => preview(option.value));
+        button.addEventListener('click', () => preview(option.value));
+        list.appendChild(button);
+        return button;
+      });
+      const chosen = buttons.find(button => button.dataset.world === previous) ||
+        buttons.find(button => button.dataset.world === select.value) || buttons[0];
+      preview(chosen ? chosen.dataset.world : null);
+      if (focusedId !== null) buttons.find(button => button.dataset.world === focusedId)?.focus();
+    }
+
+    opener.addEventListener('click', () => {
+      previewId = select.value;
+      dialog.showModal();
+      refresh();
+    });
+    document.getElementById('closeRoomGuide').addEventListener('click', () => dialog.close());
+    dialog.addEventListener('close', () => opener.focus());
+    list.addEventListener('keydown', event => {
+      const index = buttons.indexOf(document.activeElement);
+      const target = {ArrowDown: Math.min(index + 1, buttons.length - 1), ArrowUp: Math.max(index - 1, 0), Home: 0, End: buttons.length - 1}[event.key];
+      if (target === undefined || index < 0) return;
+      event.preventDefault();
+      buttons[target]?.focus();
+    });
+    load.addEventListener('click', () => {
+      updateControls();
+      if (load.disabled) return;
+      select.value = previewId;
+      select.dispatchEvent(new root.Event('change', {bubbles: true}));
+      dialog.close();
+    });
+    select.addEventListener('change', updateControls);
+    const observer = new root.MutationObserver(records => {
+      if (records.some(record => record.type === 'childList')) refresh();
+      else updateControls();
+    });
+    observer.observe(select, {childList: true, subtree: true, attributes: true, attributeFilter: ['disabled']});
+    refresh();
+  }
+
+  if (typeof module !== 'undefined' && module.exports) module.exports = {entries, shared, describe, metadata, tooltip, backhaulDescription, mount};
+  else root.RoomGuide = {entries, shared, describe, metadata, tooltip, backhaulDescription, mount};
+})(typeof globalThis !== 'undefined' ? globalThis : this);

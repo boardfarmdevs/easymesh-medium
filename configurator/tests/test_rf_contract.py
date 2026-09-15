@@ -228,5 +228,23 @@ class CapabilityTests(unittest.TestCase):
             capability_manifest("invented")
 
 
+class SupportManifestTests(unittest.TestCase):
+    def test_implemented_and_enabled_do_not_establish_current_run_qualification(self):
+        status = SimpleNamespace(instance_id="medium", generation=12,
+                                 capabilities={"frequency_qualified_snr", "channel_survey", "visibility_contention"})
+        manifest = capability_manifest("userspace", status)
+        self.assertEqual(manifest["support"]["activation"]["survey_api"], "enabled")
+        self.assertEqual(manifest["support"]["activation"]["native_survey_provider"], "unknown")
+        self.assertFalse(manifest["qualification"]["physical_capacity"])
+        self.assertFalse(manifest["qualification"]["measured_airtime"])
+        self.assertEqual(manifest["capabilities"]["received_candidate_rcpi"]["state"], "missing")
+        self.assertIn("not established", manifest["support"]["current_run_qualification"])
+
+    def test_no_medium_status_cannot_prove_survey_or_received_scans(self):
+        manifest = capability_manifest("userspace")
+        self.assertEqual(manifest["support"]["activation"]["survey_api"], "unavailable")
+        self.assertEqual(manifest["capabilities"]["received_candidate_rcpi"]["state"], "missing")
+
+
 if __name__ == "__main__":
     unittest.main()

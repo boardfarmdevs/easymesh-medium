@@ -1,0 +1,115 @@
+{
+  "schema": "wmdcfg.mobility.v1",
+  "name": "backhaul-isolation-recovery",
+  "tags": [
+    "backhaul",
+    "geometry",
+    "native-parent-selection",
+    "quick-demo"
+  ],
+  "backhaul_rf": "geometry",
+  "duration_ms": 24000,
+  "tick_ms": 1000,
+  "pause_at_ms": [
+    12000
+  ],
+  "seed": 1914,
+  "nodes": [
+    {
+      "role": "extender_4",
+      "kind": "fronthaul_ap",
+      "path": [
+        {
+          "time_ms": 0,
+          "position": [
+            12,
+            26
+          ]
+        },
+        {
+          "time_ms": 2000,
+          "position": [
+            12,
+            26
+          ]
+        },
+        {
+          "time_ms": 8000,
+          "position": [
+            58,
+            28
+          ]
+        },
+        {
+          "time_ms": 16000,
+          "position": [
+            58,
+            28
+          ]
+        },
+        {
+          "time_ms": 22000,
+          "position": [
+            12,
+            26
+          ]
+        },
+        {
+          "time_ms": 24000,
+          "position": [
+            12,
+            26
+          ]
+        }
+      ]
+    },
+    {
+      "role": "sta_static_10",
+      "kind": "station",
+      "path": [
+        {
+          "time_ms": 0,
+          "position": [
+            13,
+            26
+          ]
+        },
+        {
+          "time_ms": 2000,
+          "position": [
+            13,
+            26
+          ]
+        },
+        {
+          "time_ms": 8000,
+          "position": [
+            59,
+            28
+          ]
+        },
+        {
+          "time_ms": 16000,
+          "position": [
+            59,
+            28
+          ]
+        },
+        {
+          "time_ms": 22000,
+          "position": [
+            13,
+            26
+          ]
+        },
+        {
+          "time_ms": 24000,
+          "position": [
+            13,
+            26
+          ]
+        }
+      ]
+    }
+  ]
+}
