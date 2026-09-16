@@ -59,6 +59,15 @@ The highest-value findings are:
    not proof that a radio actually heard an unassociated station. RDK HAL
    `0038` also samples current fronthaul signal from this model; neither
    signal source qualifies real-world measurement availability.
+   RDK HAL `0041` resolves each requested STA/VIF through read-only native
+   association ownership before looking up its canonical radio's candidate
+   link. A station connected elsewhere can be measured as unassociated to the
+   queried AP, including random-MAC backhaul STAs. Globally unassociated,
+   never-observed, departed or ambiguously mapped stations are unavailable,
+   **not zero RCPI**; there is no guessed-MAC fallback. The ledger's owner AP
+   does not select the candidate: the receiving AP remains the local HAL radio
+   and the query supplies the frequency. This is an identity safeguard, not
+   evidence that the candidate AP received a probe or measurement frame.
 4. Default contention remains global per frequency. Optional `-F` permits
    isolated unicast pairs to overlap, using bidirectional endpoint visibility.
    This is not a hidden-node collision or full DCF model.

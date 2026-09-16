@@ -2329,11 +2329,28 @@
   }
 
   // ---- loading -------------------------------------------------------------
+  function renderProfilingAuthority(policy) {
+    if (!profilingState) return;
+    const label = profilingState.mode === 'native-observation'
+      ? 'Native observation · no lab steering'
+      : profilingState.mode === 'unassisted-btm' ? 'External policy · unassisted BTM'
+      : profilingState.mode === 'external-recommendations' ? 'External recommendations · no lab steering'
+      : 'Assisted demo · external policy';
+    const backhaul = policy === 'modeled' ? 'geometry backhaul · native parents'
+      : policy === 'adaptive-rdk' ? 'geometry backhaul · assisted parents'
+      : policy === 'fixed-startup-mesh' ? 'protected startup backhaul'
+      : 'backhaul pending';
+    for (const selector of ['#profilingAuthority', '#fullscreenAuthority']) {
+      const element = $(selector);
+      if (element) element.textContent = label + ' · ' + backhaul;
+    }
+  }
   function renderBackhaulPolicy(policy) {
     const description = RoomGuide.backhaulDescription(policy, noConnectMode);
     if ($('#backhaulPolicyTitle').textContent !== description.title) $('#backhaulPolicyTitle').textContent = description.title;
     if ($('#backhaulPolicyDetail').textContent !== description.detail) $('#backhaulPolicyDetail').textContent = description.detail;
     $('#backhaulPolicyCard').dataset.policy = policy || 'unknown';
+    renderProfilingAuthority(policy);
   }
   function loadWorld(w) {
     $('#roomName').textContent = 'Room: ' + RoomName.format(w.name);
@@ -2860,17 +2877,8 @@
     }
     if (advanceClock) tMs = Math.max(0, Math.min(world.duration_ms, Number(event.world_time_ms) || 0));
     if (event.kind === 'lab.profiling') {
-      const profile = event.payload;
-      profilingState = profile;
-      const label = profile.mode === 'native-observation'
-        ? 'Native observation · no lab steering'
-        : profile.mode === 'unassisted-btm' ? 'External policy · unassisted BTM'
-        : profile.mode === 'external-recommendations' ? 'External recommendations · no lab steering'
-        : 'Assisted demo · external policy';
-      for (const selector of ['#profilingAuthority', '#fullscreenAuthority']) {
-        const element = $(selector);
-        if (element) element.textContent = label + ' · ' + (profile.backhaul_rf || 'scenario') + ' backhaul';
-      }
+      profilingState = event.payload;
+      renderProfilingAuthority(interaction.backhaulPolicy);
     }
     if (event.kind === 'room.world.committed') {
       const payload = event.payload;
