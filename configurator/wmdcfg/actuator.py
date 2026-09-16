@@ -39,6 +39,7 @@ CAPABILITIES = {
     1 << 12: "channel_survey",
     1 << 13: "observer_surveys",
     1 << 14: "visibility_contention",
+    1 << 15: "priority_queues",
 }
 
 STATUS = {

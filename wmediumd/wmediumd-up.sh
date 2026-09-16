@@ -29,6 +29,12 @@ PIDF=${WMEDIUMD_PIDFILE:-$RUNTIME/wmediumd.pid}
 LOG=${WMEDIUMD_LOG:-$RUNTIME/wmediumd.log}
 CPU_AFFINITY=${WMEDIUMD_CPU_AFFINITY:-}
 VISIBILITY_FLAG=
+PRIORITY_FLAG=
+case "${WMEDIUMD_PRIORITY_QUEUES:-0}" in
+    0) ;;
+    1) PRIORITY_FLAG=-Q ;;
+    *) echo "WMEDIUMD_PRIORITY_QUEUES must be 0 or 1" >&2; exit 1 ;;
+esac
 case "${WMEDIUMD_VISIBILITY_CONTENTION:-0}" in
     0) ;;
     1) VISIBILITY_FLAG=-F ;;
@@ -112,6 +118,14 @@ case "${1:-up}" in
     # deliver frames for client radios that become active afterward.
     echo ">> preflight radio inventory"
     "$HERE/gen-config.sh" "${SNR:-40}" >/dev/null
+    if [ -n "$PRIORITY_FLAG" ]; then
+        sudo python3 "$HERE/configurator/wmdcfg/control_priority.py" --stack rdk --enable
+        if [ -f /etc/systemd/system/wmdcfg-control-priority.service ]; then
+            sudo systemctl start wmdcfg-control-priority.service
+        fi
+    elif [ -f /var/lib/wmdcfg-control-priority/rdk.json ]; then
+        sudo python3 "$HERE/configurator/wmdcfg/control_priority.py" --stack rdk --disable
+    fi
     stop_running_wmediumd
     # Pool vifs are created administratively UP even while unused.  They are not
     # part of the active matrix and must not originate frames after REGISTER.
@@ -135,9 +149,9 @@ case "${1:-up}" in
         sudo rm -f "$IDENTITY"
     fi
     if [ -n "$CPU_AFFINITY" ]; then
-        sudo sh -c "taskset -c '$CPU_AFFINITY' '$WMD' $VISIBILITY_FLAG -c '$CFG' -C '$CONTROL' -R '$METRICS' -O '$OBSERVER' >'$LOG' 2>&1 & echo \$! > '$PIDF'"
+        sudo sh -c "taskset -c '$CPU_AFFINITY' '$WMD' $VISIBILITY_FLAG $PRIORITY_FLAG -c '$CFG' -C '$CONTROL' -R '$METRICS' -O '$OBSERVER' >'$LOG' 2>&1 & echo \$! > '$PIDF'"
     else
-        sudo sh -c "'$WMD' $VISIBILITY_FLAG -c '$CFG' -C '$CONTROL' -R '$METRICS' -O '$OBSERVER' >'$LOG' 2>&1 & echo \$! > '$PIDF'"
+        sudo sh -c "'$WMD' $VISIBILITY_FLAG $PRIORITY_FLAG -c '$CFG' -C '$CONTROL' -R '$METRICS' -O '$OBSERVER' >'$LOG' 2>&1 & echo \$! > '$PIDF'"
     fi
     sleep 1
     pid=$(cat "$PIDF" 2>/dev/null || true)

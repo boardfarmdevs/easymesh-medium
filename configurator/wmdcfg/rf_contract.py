@@ -40,6 +40,12 @@ def capability_manifest(backend: str, status=None) -> dict:
             "capabilities": wire,
         },
         "capabilities": {
+            "access_category_admission": {
+                "state": "enabled" if "priority_queues" in wire else "not_enabled",
+                "source_kind": "bounded_access_category_admission",
+                "maximum_priority_bypass": 8 if "priority_queues" in wire else None,
+                "reason": "Actual daemon mode; FIFO within each AC, bounded bypass of older frames. Not calibrated EDCA or a capacity measurement.",
+            },
             "modeled_channel_survey": {
                 "state": "available" if modeled else "unsupported",
                 "unit": "us", "source_kind": "modeled_interval_union",

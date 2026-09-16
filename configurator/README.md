@@ -1,5 +1,8 @@
 # wmediumd configurator
 
+For opt-in IEEE 1905 bridge classification across direct LXC restarts, see
+[control-priority persistence](../control-priority.md).
+
 This directory contains the scenario-language implementation described in
 [the wmediumd configurator reference](../../../doc/easymesh/reference/radio/configurator.md).
 

@@ -229,6 +229,17 @@ class CapabilityTests(unittest.TestCase):
 
 
 class SupportManifestTests(unittest.TestCase):
+    def test_priority_mode_requires_live_capability_and_is_not_physical_capacity(self):
+        for enabled in (False, True):
+            status = SimpleNamespace(instance_id="medium", generation=12,
+                                     capabilities={"priority_queues"} if enabled else set())
+            manifest = capability_manifest("userspace", status)
+            admission = manifest["capabilities"]["access_category_admission"]
+            self.assertEqual(admission["state"], "enabled" if enabled else "not_enabled")
+            self.assertEqual(admission["maximum_priority_bypass"], 8 if enabled else None)
+            self.assertFalse(manifest["qualification"]["physical_capacity"])
+        self.assertEqual(capability_manifest("userspace")["capabilities"]["access_category_admission"]["state"], "not_enabled")
+
     def test_implemented_and_enabled_do_not_establish_current_run_qualification(self):
         status = SimpleNamespace(instance_id="medium", generation=12,
                                  capabilities={"frequency_qualified_snr", "channel_survey", "visibility_contention"})

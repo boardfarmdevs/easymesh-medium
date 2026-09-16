@@ -16,14 +16,16 @@
         "role": "sta_static_01",
         "start_ms": 5000,
         "end_ms": 10000,
-        "packets_per_second": 10,
+        "mode": "udp",
+        "offered_mbps": 1,
         "payload_bytes": 1200
       },
       {
         "role": "sta_static_01",
         "start_ms": 10000,
         "end_ms": 23000,
-        "packets_per_second": 200,
+        "mode": "udp",
+        "offered_mbps": 8,
         "payload_bytes": 1200
       }
     ]

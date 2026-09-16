@@ -1,0 +1,209 @@
+Subject: [PATCH] wmediumd: opt-in bounded access-category admission
+
+Add -Q to select pending frames by their actual 802.11 access category.
+Retain FIFO within each category, one active transmitter/frequency head,
+and the existing timing, loss, visibility and receive-context rules.
+After at most eight priority bypasses, admit the oldest pending frame so
+best effort/background cannot starve. The default remains global FIFO.
+Advertise the mode on the control socket only when actually enabled.
+This is bounded admission, not calibrated hardware EDCA/TXOP emulation.
+
+diff --git a/wmediumd/control.c b/wmediumd/control.c
+index fb2dff7..f32ccff 100644
+--- a/wmediumd/control.c
++++ b/wmediumd/control.c
+@@ -573,6 +573,8 @@ static int send_info(struct wmd_control_client *client, uint16_t opcode)
+ 		capabilities |= WMDC_CAP_CHANNEL_SURVEY | WMDC_CAP_OBSERVER_SURVEYS;
+ 	if (ctx->visibility_contention)
+ 		capabilities |= WMDC_CAP_VISIBILITY_CONTENTION;
++	if (ctx->priority_queues)
++		capabilities |= WMDC_CAP_PRIORITY_QUEUES;
+ 
+ 	if (ctx->frequency_overrides) {
+ 		capabilities |= WMDC_CAP_FREQUENCY_QUALIFIED_SNR;
+diff --git a/wmediumd/control.h b/wmediumd/control.h
+index 804f501..49aa73a 100644
+--- a/wmediumd/control.h
++++ b/wmediumd/control.h
+@@ -59,6 +59,7 @@ enum wmdc_capability {
+ 	WMDC_CAP_CHANNEL_SURVEY = 1U << 12,
+ 	WMDC_CAP_OBSERVER_SURVEYS = 1U << 13,
+ 	WMDC_CAP_VISIBILITY_CONTENTION = 1U << 14,
++	WMDC_CAP_PRIORITY_QUEUES = 1U << 15,
+ };
+ 
+ #define WMDC_FREQUENCY_OVERRIDE (1U << 0)
+diff --git a/wmediumd/wmediumd.c b/wmediumd/wmediumd.c
+index 8f952a9..9c92d5c 100644
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -1025,7 +1025,21 @@ static void schedule_next_radio_frame(struct wmediumd *ctx, struct radio_queue *
+ 		return;
+ 	}
+ 	frame = list_first_entry(&radio->pending_frames, struct frame, list);
++	if (ctx->priority_queues && radio->priority_burst < 8) {
++		for (unsigned int category = 0; category < IEEE80211_NUM_ACS; category++) {
++			if (list_empty(&radio->pending_by_ac[category]))
++				continue;
++			struct frame *preferred = list_first_entry(&radio->pending_by_ac[category],
++				struct frame, ac_pending);
++			radio->priority_burst = preferred == frame ? 0 : radio->priority_burst + 1;
++			frame = preferred;
++			break;
++		}
++	} else {
++		radio->priority_burst = 0;
++	}
+ 	list_del(&frame->list);
++	list_del(&frame->ac_pending);
+ 	radio->active_frame = frame;
+ 	queue_frame(ctx, frame->sender, frame);
+ }
+@@ -1052,11 +1066,15 @@ static void enqueue_radio_frame(struct wmediumd *ctx, struct station *station,
+ 		}
+ 		radio->frequency = frame->freq;
+ 		INIT_LIST_HEAD(&radio->pending_frames);
++		for (unsigned int category = 0; category < IEEE80211_NUM_ACS; category++)
++			INIT_LIST_HEAD(&radio->pending_by_ac[category]);
+ 		list_add_tail(&radio->list, &station->radio_queues);
+ 		frame->radio_queue = radio;
+ 	}
+ 	wmd_telemetry_frame_queued(ctx, frame);
+ 	list_add_tail(&frame->list, &radio->pending_frames);
++	list_add_tail(&frame->ac_pending,
++		&radio->pending_by_ac[frame_select_queue_80211(frame)]);
+ 	schedule_next_radio_frame(ctx, radio);
+ }
+ 
+@@ -1125,6 +1143,7 @@ static void wmediumd_remove_client(struct wmediumd *ctx, struct client *client)
+ 				if (frame->src != client)
+ 					continue;
+ 				list_del(&frame->list);
++				list_del(&frame->ac_pending);
+ 				wmd_telemetry_frame_done(ctx);
+ 				free(frame);
+ 			}
+@@ -1895,6 +1914,7 @@ static void print_help(int exval)
+ 	printf("  -R socket       expose read-only link-metrics socket\n");
+ 	printf("  -O socket       expose host-only paged telemetry socket\n");
+ 	printf("  -F              opt in to conservative visibility reservations\n");
++	printf("  -Q              opt in to bounded access-category priority admission\n");
+ 	printf("  -S              disable survey accounting for observer A/B tests\n");
+ 	printf("  -n              force netlink use even with vhost-user\n");
+ 	printf("  -p FILE         log packets to pcapng file FILE\n");
+@@ -1980,7 +2000,7 @@ static void packet_test_complete_radio(struct wmediumd *ctx, struct radio_queue
+ 	schedule_next_radio_frame(ctx, radio);
+ }
+ 
+-static int radio_head_selftest(bool visibility)
++static int radio_head_selftest(bool visibility, bool priority)
+ {
+ 	struct wmediumd test = {0};
+ 	struct station stations[3] = {0};
+@@ -2004,6 +2024,7 @@ static int radio_head_selftest(bool visibility)
+ 	test.get_error_prob = packet_test_per;
+ 	test.get_fading_signal = packet_test_fading;
+ 	test.visibility_contention = visibility;
++	test.priority_queues = priority;
+ 	test.survey_disabled = true;
+ 	test.need_start_notify = 1;
+ 	for (int index = 0; index < 9; index++)
+@@ -2031,6 +2052,10 @@ static int radio_head_selftest(bool visibility)
+ 		frame->tx_rates[0].idx = 7;
+ 		frame->tx_rates[0].count = 3;
+ 		header->frame_control[0] = index == 33 ? 0xb0 : 0x08;
++		if (priority && index >= 23 && index <= 31) {
++			header->frame_control[0] = 0x88;
++			frame->data[24] = 7;
++		}
+ 		memcpy(header->addr1, index >= 34 ? other_band : stations[2].addr, ETH_ALEN);
+ 		memcpy(header->addr2, frame->sender->addr, ETH_ALEN);
+ 		enqueue_radio_frame(&test, frame->sender, frame);
+@@ -2066,6 +2091,14 @@ static int radio_head_selftest(bool visibility)
+ 		goto cleanup;
+ 	mc_update_vif_owner(&test, &stations[2], stations[2].addr, 2437);
+ 	packet_test_complete_radio(&test, primary_radio);
++	if (priority) {
++		for (int index = 23; index <= 30; index++) {
++			failures += primary_radio->active_frame != frames[index];
++			if (failures)
++				goto cleanup;
++			packet_test_complete_radio(&test, primary_radio);
++		}
++	}
+ 	failures += primary_radio->active_frame != frames[1];
+ 	failures += !!(frames[1]->flags & HWSIM_TX_STAT_ACK) || frames[1]->forward_received;
+ 	failures += frames[1]->tx_rates[0].count != 3;
+@@ -2077,6 +2110,17 @@ static int radio_head_selftest(bool visibility)
+ 	failures += !(frames[35]->flags & HWSIM_TX_STAT_ACK);
+ 	packet_test_complete_radio(&test, frames[35]->radio_queue);
+ 	packet_test_complete_radio(&test, primary_radio);
++	if (priority) {
++		failures += primary_radio->active_frame != frames[31];
++		if (failures)
++			goto cleanup;
++		packet_test_complete_radio(&test, primary_radio);
++		failures += primary_radio->active_frame != frames[33];
++		if (failures)
++			goto cleanup;
++		packet_test_complete_radio(&test, primary_radio);
++		printf("PASS priority admission: FIFO within AC, eight-priority burst, oldest-frame fairness\n");
++	}
+ 	for (int index = 2; index < 16; index++) {
+ 		failures += primary_radio->active_frame != frames[index];
+ 		if (failures)
+@@ -2449,8 +2493,10 @@ static int wmd_selftest(void)
+ 
+ 	printf("=== wmediumd multichannel + Linux 7 rate-flags self-test ===\n");
+ 	fails += packet_path_selftest();
+-	fails += radio_head_selftest(false);
+-	fails += radio_head_selftest(true);
++	fails += radio_head_selftest(false, false);
++	fails += radio_head_selftest(true, false);
++	fails += radio_head_selftest(false, true);
++	fails += radio_head_selftest(true, true);
+ 	fails += spatial_queue_selftest();
+ 	fails += spatial_gap_selftest();
+ 	fails += scheduler_deadline_selftest();
+@@ -2684,8 +2730,11 @@ int main(int argc, char *argv[])
+ 	unsigned long int parse_log_lvl;
+ 	char* parse_end_token;
+ 
+-	while ((opt = getopt(argc, argv, "hVc:l:x:t:u:a:C:R:O:np:TFS")) != -1) {
++	while ((opt = getopt(argc, argv, "hVc:l:x:t:u:a:C:R:O:np:TFSQ")) != -1) {
+ 		switch (opt) {
++		case 'Q':
++			ctx.priority_queues = true;
++			break;
+ 		case 'F':
+ 			ctx.visibility_contention = true;
+ 			break;
+diff --git a/wmediumd/wmediumd.h b/wmediumd/wmediumd.h
+index 8fb28b2..ba3b6fc 100644
+--- a/wmediumd/wmediumd.h
++++ b/wmediumd/wmediumd.h
+@@ -164,6 +164,8 @@ struct addr {
+ struct radio_queue {
+ 	struct list_head list;
+ 	struct list_head pending_frames;
++	struct list_head pending_by_ac[IEEE80211_NUM_ACS];
++	unsigned int priority_burst;
+ 	struct frame *active_frame;
+ 	u32 frequency;
+ };
+@@ -261,6 +263,7 @@ struct wmediumd {
+ 	u64 control_generation;
+ 	struct wmd_airtime airtime;
+ 	bool visibility_contention;
++	bool priority_queues;
+ 	bool survey_disabled;
+ 	struct wmd_frequency_override *frequency_overrides;
+ 	size_t frequency_override_capacity;
+@@ -305,6 +308,7 @@ struct frame {
+ 	uint64_t queued_at;
+ 	bool queue_accounted;
+ 	struct radio_queue *radio_queue;
++	struct list_head ac_pending;
+ 	struct client *src;
+ 	bool acked;
+ 	u64 cookie;
