@@ -1,0 +1,22 @@
+Subject: [PATCH] wmediumd: avoid success ACK amplification on hwsim transport
+
+nl_send_auto_complete requests a kernel success ACK for every cloned RX frame
+and TX status. A large multicast fanout therefore feeds administrative ACKs
+back into the same receive socket carrying radio TX work. Disable automatic
+success ACK requests after the synchronous generic-netlink family lookup.
+
+Keep request flags, automatic sequence assignment, negative kernel replies,
+and all radio delivery/802.11 ACK semantics unchanged. No buffer enlargement,
+RF filtering, receive batching, or scheduler change is included.
+
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -1882,6 +1882,8 @@ static int init_netlink(struct wmediumd *ctx)
+ 		return -1;
+ 	}
+ 
++	nl_socket_disable_auto_ack(sock);
++
+ 	nl_cb_set(ctx->cb, NL_CB_MSG_IN, NL_CB_CUSTOM, process_messages_cb, ctx);
+ 	nl_cb_err(ctx->cb, NL_CB_CUSTOM, nl_err_cb, ctx);
+ 
