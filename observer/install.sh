@@ -51,6 +51,8 @@ fi
 
 $elevate install -D -m 0755 "$binary" /usr/local/bin/wmediumd-console
 $elevate install -D -m 0644 "$here/README.md" /usr/local/share/doc/wmediumd-console/README.md
+$elevate install -D -m 0644 "$here/web/ng/manual.html" /usr/local/share/doc/wmediumd-console/manual.html
+$elevate install -D -m 0644 "$here/web/ng/rf-properties.html" /usr/local/share/doc/wmediumd-console/rf-properties.html
 $elevate install -D -m 0644 "$here/identity-inventory.example.json" /usr/local/share/doc/wmediumd-console/identity-inventory.example.json
 $elevate install -D -m 0644 "$here/packaging/wmediumd-console.service" /etc/systemd/system/wmediumd-console.service
 if [ ! -e /etc/default/wmediumd-console ]; then
@@ -59,7 +61,8 @@ fi
 $elevate systemctl daemon-reload
 
 if [ "$start" -eq 1 ]; then
-    $elevate systemctl enable --now wmediumd-console.service
+    $elevate systemctl enable wmediumd-console.service
+    $elevate systemctl restart wmediumd-console.service
     $elevate systemctl --no-pager --full status wmediumd-console.service
 else
     echo "installed; run: sudo systemctl enable --now wmediumd-console.service"

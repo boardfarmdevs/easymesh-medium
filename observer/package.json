@@ -1,0 +1,13 @@
+{
+  "name": "wmediumd-console-ng",
+  "private": true,
+  "version": "2.0.0",
+  "scripts": {
+    "vendor": "esbuild web/vendor-entry.js --bundle --format=esm --minify --outfile=web/ng/vendor/three.js --legal-comments=eof && cp node_modules/three/LICENSE web/ng/vendor/THREE-LICENSE.txt",
+    "test:ng": "node --test web/ng/model.test.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.10",
+    "three": "0.180.0"
+  }
+}

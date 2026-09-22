@@ -15,8 +15,12 @@ RF delivery, configurator and Console.
 - [Future RF development plan](../proposals/easymesh-rf-assessment-and-development-plan.md):
   proposed M0–M9 roadmap for richer observations, neighboring networks, noise,
   overlap, collisions and qualified PHY service; not current runtime capabilities.
+  Start with the [current RF-access priorities](../proposals/easymesh-rf-assessment-and-development-plan.md#ordered-low-risk-delivery).
 - [wmediumd configurator](configurator.md)
 - [wmediumd Console: architecture, operation and design](console.md)
 - [Optional kernel medium](kernel-medium.md)
 - [wmediumd: operation, control and simulation model](wmediumd-internals.md)
 - [Console installation and API](../../../../gen/wmediumd/observer/README.md)
+- [Console NG RF property field guide](console-rf-properties.md): modeled inputs,
+  observed outcomes, native reporting, optional modes and fidelity limits;
+  also embedded offline in the console.

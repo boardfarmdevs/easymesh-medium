@@ -87,6 +87,11 @@ var capabilityNames = []struct {
 	{capEventRing, "event_ring"},
 	{capAssociationOwnership, "association_ownership"},
 	{capPagedLinkDumps, "paged_link_dumps"},
+	{1 << 12, "channel_survey"},
+	{1 << 13, "observer_surveys"},
+	{1 << 14, "visibility_contention"},
+	{1 << 15, "priority_queues"},
+	{1 << 16, "explorer_details"},
 }
 
 type Client struct {

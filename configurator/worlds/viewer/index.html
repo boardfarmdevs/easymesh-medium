@@ -196,7 +196,7 @@
   <div class="sub" id="liveRun"></div>
 
   <div class="live-only">
-    <details class="card" id="rfInspectorCard"><summary>RF inspector · selected device</summary><select id="rfInspectorView" aria-label="RF evidence view"><option value="native">Native observations</option><option value="configured">Configured stimulus</option><option value="decision">Optimizer decision</option><option value="traffic">Traffic experiment</option></select><pre id="rfInspector" class="live-scroll" style="height:220px;white-space:pre-wrap;overflow-wrap:anywhere" tabindex="0" aria-label="Selected device RF evidence">Waiting for data…</pre></details>
+    <details class="card" id="rfInspectorCard"><summary>RF inspector · selected device</summary><select id="rfInspectorView" aria-label="RF evidence view"><option value="native">Native observations</option><option value="configured">Configured stimulus</option><option value="decision">Optimizer decision</option><option value="traffic">Traffic experiment</option><option value="properties">RF property catalog</option></select><pre id="rfInspector" class="live-scroll" style="height:220px;white-space:pre-wrap;overflow-wrap:anywhere" tabindex="0" aria-label="Selected device RF evidence">Waiting for data…</pre></details>
     <div class="card" id="rfLoadCard"><h2>Modeled channel activity</h2><div id="rfLoad" class="metric-grid"></div><div class="sub">Frequency-wide busy time, not SNR or available capacity. Hover for age and window; — means unavailable.</div></div>
     <div class="card" id="storyCard"><h2>Scenario</h2><div id="storyText">Waiting for the conductor…</div></div>
     <div class="card" id="labCard"><h2>Whole lab</h2><div id="labMetrics" class="metric-grid"><span>Status</span><b>waiting</b></div></div>
@@ -410,6 +410,7 @@
   let liveTerminal = false;
   let networkState = null, optimizerState = null, trafficState = null;
   let rfCapabilitiesState = null;
+  let rfObservationsState = null, rfCatalogState = null;
   let trafficExperimentState = null;
   let profilingState = null;
   let trafficProbeState = null, liveClock = null;
@@ -2072,12 +2073,17 @@
   function renderRFInspector() {
     RoomRFInspector.render($('#rfInspector'), {selected, world, network: networkState,
       optimizer: optimizerState, capabilities: rfCapabilitiesState, traffic: trafficExperimentState,
+      observations: rfObservationsState, catalog: rfCatalogState,
       view: $('#rfInspectorView').value,
       now: liveMode
         ? liveClock ? liveClock.serverMs + Math.max(0, performance.now() - liveClock.receivedMs) : NaN
         : Date.parse(networkState?.observed_at || optimizerState?.evaluated_at || '')});
   }
   $('#rfInspectorView').addEventListener('change', renderRFInspector);
+  fetch('rf-catalog.json').then(response => response.ok ? response.json() : null).then(catalog => {
+    if (catalog?.schema === 'easymesh.rf-properties.v1' && !rfCatalogState) rfCatalogState = catalog;
+    if ($('#rfInspectorCard')?.open) renderRFInspector();
+  }).catch(() => {});
   $('#rfInspectorCard').addEventListener('toggle', () => {
     if ($('#rfInspectorCard')?.open) renderRFInspector();
   });
@@ -2791,6 +2797,7 @@
   }
   function resetEventState() {
     rfCapabilitiesState = null;
+    rfObservationsState = null;
     trafficExperimentState = null;
     networkState = optimizerState = trafficState = healthState = actionState = verificationState = null;
     trafficProbeState = liveClock = null;
@@ -2862,6 +2869,8 @@
   }
   function applyDemoEvent(event, advanceClock = true) {
     if (event.kind === 'rf.capabilities') rfCapabilitiesState = event.payload;
+    if (event.kind === 'rf.catalog') rfCatalogState = event.payload;
+    if (event.kind === 'rf.observations') rfObservationsState = event.payload;
     if (event.kind === 'traffic.experiment' &&
         (!event.payload.world_sha256 || event.payload.world_sha256 === world.golden_sha256)) {
       trafficExperimentState = event.payload;
@@ -2888,6 +2897,7 @@
       selectCurrentLiveWorld();
       worldSwitchError = false;
       networkState = optimizerState = trafficState = healthState = null;
+      rfObservationsState = null;
       trafficExperimentState = null;
       interaction.initialRoles = {};
       const roles = Object.keys(payload.world.roles);

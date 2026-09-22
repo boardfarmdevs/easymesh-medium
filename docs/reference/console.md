@@ -24,6 +24,15 @@ scenario writer, steering optimizer or source of EasyMesh measurements.
 
 ## Implementation status
 
+**Console NG is the default presentation and collector.** Start with the
+[NG manual](../../guide/wmediumd-console-ng.md) and
+[implementation/acceptance specification](../../concepts/wmediumd-console-design.md).
+The protocol/counting contracts below retain v1 compatibility. The old UI and
+typed controls are retired: `/classic/` redirects to NG, legacy mode/control
+flags are ignored, and every HTTP mutation is rejected. NG adds `/api/v2/`
+subscriptions and room/survey correlation. The
+[RF field guide](console-rf-properties.md) is also embedded in the console.
+
 The implemented observation path is:
 
 - patched wmediumd exposes bounded packet telemetry through a separate,
@@ -33,15 +42,15 @@ The implemented observation path is:
 - startup generates a bounded radio identity inventory, so the UI names
   `agent-1`, `extender-N`, `sta-NN` and `iot-NN` rather than showing only MAC
   addresses;
-- controls are disabled by default. An explicit startup option enables only
-  typed, atomic pair-SNR and exact-frequency operations plus one-step undo;
+- the console never opens a writable RF socket or enables controls;
   and
 - the existing `-R` endpoint remains the small, read-only HAL measurement
   interface and is not changed into a general telemetry endpoint.
 
 The code is in `gen/wmediumd/observer/`; its focused operator and API manual is
 `gen/wmediumd/observer/README.md`. Persistent cross-component correlation beyond the interfaces described here is
-not a current Console capability.
+is available through NG's explicitly configured, cached room/survey adapters;
+the classic collector remains independent.
 
 ### Current data flow
 
@@ -57,7 +66,6 @@ flowchart LR
     O --> G
     G --> UI[embedded live UI]
     G --> API[REST / WebSocket / Prometheus]
-    UI -. explicit opt-in typed HTTP set/clear/undo .-> G
     G -. typed generation-checked socket operations .-> WC
 ```
 
@@ -398,13 +406,15 @@ The normal managed service is read only. It exposes these implemented routes:
 | `GET /metrics` | low-cardinality Prometheus summary without MAC labels by default |
 | `WS /api/v1/stream` | initial snapshot followed by sequenced deltas |
 
-When and only when the process starts with `--enable-control` and the dedicated
-writable socket, four POST routes become available: atomic pair set, atomic
-frequency set, frequency clear and one-step undo. Every operation is typed,
-same-origin/CSRF checked, and must name the current daemon instance and
-generation. There is no shell, arbitrary opcode or generic socket-proxy route.
+The retired typed-control backend remains source-level protocol test coverage,
+not an operational console mode. No flag enables its POST routes in Console NG.
+The room/configurator remains the RF writer. New readiness consumers use
+`GET /api/v2/health`; existing v1 read-only clients retain their wire format.
 
-## Current UI
+## Historical v1 UI
+
+The following describes the retired presentation. Use the
+[NG operator manual](../../guide/wmediumd-console-ng.md) for the deployed UI.
 
 ### Live overview
 
@@ -466,11 +476,9 @@ an overload condition even if the UI itself remains responsive.
 - Run as the unprivileged `wmediumd-console` user with no capabilities. The
   shared `lxd` group gates only the wmediumd sockets; the hardened unit hides
   all known LXD/Incus daemon sockets from the service namespace.
-- Open `/run/wmediumd-control.sock` only after explicit `--enable-control`;
-  otherwise every HTTP mutation returns 405 and the socket is never opened.
-- Permit only typed pair/frequency set, frequency clear and one-step undo with
-  daemon-instance/generation checks. Never implement an arbitrary command,
-  opcode or socket proxy.
+- Never open `/run/wmediumd-control.sock`; its path is hidden by the service
+  sandbox. Every HTTP mutation returns 405, including deprecated control routes.
+- Never expose an arbitrary command, opcode or socket proxy.
 - Disable CORS and all browser write routes by default. If direct network
   exposure is later required, use a TLS/authenticating reverse proxy.
 - Retain MAC identities only because they are required to understand this lab.
@@ -518,8 +526,8 @@ same captured response in the Go observer and Python `ControlClient` tests.
 
 ### Safety
 
-1. In default read-only mode the writable socket is unopened and every APPLY
-   route is rejected; opt-in mode exposes only the four typed operations.
+1. The writable socket is unopened and every APPLY route is rejected;
+   deprecated flags cannot reactivate controls or the old UI.
 2. Starting, stopping or crashing the observer does not change the control
    generation, matrix, associations, daemon PID or scenario restore result.
 3. A stalled browser and a full history queue cannot block the medium loop.

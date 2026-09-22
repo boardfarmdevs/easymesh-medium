@@ -1,0 +1,540 @@
+diff --git a/wmediumd/control.c b/wmediumd/control.c
+index f32ccff..7a877ef 100644
+--- a/wmediumd/control.c
++++ b/wmediumd/control.c
+@@ -4,6 +4,8 @@
+  */
+ #include <endian.h>
+ #include <errno.h>
++#include <inttypes.h>
++#include <stdarg.h>
+ #include <fcntl.h>
+ #include <stdbool.h>
+ #include <stdint.h>
+@@ -26,6 +28,8 @@ struct wmd_control_client {
+ 	struct wmediumd *ctx;
+ 	bool read_only;
+ 	bool telemetry;
++	int peer_pid;
++	unsigned int peer_uid;
+ };
+ 
+ struct wmd_control_listener {
+@@ -135,7 +139,10 @@ struct wmdt_event_state {
+ 	uint32_t auxiliary;
+ };
+ 
++#include "explorer-types.h"
++
+ struct wmd_telemetry {
++	struct wmdx_state explorer;
+ 	uint64_t sequence;
+ 	uint64_t frames_seen;
+ 	uint64_t bytes_seen;
+@@ -585,7 +592,8 @@ static int send_info(struct wmd_control_client *client, uint16_t opcode)
+ 		capabilities |= WMDC_CAP_READ_ONLY;
+ 	if (client->telemetry)
+ 		capabilities |= WMDC_CAP_TELEMETRY | WMDC_CAP_PAGED_DUMPS |
+-			WMDC_CAP_VIF_OWNERSHIP | WMDC_CAP_EVENT_RING;
++			WMDC_CAP_VIF_OWNERSHIP | WMDC_CAP_EVENT_RING |
++			WMDC_CAP_EXPLORER_DETAIL;
+ 	if (ctx->association_owners)
+ 		capabilities |= WMDC_CAP_ASSOCIATION_OWNERSHIP;
+ 	struct wmdc_info info = {
+@@ -644,6 +652,8 @@ void wmd_telemetry_frame_queued(struct wmediumd *ctx, struct frame *frame)
+ 	}
+ }
+ 
++#include "explorer.inc"
++
+ void wmd_telemetry_record_tx(struct wmediumd *ctx, struct frame *frame,
+ 			     struct station *destination, int access_category,
+ 			     unsigned int attempts, unsigned int retries,
+@@ -708,6 +718,7 @@ void wmd_telemetry_record_tx(struct wmediumd *ctx, struct frame *frame,
+ 	}
+ 
+ 	if (destination) {
++		explorer_record(ctx, frame, destination, -1, acked);
+ 		link = telemetry_active_link(ctx, frame->sender->index,
+ 			destination->index, frame->freq, true);
+ 		if (link) {
+@@ -752,6 +763,8 @@ void wmd_telemetry_record_rx(struct wmediumd *ctx, struct frame *frame,
+ 		return;
+ 	telemetry->sequence++;
+ 	frame->telemetry_snr_db = snr_db;
++	if (destination)
++		explorer_record(ctx, frame, destination, outcome, false);
+ 	frame->telemetry_per_million = telemetry_probability(error_prob);
+ 	link = destination ? telemetry_active_link(ctx, frame->sender->index,
+ 		destination->index, frame->freq, true) : NULL;
+@@ -1006,6 +1019,7 @@ static int handle_apply(struct wmd_control_client *client,
+ 			resolved[i].destination] = resolved[i].snr_db;
+ 	ctx->control_generation = generation;
+ 	wmd_telemetry_generation(ctx, generation, false, count);
++	explorer_writer(client, generation, count, false);
+ 	free(resolved);
+ 	return send_response(client->loop.fd, WMDC_OP_APPLY, WMDC_OK,
+ 			generation, payload, payload_len);
+@@ -1207,6 +1221,7 @@ static int handle_frequency_apply(struct wmd_control_client *client,
+ 	}
+ 	ctx->control_generation = generation;
+ 	wmd_telemetry_generation(ctx, generation, true, count);
++	explorer_writer(client, generation, count, true);
+ 	free(resolved);
+ 	return send_response(client->loop.fd, WMDC_OP_APPLY_FREQUENCY, WMDC_OK,
+ 			generation, payload, payload_len);
+@@ -1697,6 +1712,10 @@ static int handle_event_dump(struct wmd_control_client *client,
+ 
+ static void control_disconnect(struct wmd_control_client *client)
+ {
++	if (client->ctx->telemetry) {
++		struct wmdx_endpoint *endpoint = explorer_endpoint(client);
++		if (endpoint->connections) endpoint->connections--;
++	}
+ 	usfstl_loop_unregister(&client->loop);
+ 	close(client->loop.fd);
+ 	free(client);
+@@ -1796,15 +1815,19 @@ static void control_handler(struct usfstl_loop_entry *entry)
+ 	uint16_t opcode;
+ 	ssize_t length;
+ 	int result = -1;
++	struct wmdx_endpoint *accounting = client->ctx->telemetry ? explorer_endpoint(client) : NULL;
++	uint64_t request_started = explorer_clock_usec();
+ 
+ 	length = recv(entry->fd, frame, sizeof(frame), 0);
+ 	if (length <= 0) {
+ 		control_disconnect(client);
+ 		return;
+ 	}
++	if (accounting) { accounting->requests++; accounting->request_bytes += length; }
+ 	if (length < (ssize_t)sizeof(*header) ||
+ 	    be32toh(header->magic) != WMDC_MAGIC ||
+ 	    be16toh(header->version) != WMDC_VERSION) {
++		if (accounting) accounting->protocol_errors++;
+ 		if (send_response(entry->fd, 0, WMDC_ERR_PROTOCOL,
+ 				  client->ctx->control_generation, NULL, 0) < 0)
+ 			control_disconnect(client);
+@@ -1812,7 +1835,9 @@ static void control_handler(struct usfstl_loop_entry *entry)
+ 	}
+ 	payload_len = be32toh(header->payload_len);
+ 	opcode = be16toh(header->opcode);
++	if (accounting && opcode < 18) accounting->opcodes[opcode]++;
+ 	if (payload_len != (uint32_t)(length - sizeof(*header))) {
++		if (accounting) accounting->protocol_errors++;
+ 		if (send_response(entry->fd, opcode, WMDC_ERR_LENGTH,
+ 				  client->ctx->control_generation, NULL, 0) < 0)
+ 			control_disconnect(client);
+@@ -1893,9 +1918,19 @@ static void control_handler(struct usfstl_loop_entry *entry)
+ 	case WMDC_OP_GET_OBSERVER_SURVEYS:
+ 		result = handle_observer_surveys(client, frame + sizeof(*header), payload_len);
+ 		break;
++	case WMDC_OP_EXPLORER_DETAIL:
++		if (client->telemetry)
++			result = explorer_detail(client, frame + sizeof(*header), payload_len);
++		break;
+ 	default:
+ 		break;
+ 	}
++	if (accounting) {
++		uint64_t elapsed = explorer_clock_usec() - request_started;
++		accounting->handler_usec += elapsed;
++		if (elapsed > accounting->handler_usec_max) accounting->handler_usec_max = elapsed;
++		if (result < 0) accounting->io_or_opcode_disconnects++;
++	}
+ 	if (result < 0)
+ 		control_disconnect(client);
+ }
+@@ -1915,6 +1950,18 @@ static void control_connected(int fd, void *data)
+ 	client->ctx = listener->ctx;
+ 	client->read_only = listener->read_only;
+ 	client->telemetry = listener->telemetry;
++	struct { pid_t pid; uid_t uid; gid_t gid; } peer;
++	socklen_t peer_size = sizeof(peer);
++	client->peer_pid = -1;
++	if (!getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &peer, &peer_size)) {
++		client->peer_pid = peer.pid;
++		client->peer_uid = peer.uid;
++	}
++	if (client->ctx->telemetry) {
++		struct wmdx_endpoint *endpoint = explorer_endpoint(client);
++		endpoint->connections++;
++		endpoint->accepted++;
++	}
+ 	client->loop.fd = fd;
+ 	client->loop.handler = control_handler;
+ 	usfstl_loop_register(&client->loop);
+@@ -1992,11 +2039,19 @@ static int wmd_telemetry_init(struct wmediumd *ctx)
+ 		sizeof(*ctx->telemetry->radio_frequencies));
+ 	ctx->telemetry->vifs = calloc(ctx->telemetry->vif_capacity,
+ 		sizeof(*ctx->telemetry->vifs));
++	if (ctx->snr_matrix) {
++		size_t matrix_bytes = (size_t)ctx->num_stas * ctx->num_stas * sizeof(int);
++		ctx->telemetry->explorer.startup_snr = malloc(matrix_bytes);
++		if (ctx->telemetry->explorer.startup_snr)
++			memcpy(ctx->telemetry->explorer.startup_snr, ctx->snr_matrix, matrix_bytes);
++	}
++	ctx->telemetry->explorer.startup_generation = ctx->control_generation;
+ 	if (!ctx->telemetry->active_links ||
+ 	    !ctx->telemetry->radio_frequencies || !ctx->telemetry->vifs) {
+ 		free(ctx->telemetry->active_links);
+ 		free(ctx->telemetry->radio_frequencies);
+ 		free(ctx->telemetry->vifs);
++		free(ctx->telemetry->explorer.startup_snr);
+ 		free(ctx->telemetry);
+ 		ctx->telemetry = NULL;
+ 		return -1;
+@@ -2045,7 +2100,7 @@ int wmd_telemetry_selftest(void)
+ 	struct frame *frame;
+ 	uint8_t vif[6] = {0x02, 0, 0, 0, 0, 1};
+ 	uint8_t unknown_vif[6] = {0x02, 0, 0, 0, 0, 9};
+-	int failures = control_response_selftest();
++	int failures = control_response_selftest() + explorer_selftest();
+ 
+ 	source.addr[5] = 1;
+ 	source.addr[0] = 0x42;
+@@ -2181,6 +2236,7 @@ int wmd_telemetry_selftest(void)
+ 	free(ctx.telemetry->active_links);
+ 	free(ctx.telemetry->radio_frequencies);
+ 	free(ctx.telemetry->vifs);
++	free(ctx.telemetry->explorer.startup_snr);
+ 	free(ctx.telemetry);
+ 	return failures;
+ }
+diff --git a/wmediumd/control.h b/wmediumd/control.h
+index 49aa73a..f91e15e 100644
+--- a/wmediumd/control.h
++++ b/wmediumd/control.h
+@@ -28,6 +28,7 @@ enum wmdc_opcode {
+ 	WMDC_OP_GET_ASSOCIATION = 14,
+ 	WMDC_OP_GET_CHANNEL_SURVEY = 15,
+ 	WMDC_OP_GET_OBSERVER_SURVEYS = 16,
++	WMDC_OP_EXPLORER_DETAIL = 17,
+ };
+ 
+ enum wmdc_status {
+@@ -60,6 +61,7 @@ enum wmdc_capability {
+ 	WMDC_CAP_OBSERVER_SURVEYS = 1U << 13,
+ 	WMDC_CAP_VISIBILITY_CONTENTION = 1U << 14,
+ 	WMDC_CAP_PRIORITY_QUEUES = 1U << 15,
++	WMDC_CAP_EXPLORER_DETAIL = 1U << 16,
+ };
+ 
+ #define WMDC_FREQUENCY_OVERRIDE (1U << 0)
+diff --git a/wmediumd/explorer-types.h b/wmediumd/explorer-types.h
+new file mode 100644
+index 0000000..f46c7b1
+--- /dev/null
++++ b/wmediumd/explorer-types.h
+@@ -0,0 +1,45 @@
++#define WMDX_SELECTIONS 8U
++#define WMDX_HEADERS 16U
++#define WMDX_LEASE_USEC 15000000ULL
++
++struct wmdx_header {
++	uint64_t time_usec;
++	uint32_t length;
++	uint8_t type, subtype, access_category;
++	int outcome;
++	bool multicast;
++};
++
++struct wmdx_selection {
++	int source, destination;
++	uint32_t frequency;
++	uint64_t expires, started;
++	uint64_t tx_subtypes[64], rx_subtypes[64];
++	uint64_t tx_unicast, tx_multicast, rx_unicast, rx_multicast;
++	uint64_t tx_eapol, rx_eapol, headers_seen;
++	struct wmdx_header headers[WMDX_HEADERS];
++	bool beacon_present;
++	uint64_t beacon_usec;
++	uint8_t beacon_bssid[6], beacon_utilization;
++	uint16_t beacon_stations, beacon_admission;
++};
++
++struct wmdx_endpoint {
++	uint64_t connections, accepted, requests, request_bytes;
++	uint64_t protocol_errors, io_or_opcode_disconnects;
++	uint64_t handler_usec, handler_usec_max;
++	uint64_t opcodes[18];
++};
++
++struct wmdx_state {
++	int *startup_snr;
++	uint64_t startup_generation;
++	uint64_t latest_expiry;
++	struct wmdx_selection selections[WMDX_SELECTIONS];
++	struct wmdx_endpoint endpoints[3];
++	int last_writer_pid;
++	unsigned int last_writer_uid;
++	uint64_t last_writer_generation, last_write_usec;
++	uint32_t last_write_updates;
++	bool last_write_frequency;
++};
+diff --git a/wmediumd/explorer.inc b/wmediumd/explorer.inc
+new file mode 100644
+index 0000000..7a4b716
+--- /dev/null
++++ b/wmediumd/explorer.inc
+@@ -0,0 +1,261 @@
++struct wmdx_json {
++	char bytes[24576];
++	size_t used;
++	bool overflow;
++};
++
++static void explorer_json(struct wmdx_json *document, const char *format, ...)
++{
++	va_list arguments;
++	int length;
++	if (document->overflow) return;
++	va_start(arguments, format);
++	length = vsnprintf(document->bytes + document->used,
++		sizeof(document->bytes) - document->used, format, arguments);
++	va_end(arguments);
++	if (length < 0 || (size_t)length >= sizeof(document->bytes) - document->used) {
++		document->overflow = true;
++		return;
++	}
++	document->used += length;
++}
++
++static uint64_t explorer_clock_usec(void)
++{
++	struct timespec stamp;
++	clock_gettime(CLOCK_MONOTONIC, &stamp);
++	return (uint64_t)stamp.tv_sec * 1000000ULL + stamp.tv_nsec / 1000;
++}
++
++static struct wmdx_endpoint *explorer_endpoint(struct wmd_control_client *client)
++{
++	return &client->ctx->telemetry->explorer.endpoints[
++		client->telemetry ? 2 : client->read_only ? 1 : 0];
++}
++
++static void explorer_writer(struct wmd_control_client *client,
++		uint64_t generation, uint32_t count, bool frequency)
++{
++	if (!client->ctx->telemetry) return;
++	struct wmdx_state *state = &client->ctx->telemetry->explorer;
++	state->last_writer_pid = client->peer_pid;
++	state->last_writer_uid = client->peer_uid;
++	state->last_writer_generation = generation;
++	state->last_write_usec = telemetry_now_usec();
++	state->last_write_updates = count;
++	state->last_write_frequency = frequency;
++}
++
++static void explorer_beacon(struct wmdx_selection *selection,
++		const struct frame *frame, uint64_t now)
++{
++	size_t offset = 36, elements = 0;
++	if (telemetry_frame_type(frame) != 0 || telemetry_frame_subtype(frame) != 8 ||
++		frame->data_len < offset) return;
++	while (offset + 2 <= frame->data_len && elements++ < 256) {
++		uint8_t type = frame->data[offset], length = frame->data[offset + 1];
++		offset += 2;
++		if (offset + length > frame->data_len) return;
++		if (type == 11 && length == 5) {
++			selection->beacon_present = true;
++			selection->beacon_usec = now;
++			memcpy(selection->beacon_bssid, frame->data + 16, 6);
++			selection->beacon_stations = frame->data[offset] | (frame->data[offset + 1] << 8);
++			selection->beacon_utilization = frame->data[offset + 2];
++			selection->beacon_admission = frame->data[offset + 3] | (frame->data[offset + 4] << 8);
++			return;
++		}
++		offset += length;
++	}
++}
++
++static void explorer_record(struct wmediumd *ctx, struct frame *frame,
++		struct station *destination, int outcome, bool acked)
++{
++	struct wmdx_state *state = &ctx->telemetry->explorer;
++	uint64_t now = telemetry_now_usec();
++	if (state->latest_expiry <= now) return;
++	for (size_t index = 0; index < WMDX_SELECTIONS; index++) {
++		struct wmdx_selection *selection = &state->selections[index];
++		if (selection->expires <= now || selection->source != frame->sender->index ||
++			selection->destination != destination->index || selection->frequency != frame->freq) continue;
++		uint8_t type = telemetry_frame_type(frame), subtype = telemetry_frame_subtype(frame);
++		bool multicast = frame->data_len >= 10 && (frame->data[4] & 1);
++		bool eapol = telemetry_frame_is_eapol(frame);
++		if (outcome < 0) {
++			selection->tx_subtypes[type * 16 + subtype]++;
++			selection->tx_unicast += !multicast;
++			selection->tx_multicast += multicast;
++			selection->tx_eapol += eapol;
++		} else {
++			selection->rx_subtypes[type * 16 + subtype]++;
++			selection->rx_unicast += !multicast;
++			selection->rx_multicast += multicast;
++			selection->rx_eapol += eapol;
++		}
++		struct wmdx_header *header = &selection->headers[selection->headers_seen % WMDX_HEADERS];
++		*header = (struct wmdx_header){ .time_usec = now, .length = frame->data_len,
++			.type = type, .subtype = subtype, .access_category = frame->telemetry_access_category,
++			.outcome = outcome < 0 ? (acked ? -1 : -2) : outcome, .multicast = multicast };
++		selection->headers_seen++;
++		explorer_beacon(selection, frame, now);
++	}
++}
++
++static void explorer_array(struct wmdx_json *document, const uint64_t *values, size_t count)
++{
++	explorer_json(document, "[");
++	for (size_t index = 0; index < count; index++)
++		explorer_json(document, "%s\"%" PRIu64 "\"", index ? "," : "", values[index]);
++	explorer_json(document, "]");
++}
++
++static int explorer_detail(struct wmd_control_client *client,
++		const uint8_t *payload, uint32_t length)
++{
++	struct wmediumd *ctx = client->ctx;
++	struct wmdx_json document = {};
++	struct wmdx_state *state;
++	uint8_t empty[16] = {};
++	uint64_t now = telemetry_now_usec();
++	if (length != 16 || !ctx->telemetry)
++		return send_response(client->loop.fd, WMDC_OP_EXPLORER_DETAIL, WMDC_ERR_LENGTH,
++			ctx->control_generation, NULL, 0);
++	state = &ctx->telemetry->explorer;
++	if (!memcmp(payload, empty, 16)) {
++		explorer_json(&document, "{\"schema\":\"wmediumd.explorer.v1\",\"scope\":\"services\","
++			"\"observed_usec\":\"%" PRIu64 "\",\"visibility_contention\":%s,\"priority_queues\":%s,"
++			"\"survey_enabled\":%s,\"model\":\"%s\",\"interference_enabled\":%s,"
++			"\"fading_coefficient\":%d,\"pcap_enabled\":%s,\"frequency_override_count\":%zu,"
++			"\"active_path_capacity\":%zu,\"selection_capacity\":%u,\"header_capacity\":%u,"
++			"\"last_writer_pid\":%d,\"last_writer_uid\":%u,\"last_writer_generation\":\"%" PRIu64 "\","
++			"\"last_write_usec\":\"%" PRIu64 "\",\"last_write_updates\":%u,\"last_write_frequency\":%s,\"endpoints\":[",
++			now, ctx->visibility_contention ? "true" : "false", ctx->priority_queues ? "true" : "false",
++			ctx->survey_disabled ? "false" : "true", ctx->error_prob_matrix ? "error-probability" : ctx->calc_path_loss ? "path-loss" : "snr-matrix",
++			ctx->intf ? "true" : "false", ctx->fading_coefficient, ctx->pcap_file ? "true" : "false",
++			ctx->frequency_override_count, ctx->telemetry->active_link_capacity, WMDX_SELECTIONS, WMDX_HEADERS,
++			state->last_writer_pid, state->last_writer_uid, state->last_writer_generation,
++			state->last_write_usec, state->last_write_updates, state->last_write_frequency ? "true" : "false");
++		const char *names[] = {"scenario-control", "radio-provider", "console-observer"};
++		for (size_t index = 0; index < 3; index++) {
++			struct wmdx_endpoint *endpoint = &state->endpoints[index];
++			explorer_json(&document, "%s{\"name\":\"%s\",\"connections\":\"%" PRIu64 "\","
++				"\"accepted\":\"%" PRIu64 "\",\"requests\":\"%" PRIu64 "\",\"request_bytes\":\"%" PRIu64 "\","
++				"\"protocol_errors\":\"%" PRIu64 "\",\"io_or_opcode_disconnects\":\"%" PRIu64 "\","
++				"\"handler_usec\":\"%" PRIu64 "\",\"handler_usec_max\":\"%" PRIu64 "\",\"opcodes\":",
++				index ? "," : "", names[index], endpoint->connections, endpoint->accepted, endpoint->requests,
++				endpoint->request_bytes, endpoint->protocol_errors, endpoint->io_or_opcode_disconnects,
++				endpoint->handler_usec, endpoint->handler_usec_max);
++			explorer_array(&document, endpoint->opcodes, 18);
++			explorer_json(&document, "}");
++		}
++		explorer_json(&document, "]}");
++	} else {
++		int source = station_index(ctx, payload), destination = station_index(ctx, payload + 6);
++		uint32_t frequency;
++		memcpy(&frequency, payload + 12, 4); frequency = be32toh(frequency);
++		if (source < 0 || destination < 0 || source == destination || (frequency && (frequency < 2300 || frequency > 7125)))
++			return send_response(client->loop.fd, WMDC_OP_EXPLORER_DETAIL, WMDC_ERR_VALUE,
++				ctx->control_generation, NULL, 0);
++		if (!frequency) {
++			explorer_json(&document, "{\"schema\":\"wmediumd.explorer.v1\",\"scope\":\"observer-start-pair-baseline\","
++				"\"baseline_generation\":\"%" PRIu64 "\",\"observed_usec\":\"%" PRIu64 "\",\"startup_snr_db\":",
++				state->startup_generation, now);
++			if (state->startup_snr) explorer_json(&document, "%d", state->startup_snr[source * ctx->num_stas + destination]);
++			else explorer_json(&document, "null");
++			explorer_json(&document, "}");
++			return send_response(client->loop.fd, WMDC_OP_EXPLORER_DETAIL, WMDC_OK,
++				ctx->control_generation, document.bytes, document.used);
++		}
++		struct wmdx_selection *selection = NULL, *available = NULL;
++		for (size_t index = 0; index < WMDX_SELECTIONS; index++) {
++			struct wmdx_selection *candidate = &state->selections[index];
++			if (candidate->expires <= now) { if (!available) available = candidate; continue; }
++			if (candidate->source == source && candidate->destination == destination && candidate->frequency == frequency) selection = candidate;
++		}
++		if (!selection) {
++			if (!available) return send_response(client->loop.fd, WMDC_OP_EXPLORER_DETAIL, WMDC_ERR_INTERNAL,
++				ctx->control_generation, NULL, 0);
++			selection = available; memset(selection, 0, sizeof(*selection));
++			selection->source = source; selection->destination = destination;
++			selection->frequency = frequency; selection->started = now;
++		}
++		selection->expires = now + WMDX_LEASE_USEC; state->latest_expiry = selection->expires;
++		explorer_json(&document, "{\"schema\":\"wmediumd.explorer.v1\",\"scope\":\"leased-selected-path\","
++			"\"started_usec\":\"%" PRIu64 "\",\"observed_usec\":\"%" PRIu64 "\",\"frequency_mhz\":%u,"
++			"\"tx_unicast\":\"%" PRIu64 "\",\"tx_multicast\":\"%" PRIu64 "\","
++			"\"rx_unicast\":\"%" PRIu64 "\",\"rx_multicast\":\"%" PRIu64 "\","
++			"\"tx_eapol\":\"%" PRIu64 "\",\"rx_eapol\":\"%" PRIu64 "\","
++			"\"header_overwrites\":\"%" PRIu64 "\",\"tx_subtypes\":",
++			selection->started, now, frequency, selection->tx_unicast, selection->tx_multicast,
++			selection->rx_unicast, selection->rx_multicast, selection->tx_eapol, selection->rx_eapol,
++			selection->headers_seen > WMDX_HEADERS ? selection->headers_seen - WMDX_HEADERS : 0);
++		explorer_array(&document, selection->tx_subtypes, 64);
++		explorer_json(&document, ",\"rx_subtypes\":"); explorer_array(&document, selection->rx_subtypes, 64);
++		explorer_json(&document, ",\"headers\":[");
++		uint64_t first = selection->headers_seen > WMDX_HEADERS ? selection->headers_seen - WMDX_HEADERS : 0;
++		for (uint64_t index = first; index < selection->headers_seen; index++) {
++			struct wmdx_header *header = &selection->headers[index % WMDX_HEADERS];
++			explorer_json(&document, "%s{\"time_usec\":\"%" PRIu64 "\",\"length\":%u,\"type\":%u,"
++				"\"subtype\":%u,\"access_category\":%u,\"outcome\":%d,\"multicast\":%s}",
++				index != first ? "," : "", header->time_usec, header->length, header->type, header->subtype,
++				header->access_category, header->outcome, header->multicast ? "true" : "false");
++		}
++		explorer_json(&document, "]");
++		if (selection->beacon_present) explorer_json(&document, ",\"beacon_bss_load\":{"
++			"\"bssid\":\"%02x:%02x:%02x:%02x:%02x:%02x\",\"observed_usec\":\"%" PRIu64 "\","
++			"\"station_count\":%u,\"utilization\":%u,\"admission_capacity\":%u}",
++			selection->beacon_bssid[0], selection->beacon_bssid[1], selection->beacon_bssid[2],
++			selection->beacon_bssid[3], selection->beacon_bssid[4], selection->beacon_bssid[5],
++			selection->beacon_usec, selection->beacon_stations, selection->beacon_utilization, selection->beacon_admission);
++		explorer_json(&document, "}");
++	}
++	return send_response(client->loop.fd, WMDC_OP_EXPLORER_DETAIL,
++		document.overflow ? WMDC_ERR_INTERNAL : WMDC_OK, ctx->control_generation,
++		document.bytes, document.overflow ? 0 : document.used);
++}
++
++static int explorer_selftest(void)
++{
++	struct wmd_telemetry *telemetry = calloc(1, sizeof(*telemetry));
++	struct frame *frame = calloc(1, sizeof(*frame) + 64);
++	if (!telemetry || !frame) { free(telemetry); free(frame); return 1; }
++	struct wmediumd ctx = {.telemetry = telemetry};
++	struct station source = {.index = 0}, destination = {.index = 1};
++	struct wmdx_selection *selection = &telemetry->explorer.selections[0];
++	uint64_t now = telemetry_now_usec();
++	int failures = 0;
++	selection->source = 0; selection->destination = 1; selection->frequency = 5180;
++	selection->expires = now + WMDX_LEASE_USEC;
++	telemetry->explorer.latest_expiry = selection->expires;
++	frame->sender = &source; frame->freq = 5180; frame->data_len = 43;
++	frame->data[0] = 0x80; frame->data[4] = 0xff; frame->data[16] = 0x02;
++	frame->data[36] = 11; frame->data[37] = 5;
++	frame->data[38] = 7; frame->data[40] = 128; frame->data[41] = 3;
++	explorer_record(&ctx, frame, &destination, WMD_TELEMETRY_RX_INJECTED, false);
++	if (selection->rx_subtypes[8] != 1 || selection->tx_subtypes[8] != 0 ||
++		selection->rx_multicast != 1 || !selection->beacon_present ||
++		selection->beacon_stations != 7 || selection->beacon_utilization != 128 ||
++		selection->beacon_admission != 3) failures++;
++	frame->data[0] = FTYPE_DATA; frame->data[4] = 0;
++	explorer_record(&ctx, frame, &destination, -1, true);
++	if (selection->tx_subtypes[32] != 1 || selection->tx_unicast != 1) failures++;
++	for (size_t index = 0; index < WMDX_HEADERS; index++) explorer_record(&ctx, frame, &destination, -1, true);
++	if (selection->headers_seen != WMDX_HEADERS + 2) failures++;
++	selection->expires = now;
++	explorer_record(&ctx, frame, &destination, -1, true);
++	if (selection->headers_seen != WMDX_HEADERS + 2) failures++;
++	selection->beacon_present = false; frame->data[0] = 0x80; frame->data[37] = 6;
++	explorer_beacon(selection, frame, now);
++	if (selection->beacon_present) failures++;
++	struct wmdx_json *document = calloc(1, sizeof(*document));
++	if (!document) failures++;
++	else {
++		uint64_t maximum = UINT64_MAX;
++		explorer_array(document, &maximum, 1);
++		if (strcmp(document->bytes, "[\"18446744073709551615\"]")) failures++;
++		free(document);
++	}
++	free(telemetry); free(frame);
++	return failures;
++}

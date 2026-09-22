@@ -3,23 +3,16 @@
 [Radio reference](README.md) · [Neighbor-room design](../proposals/neighbor-rooms/design.md)
 
 **Status: Phases 0–2 and the bounded Phase 3 profile are qualified; Phase 4 is partially implemented.**
-See [operation, supported profile and acceptance](#124-implemented-phases-12-survey-and-native-bss-load).
-The supported model remains legacy-rate, 20 MHz. The Phase 3 visibility profile
-is opt-in and conservative, not calibrated physical capacity or full DCF.
-The measurements originated on `codex/0908-clean`; the shared assessment is
-maintained on `codex/0913-clean`. Keep both copies synchronized, not separate backlogs.
+The [supported profile](#124-implemented-phases-12-survey-and-native-bss-load)
+is legacy-rate, 20 MHz; optional visibility is not calibrated capacity or full DCF.
+Source baseline: `codex/0916-clean`, RDK `f0bac18`, prpl backport `02b5673`,
+plus local changes below. The operator RDK suite had 60 passes, eight failures
+and three skips. Bounded fixes/checks do not replace room requalification.
 
-Evidence extends through September 15, 2026 UTC. Phases 1–2 deploy
-the module, daemon and native providers, testing fixed fields, traffic, retunes,
-failure and recovery. No soak or physical-capacity qualification was run.
-
-For subsequent client cross-band work, see [band steering and dedicated-room
-qualification](../optimizer/band-steering.md): capability-aware passive scans,
-native receive-channel reporting, and independent signal/load telemetry. Its
-room results do not replace the RF-capacity qualification limits in this assessment.
-
-0913 requires [namespace-safe cfg80211 socket cleanup](../../../../gen/hwsim/cfg80211/README.md).
-Its live regression passes on both labs; room convergence remains a separate gate.
+See [Console NG properties](console-rf-properties.md),
+[integration priorities](../proposals/easymesh-rf-assessment-and-development-plan.md#current-integration-review),
+[band steering](../optimizer/band-steering.md) and required
+[cfg80211 cleanup](../../../../gen/hwsim/cfg80211/README.md) for their separate contracts.
 
 ## Navigation
 
@@ -33,7 +26,7 @@ Its live regression passes on both labs; room convergence remains a separate gat
 - [Common implementation work](#6-common-implementation-work)
 - [RDK implementation work](#7-rdk-implementation-work)
 - [prpl implementation work](#8-prpl-implementation-work)
-- [Optimizer and viewer integration](#9-optimizer-and-viewer-integration)
+- [Optimizer and viewer integration](#9-optimizer-and-viewer-integration), including [current access gaps](#94-current-consumer-access-gaps)
 - [Phased delivery](#10-phased-delivery)
 - [Correctness and performance qualification](#11-correctness-and-performance-qualification)
 - [Reproducing the audit and maintaining this document](#12-reproducing-the-audit-and-maintaining-this-document)
@@ -85,62 +78,45 @@ Calibrated PHY service, hidden nodes and demand/capacity remain future work.
 
 ## 2. Evidence and deployed architecture
 
-### 2.1 Deployed architecture
+### 2.1 Current source architecture
 
-| Item | RDK on rev140 | prpl on rev150 |
+These are build defaults, not an inventory of a running VM. VM names, checkout
+paths and ports are operator-selected; follow the [build guide](../../build/README.md).
+
+| Item | RDK | prpl |
 | --- | --- | --- |
-| Running VM | `rdkeasymesh-20-0908` | `prplmesh-20-0908` |
-| Canonical repository | `/home/rev/yocto/rdkb-bpi-nosrc-vcpe-0908-clean/meta-cmf-bananapi-vcpe` | `/home/rev/git/prplmesh-lab` |
-| Prior qualification checkpoint | `0d9cde2` | `e70a431` |
-| Guest kernel | `7.0.0-30-generic` | `7.0.0-30-generic` |
-| Loaded/on-disk hwsim srcversion, patch 0010 | `542E9DB26233E9A8439431A`, matching | Same, matching |
-| Configured radio pool / channel contexts | 32 / 3 | 40 / 3 |
+| Guest kernel target | `7.0.0-30-generic` | `7.0.0-30-generic` |
+| Fixed client capacity / usual room presence | 100 / 20 | 100 / 20 |
+| Default hwsim pool / channel contexts | 128 / 3 | 120 / 3 |
 | Mesh radio ownership | One wiphy per mesh container, concurrent band-specific VAPs | Three wiphys per mesh container |
-| Default active radio requirement | 5 mesh + 20 client = 25 | 15 mesh + 20 client = 35 |
+| Bound radio requirement, full client pool | 5 mesh + 100 client = 105 | 15 mesh + 100 client = 115 |
 | Logical mesh roles | Controller plus colocated Agent-1 and four extenders | Same logical arrangement |
 | Selected medium | Userspace wmediumd; `kernel_medium=N` | Userspace wmediumd; `kernel_medium=N` |
 | Startup signal model | `snr`, default SNR 40 dB | Same |
 | Radio regulatory test setting | `regtest=5` | Same |
 
-The pool totals are not counts of independent RF channels. Nor are six
-logical mesh roles six physical mesh containers. Recheck spare radio ownership
-before adding foreign APs; do not reload hwsim during a room transition.
+Room exclusion does not delete bound radios. Presence, association, receive
+eligibility and observed traffic are different states. Pool size is neither
+independent channel count nor active-client count. Never reload hwsim to switch rooms.
 
 Both build scripts pin wmediumd to
-`717e5d7fcc23eecbc8e32bd897a8fd4b1e3ba640`. The hwsim patch sets are identical
-in the inspected repositories. wmediumd patch numbering differs after the
-shared initial series, and prpl includes an additional learned-VIF control
-identity patch. Compare content and capabilities, not patch numbers alone.
+`717e5d7fcc23eecbc8e32bd897a8fd4b1e3ba640`. The inspected hwsim series includes
+native receive-context patch `0011`. wmediumd numbering differs by stack:
+RDK includes Console NG patches `0032` and `0033`; prpl's `0032` is the
+netlink-ACK repair, not Console NG. Compare content and negotiated capabilities.
 
-RDK's canonical Yocto source trees identify Wi-Fi HAL
-`ce3170c9c8710a44b4627248e1443c31a9f7ad43`, OneWifi/libwebconfig
-`6281b770f10654644c23e6f474c556cf913e41b4`, and Unified Wi-Fi Mesh
-`1ef3cfd3014296defd2c5b575584e5f1d8195e0f`, plus the lab patches.
-prpl's manifest pins release 6.0.0 at
-`2e153c7e00cbcab6b8ee35082f494a364e23f018`, plus its lab patches.
-Phase 1–2 acceptance rebuilt the affected native providers from these pins and
-the checked-in patches. See the deployment and artifact details in section 12.4;
-this is not a byte-for-byte rebuild comparison of every appliance component.
+Use each build's pinned manifest and patch hashes to identify native components.
+Phase 1–2 acceptance rebuilt the affected providers (§12.4), not every appliance
+component. Old source revisions or module hashes cannot identify today's binaries.
 
 ### 2.2 Evidence baseline
 
-The initial audit remains outside the repository under
-`/home/rev/work/rf-phase0-0910/`. Its relevant findings were:
-
-- **E01/E12:** userspace medium and matching module identity; monitor ACK
-  channel-context fix present.
-- **E02–E06:** dummy/absent surveys, missing prpl BSS-load configuration and
-  RDK HAL no-op survey methods. Phases 1–2 replace these.
-- **E07:** legacy PHY approximations, fixed RX metadata and global queue
-  reservations; Phase 3 addresses sections 4.5–4.7's bounded subset.
-- **E08/E10:** idealized candidate metrics and signal-only optimizer inputs.
-- **E09:** prpl noise/ESP placeholders and zero-to-10 scan rewrite; the rewrite
-  is removed, unsupported noise/ESP remain unqualified.
-- **E11:** documented RDK rate/storage limitations, not a reproduced overflow.
-
-Old dummy values are not current measurements. Empty, unsupported, stale and
-measured idle remain distinct. Current contracts and acceptance below supersede
-historical source observations.
+The initial audit is retained under `/home/rev/work/rf-phase0-0910/`.
+Phases 1–2 supersede its dummy surveys and no-op native providers; Phase 3
+addresses legacy airtime/RX metadata and bounded reservations. Idealized
+candidate availability, noise/ESP placeholders and modern-PHY limitations remain.
+The old prpl zero-to-10 scan rewrite is removed. Empty, unsupported, stale and
+measured idle remain distinct; current contracts supersede historical stubs.
 
 ### 2.3 Three separate planes
 
@@ -379,9 +355,9 @@ silently become an optimizer input.
 
 ### 5.2 Proposed radio/channel record
 
-The full producer/driver record below remains a design contract, not an
-existing driver API. Phase 0 implements its per-field validity/unit rules and
-a guarded survey-delta helper without enabling a measured-airtime provider:
+The complete record below remains a design contract. Phase 0 supplies validity
+rules and survey-delta validation; Phases 1–2 implement TIME/BUSY publication.
+Separate TX/RX/foreign-energy counters remain proposed, not driver capabilities:
 
 | Group | Required fields |
 | --- | --- |
@@ -507,7 +483,7 @@ merely to make a demonstration pass.
 | IDs | Source boundary and follow-up |
 | --- | --- |
 | P01, P03–P04 | `patches/prplmesh/`: current-channel survey consumption, scan override removal and associated-stat refresh implemented |
-| P02 | BWL station counters qualify after Profile 2 KiB-to-octet normalization; noise, ESP, retry/error and rate semantics remain unqualified |
+| P02 | KiB-to-octet normalization and scoped retry/error tests exist (§12.7); RX corruption, noise, ESP and PHY capacity remain unqualified |
 | P05–P06 | Periodic, explicit-query, upward/downward threshold and restart behavior pass; preserve native timestamps and availability in UI consumers |
 | P07–P08 | Scoped external policy and build/service integration implemented; channel planning and new artifact qualification remain separate |
 
@@ -578,10 +554,43 @@ frame. Track acquisition delay separately from policy delay and UI delay.
 Monotonic clocks inside one VM are suitable for local durations; record clock
 mapping/uncertainty when correlating hosts or packet captures.
 
-Normal protocol timers, physical observation windows and intentional policy
-holds are legitimate. Unbounded queues, artificial replay waits and accidental
-serialization are not. “Instant” should mean bounded measured overhead,
-not removal of every meaningful timing mechanism.
+Distinguish native observation/policy timers from avoidable queueing and
+serialization. “Instant” means bounded overhead, not removing valid timing.
+
+### 9.4 Current consumer access gaps
+
+`optimizer/model.py` supports snapshots 1/2: serving/candidate signal, BSS load
+and client activity. The additive RF envelope/catalog describes units, identity,
+source, validity and consumer usage without changing those schemas. Policy
+still selects private/IoT BSSs; hop counts do not establish capacity.
+
+The common RDK/prpl implementation now publishes cached native RF independently of
+optimizer completion, at most twice per second. Topology and Console NG share
+the room's BSS-load projection. Native BSSID/device reports remain observable
+when inventory is stale, but radio/channel joins become explicitly unverified
+and client activity is withheld. Policy freshness/ownership gates are unchanged.
+
+The prpl source port awaits runtime qualification. Console NG also reads
+modeled surveys, RF profile and selected packet details: diagnostics, not
+optimizer inputs. Catalog support is not activation or fresh evidence.
+
+Read-only backhaul explanations now join actual native paths, timestamped
+signal and exact parent-BSSID load. They reject stale/ambiguous paths and
+invalidate channel/owner joins on change. Shared-frequency hops are diagnostic,
+not capacity; backhaul traffic is unavailable without a qualified counter window.
+Room, topology and Console NG consume the same cached projection. Policy
+inputs and target ranking are unchanged.
+
+The RDK BSS inventory includes backhaul APs with native radio/channel identity;
+station-mode and unknown-mode entries are excluded. Client candidate filtering
+still uses the client's SSID, not every observed BSS.
+
+Next: finish qualification on both deployments. RDK handover readiness can still
+fail on missing native candidates; isolation withdraws the backhaul AP while
+fronthauls remain operating. Keep both acceptance gates. Browser inspection
+adds no native queries or RF writes; closing Console NG cannot stop collection.
+See the [access contract](console-rf-properties.md#shared-rf-observations) and
+[ordered integration plan](../proposals/easymesh-rf-assessment-and-development-plan.md#ordered-low-risk-delivery).
 
 ## 10. Phased delivery
 
@@ -660,9 +669,10 @@ as achieved:
 - Less than 5% throughput impact from the added observation path versus the
   identical RF model with observation disabled, when run variance is below
   that threshold. Otherwise report the comparison as inconclusive.
-- Record medium scheduling lateness and export age at 25 RDK / 35 prpl active
-  radios, with one and multiple readers. Fail the performance claim when
-  host throttling/backlog prevents faithful timekeeping.
+- Record scheduling lateness/export age with 20 present clients and the full
+  100-client pool (105 RDK / 115 prpl bound radios), then full presence;
+  distinguish allocated, receiving and transmitting radios. Host throttling or
+  backlog invalidates a performance claim.
 
 Do not demand equality between a short driver window and a longer beacon or
 controller averaging window. Compare aligned intervals and account for byte
@@ -756,10 +766,9 @@ scenarios and discovery/contention fidelity levels; it does not replace the
 lower-layer measurement work here. Treat old proposal observations as
 historical unless rechecked against the pinned implementation.
 
-When a phase lands, replace the relevant proposed item with its implemented
-contract, source pointer and compact validation summary. Remove superseded
-claims rather than appending another dated report. Update both mirrored copies
-and both radio indexes; preserve independent release/build instructions.
+When a phase lands, replace proposals with contracts, sources and validation.
+Remove superseded claims. Update both copies and indexes; preserve separate
+release/build instructions.
 
 ### 12.3 Implemented Phase 0: truthfulness baseline
 
@@ -1023,17 +1032,11 @@ Cleanup removes temporary routes/address/TCP rule and restores medium,
 matrices, associations and services. Retain JSON and verify readiness.
 Failed/inconclusive trials exit nonzero.
 
-The visibility calendar preserves FIFO and multicast/hidden-receiver
-exclusion. RDK **0026** / prpl **0027** prevent later work from postponing
-earlier deadlines. The 20-ms regression completes at **20.063 ms**, formerly
-250.062 ms; clean builds and sanitizers pass.
-Run `bash gen/wmediumd/tests/test-scheduler-deadline.sh /patched/source/wmediumd`
-on RDK; omit `gen/` on prpl. No native rate, buffer, steering or VM-limit changes.
-
-Correlated RDK tracing finds per-flow p95 deadline lateness **22–92 ms before /
-0.21–0.69 ms after**. Netlink ingress still reaches **5.69 ms p95**: not zero
-external delay. Traced runs are diagnostic. Clean-binary qualification disables
-tracing/diagnostics and retains unchanged gates:
+RDK **0026** / prpl **0027** prevent later work from postponing earlier
+scheduler deadlines, preserving FIFO and multicast/hidden-receiver exclusion.
+Reproduce with `bash gen/wmediumd/tests/test-scheduler-deadline.sh /patched/source/wmediumd`
+(omit `gen/` on prpl). Recorded tracing still finds nonzero ingress delay;
+the following clean-binary results exclude tracing overhead:
 
 | Timer + feedback fixed | Global / isolated / hidden median Mbit/s | Isolated / global | Hidden / global | Maximum repeat spread | Verdict |
 | --- | --- | --- | --- | --- | --- |
@@ -1046,8 +1049,7 @@ Common hwsim **0010** completes singleton aggregate status using real ACK
 outcomes, restoring native rate adaptation rather than forcing rates or
 modeling aggregation. [Minstrel requires that
 status](https://github.com/torvalds/linux/blob/v7.0/net/mac80211/rc80211_minstrel_ht.c).
-Helper regressions, clean builds, live counter progression and monitor ACK
-checks pass. prpl's builder accepts four-digit patches beyond 0009.
+Recorded helper, build, live-counter and monitor-ACK checks pass.
 
 For module maintenance, stop the room, bridge, console and lab before unload;
 preserve module options and rollback binary. On RDK, restart
@@ -1090,8 +1092,8 @@ The pinned prpl ubus dependency also receives a
 [reentrant-dispatch backport](../testing/room-acceptance.md#prpl-libubus-reentrancy);
 this changes message coordination, not RF or steering policy.
 
-Modern PHY/DCF, live collisions/interference, reception-backed candidates
-and physical calibration remain open. Evidence:
+Modern PHY/DCF, receiver-local collisions, independent interference power,
+reciprocal reception-backed candidates and physical calibration remain open. Evidence:
 `/home/rev/work/policy-profiling-0912/`; RF baseline:
 `/home/rev/work/profiling-gates-0912/`. No thin tar or box is made.
 
@@ -1267,11 +1269,21 @@ The current counter/inspection work remains observation-only:
   receiver/source, scan identity and two-second per-neighbor freshness.
   Stale counters stay hidden; shared-radio utilization is not additive.
 
-Next:
+Next: qualify the [shared consumer access and backhaul evidence](#94-current-consumer-access-gaps).
+Independent power/noise/CCA remains the
+first new physical-model increment, but only after shared contracts, safe
+protocol allocation and native/UI observation are ready. The supplied branch
+summary is reviewed in the [development plan](../proposals/easymesh-rf-assessment-and-development-plan.md#current-integration-review);
+its implementation claims are not release qualifications.
 
-1. **Add backhaul path evidence:** join native backhaul RCPI, radio load and
-   traffic into explanations before target ranking consumes it.
-2. **Separate noise/interference/CCA:** version received power, noise and sensed
-   undecodable energy; this is the next foundational model change.
+`wmdcfg/rf_environment.py` contains the next increment's strict opt-in input
+contract and executable reference calculations, **not live actuation**. Power
+offset changes received power; receiver noise changes decoding SNR without
+changing received power; CCA separately classifies a frame's energy. Defaults
+retain the legacy −91 dBm reference and −90 dBm CCA. It does not synthesize
+background traffic or claim measured noise. Unknown input fields, non-finite
+numbers and runtime activation fail closed. No room or native daemon uses this
+prototype yet. Remaining work is negotiated wire actuation/readback, per-context
+native reporting, room restoration and bounded cross-stack qualification.
 
 Modern PHY/aggregation, ESP and full collision/DCF calibration remain later.

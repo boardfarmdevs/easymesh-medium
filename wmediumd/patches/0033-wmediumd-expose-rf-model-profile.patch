@@ -1,0 +1,22 @@
+diff --git a/wmediumd/explorer.inc b/wmediumd/explorer.inc
+--- a/wmediumd/explorer.inc
++++ b/wmediumd/explorer.inc
+@@ -127,6 +127,8 @@ static int explorer_detail(struct wmd_control_client *client,
+ 		explorer_json(&document, "{\"schema\":\"wmediumd.explorer.v1\",\"scope\":\"services\","
+ 			"\"observed_usec\":\"%" PRIu64 "\",\"visibility_contention\":%s,\"priority_queues\":%s,"
+ 			"\"survey_enabled\":%s,\"model\":\"%s\",\"interference_enabled\":%s,"
++			"\"noise_reference_dbm\":%d,\"cca_threshold_dbm\":%d,"
++			"\"airtime_profile\":\"legacy20\",\"survey_width_mhz\":20,\"independent_reverse_ack\":true,"
+ 			"\"fading_coefficient\":%d,\"pcap_enabled\":%s,\"frequency_override_count\":%zu,"
+ 			"\"active_path_capacity\":%zu,\"selection_capacity\":%u,\"header_capacity\":%u,"
+ 			"\"last_writer_pid\":%d,\"last_writer_uid\":%u,\"last_writer_generation\":\"%" PRIu64 "\","
+@@ -135,7 +137,8 @@ static int explorer_detail(struct wmd_control_client *client,
+ 			"\"last_write_usec\":\"%" PRIu64 "\",\"last_write_updates\":%u,\"last_write_frequency\":%s,\"endpoints\":[",
+ 			now, ctx->visibility_contention ? "true" : "false", ctx->priority_queues ? "true" : "false",
+ 			ctx->survey_disabled ? "false" : "true", ctx->error_prob_matrix ? "error-probability" : ctx->calc_path_loss ? "path-loss" : "snr-matrix",
+-			ctx->intf ? "true" : "false", ctx->fading_coefficient, ctx->pcap_file ? "true" : "false",
++			ctx->intf ? "true" : "false", NOISE_LEVEL, CCA_THRESHOLD,
++			ctx->fading_coefficient, ctx->pcap_file ? "true" : "false",
+ 			ctx->frequency_override_count, ctx->telemetry->active_link_capacity, WMDX_SELECTIONS, WMDX_HEADERS,
+ 			state->last_writer_pid, state->last_writer_uid, state->last_writer_generation,
+ 			state->last_write_usec, state->last_write_updates, state->last_write_frequency ? "true" : "false");

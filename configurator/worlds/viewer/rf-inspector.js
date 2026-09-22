@@ -1,7 +1,7 @@
 (function (root) {
   'use strict';
   function describe(input) {
-    const optimizer = input.optimizer || {}, observations = optimizer.rf_observations || {};
+    const optimizer = input.optimizer || {}, observations = input.observations || optimizer.rf_observations || {};
     const decision = (optimizer.client_decisions || []).find(row => row.role === input.selected);
     const client = (input.network?.clients || []).find(row => row.role === input.selected);
     const now = input.now;
@@ -24,7 +24,26 @@
       return 'unknown';
     };
     const lines = ['Selected: ' + (input.selected || 'none')];
-    if (input.view === 'traffic') {
+    if (input.view === 'properties') {
+      lines.push('SHARED RF PROPERTY CATALOG — availability does not mean policy use');
+      const records = observations.observations?.records || [];
+      for (const definition of input.catalog?.properties || []) {
+        const available = records.filter(row => row.property === definition.id && row.state === 'valid'
+          && age(row.observed_at) !== null && age(row.observed_at) <= row.maximum_age_seconds);
+        const field = definition.id === 'native_utilization' ? 'utilization' : definition.id;
+        const samples = ['native_utilization', 'station_count'].includes(definition.id)
+          ? observations.bss_loads || [] : definition.id.endsWith('_per_second') ? observations.client_activity || [] : [];
+        const count = observations.error ? 0 : records.length ? available.length : samples.filter(row =>
+          Number.isFinite(row[field]) && age(row.observed_at) !== null && age(row.observed_at) <= 5).length;
+        lines.push(definition.label + ' · ' + definition.unit + ' · ' + definition.scope,
+          'Kind: ' + definition.kind + ' · consumer: ' + definition.usage,
+          'Activation: ' + (definition.activation || 'source-dependent'),
+          definition.usage === 'unsupported' ? 'Unsupported; no value is invented.'
+            : count ? count + ' fresh native record(s) in this room.'
+            : 'No current shared sample; see configured/diagnostic views where supported.');
+      }
+      if (!input.catalog?.properties?.length) lines.push('Catalog unavailable in this recording.');
+    } else if (input.view === 'traffic') {
       const traffic = input.traffic || {};
       const udp = traffic.mode === 'udp' || input.world?.traffic_experiment?.phases?.some(phase => phase.mode === 'udp');
       lines.push('BOUNDED ' + (udp ? 'UDP' : 'ICMP') + ' TRAFFIC — actual packets via client wlan0',
@@ -90,6 +109,27 @@
       } else lines.push('No load-policy evidence; signal/capability policy may be active.');
     } else {
       lines.push('NATIVE OBSERVATIONS — never filled from geometry or modeled busy time');
+      const backhaul = observations.backhaul;
+      const path = backhaul?.paths?.find(row => row.role === input.selected);
+      if (path) {
+        const fresh = path.state === 'valid' && age(path.observed_at) !== null && age(path.observed_at) <= 5;
+        lines.push('BACKHAUL — inspection only, not target ranking',
+          'Native path: ' + (fresh ? path.path.join(' → ') : '— unavailable/stale'),
+          'Wireless hops: ' + (fresh ? path.wireless_hops : 'unknown'));
+        if (fresh) {
+          for (const link of path.links || []) {
+            const value = record => record?.state === 'valid'
+              ? measured(record.value, record.observed_at, 5, number => number + ' ' + record.unit) : '— ' + (record?.reason || 'unavailable');
+            lines.push(link.role + ' → ' + link.parent_role + ' · ' + (link.frequency_mhz || 'unknown') + ' MHz',
+              'Native signal: ' + value(link.signal), 'AP utilization: ' + value(link.utilization),
+              'Backhaul traffic: ' + value(link.traffic));
+          }
+          for (const [frequency, count] of Object.entries(path.shared_frequency_hops || {})) {
+            lines.push(count + ' hops share ' + frequency + ' MHz; potential contention, not additive load.');
+          }
+        } else if (path.reason) lines.push(path.reason);
+        lines.push('No physical capacity or bottleneck score is inferred.');
+      }
       if (decision) lines.push(
         'Serving RCPI: ' + measured(decision.current_rcpi, decision.metric_observed_at,
           decision.measurement_source === 'client_nl80211_received_scan' ? 2 : 5),
@@ -98,17 +138,28 @@
           ? 'AP → client (received scan)' : 'provider-defined; not assumed reciprocal'));
       const records = (observations.bss_loads || []).filter(row => row.role === input.selected || row.bssid === client?.connected_bssid);
       lines.push('LOCAL AP METRICS — reported by the AP');
+      if (observations.schema === 'easymesh.rf-inspection.v2') lines.push(
+        'Publication: independent of optimizer completion · ' + (age(observations.published_at)?.toFixed(1) ?? 'unknown') + ' s ago',
+        'Load policy: ' + (observations.policy_enabled ? 'enabled; inspect decision-used values separately' : 'not enabled; inspection only'));
       if (!records.length) lines.push(observations.enabled
         ? 'Native AP load: — no matching fresh report' : 'Native AP load collector unavailable; inspect room service status.');
       if (observations.error) lines.push('AP load collection: ' + observations.error);
       for (const row of records) {
-        lines.push('Radio ' + row.radio_id + ' · channel ' + row.channel,
+        const trusted = observations.enabled === true && !observations.error && row.source === 'native_ap_metrics'
+          && ['ieee1905-ethernet', 'prpl-1905-broker', 'prpl-local-broker'].includes(row.transport);
+        const utilization = trusted && Number.isInteger(row.utilization) && row.utilization >= 0 && row.utilization <= 255 ? row.utilization : null;
+        const stationCount = trusted && Number.isInteger(row.station_count) && row.station_count >= 0 && row.station_count <= 65535 ? row.station_count : null;
+        const maximumAge = Number.isFinite(observations.maximum_age_seconds) && observations.maximum_age_seconds > 0
+          ? Math.min(5, observations.maximum_age_seconds) : 5;
+        lines.push('Radio ' + (row.radio_id || 'unverified') + ' · channel ' + (row.channel || 'unverified') +
+          (row.frequency_mhz ? ' · ' + row.frequency_mhz + ' MHz' : ' · frequency unverified'),
           'BSSID ' + row.bssid,
-          'Utilization (0–255): ' + measured(row.utilization, row.observed_at, observations.maximum_age_seconds),
-          'Associated stations: ' + measured(row.station_count, row.observed_at, observations.maximum_age_seconds),
+          'Utilization (0–255): ' + measured(utilization, row.observed_at, maximumAge),
+          'Associated stations: ' + measured(stationCount, row.observed_at, maximumAge),
           'Source: ' + row.source + ' / ' + row.transport,
           'Provider epoch: ' + row.epoch,
           'Sample window: unknown; timestamp describes native report receipt');
+        if (row.context_state === 'unverified') lines.push('Fresh BSSID/device report; radio/context join unverified. Not policy evidence.');
       }
       lines.push('RECEIVED BSS LOAD — client-heard advertisements, not AP scans or local AP counters');
       const station = decision?.sta_mac || client?.sta_mac;

@@ -130,34 +130,35 @@ type RadioFrequency struct {
 }
 
 type ActiveLink struct {
-	Source             string `json:"source"`
-	Destination        string `json:"destination"`
-	FrequencyMHz       uint32 `json:"frequency_mhz"`
-	Band               string `json:"band"`
-	Channel            int    `json:"channel"`
-	Multicast          bool   `json:"multicast"`
-	LastUpdateSequence uint64 `json:"last_update_sequence"`
-	FirstSeenUsec      uint64 `json:"first_seen_usec"`
-	LastSeenUsec       uint64 `json:"last_seen_usec"`
-	Frames             uint64 `json:"frames"`
-	Bytes              uint64 `json:"bytes"`
-	Attempts           uint64 `json:"attempts"`
-	Retries            uint64 `json:"retries"`
-	Acked              uint64 `json:"acked"`
-	NoAck              uint64 `json:"no_ack"`
-	RXInjected         uint64 `json:"rx_injected"`
-	DropsOffChannel    uint64 `json:"drops_offchannel"`
-	DropsCCA           uint64 `json:"drops_cca"`
-	DropsInterference  uint64 `json:"drops_interference"`
-	DropsPER           uint64 `json:"drops_per"`
-	DropsNoReceiver    uint64 `json:"drops_no_receiver"`
-	NetlinkRejections  uint64 `json:"netlink_rejections"`
-	LastSignalDBM      int32  `json:"last_signal_dbm"`
-	LastSNRDB          int32  `json:"last_snr_db"`
-	LastPERMillion     uint32 `json:"last_per_million"`
-	LastType           uint8  `json:"last_type"`
-	LastSubtype        uint8  `json:"last_subtype"`
-	LastAccessCategory uint8  `json:"last_access_category"`
+	SampledAt          time.Time `json:"sampled_at,omitempty"`
+	Source             string    `json:"source"`
+	Destination        string    `json:"destination"`
+	FrequencyMHz       uint32    `json:"frequency_mhz"`
+	Band               string    `json:"band"`
+	Channel            int       `json:"channel"`
+	Multicast          bool      `json:"multicast"`
+	LastUpdateSequence uint64    `json:"last_update_sequence"`
+	FirstSeenUsec      uint64    `json:"first_seen_usec"`
+	LastSeenUsec       uint64    `json:"last_seen_usec"`
+	Frames             uint64    `json:"frames"`
+	Bytes              uint64    `json:"bytes"`
+	Attempts           uint64    `json:"attempts"`
+	Retries            uint64    `json:"retries"`
+	Acked              uint64    `json:"acked"`
+	NoAck              uint64    `json:"no_ack"`
+	RXInjected         uint64    `json:"rx_injected"`
+	DropsOffChannel    uint64    `json:"drops_offchannel"`
+	DropsCCA           uint64    `json:"drops_cca"`
+	DropsInterference  uint64    `json:"drops_interference"`
+	DropsPER           uint64    `json:"drops_per"`
+	DropsNoReceiver    uint64    `json:"drops_no_receiver"`
+	NetlinkRejections  uint64    `json:"netlink_rejections"`
+	LastSignalDBM      int32     `json:"last_signal_dbm"`
+	LastSNRDB          int32     `json:"last_snr_db"`
+	LastPERMillion     uint32    `json:"last_per_million"`
+	LastType           uint8     `json:"last_type"`
+	LastSubtype        uint8     `json:"last_subtype"`
+	LastAccessCategory uint8     `json:"last_access_category"`
 }
 
 // Association is protocol-positive station ownership reported by wmediumd.

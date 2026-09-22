@@ -22,8 +22,8 @@
 #   ./build-wmediumd.sh --refresh-prebuilt
 #                                # also replace tracked ./wmediumd.patched
 #
-# A prebuilt binary proven on rev130 with Linux 7.0 is committed next to this
-# script as ./wmediumd.patched for a no-build fast path.
+# A prebuilt binary is committed as ./wmediumd.patched for a no-build fast path.
+# Console NG telemetry additions are compiled but await operator qualification.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 SRC=$HERE/src

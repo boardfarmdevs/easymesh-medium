@@ -36,6 +36,10 @@ type Identity struct {
 
 type Loader struct{ Path string }
 
+func (loader Loader) Read() (Inventory, error) {
+	return load(loader.Path)
+}
+
 // Apply reads a bounded, unprivileged handoff file and enriches known radios.
 // Absence or invalid input is visible in the snapshot but never hides medium
 // telemetry. Discovery and privileged LXD calls intentionally remain outside

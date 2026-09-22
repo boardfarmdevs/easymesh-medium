@@ -1,8 +1,183 @@
 # EasyMesh RF laboratory: assessment and prioritized development plan
 
 Date: 14 September 2026  
-Status: Proposed development plan; no implementation or lab changes made  
+Status: Development plan; shared access/backhaul implemented in both source trees; runtime qualification in progress
+
 Audience: RF lab, RDK, prplMesh, optimizer and room-viewer developers
+
+## Current integration review
+
+This addendum supersedes the original first-work ordering below, not its RF
+fidelity limits. Source review: RDK `codex/0916-clean` at `f0bac18` and the
+prpl consumer backport at `02b5673`. Shared optimizer models, load policy and
+RF capability contracts were compared; no new live qualification is claimed.
+Do not deploy or run competing RF writers during an operator's test campaign.
+
+**Decision: finish access to existing RF properties before adding new physics.**
+The [maintained assessment](../radio/virtual-rf-assessment.md#94-current-consumer-access-gaps)
+identifies concrete gaps, not a need to replace the architecture:
+
+- Snapshot schemas 1/2 contain signal, BSS load and client activity, but no
+  general radio-context or backhaul-path observation.
+- Interactive rooms collect native load even with signal-only steering.
+  The local RDK publisher now updates independently of optimizer evaluations;
+  the prpl port is present; live qualification remains a separate gate.
+- Topology and Console NG receive a filtered BSS-load projection. Console NG
+  separately knows modeled surveys, active RF profile and packet diagnostics.
+- Native policy inputs still select private/IoT BSSs. Inspection additionally
+  joins backhaul BSS contexts without adding them to policy inputs. Native
+  parent paths, fresh signal and load have an explanation; independently
+  qualified backhaul traffic is explicitly unavailable.
+- A supported operation, enabled mode, fresh observation and policy-used field
+  are different facts. The current capability catalog does not describe all
+  fields across these consumers.
+
+### External summary disposition
+
+The supplied `/home/rev/rf-new-feature-summary.md` was reviewed separately
+(SHA-256 `ccfe1088fbc6cb35bd885c159025d023c2b2bbd21fb313d08db0e18588405116`).
+It describes independent power/noise/CCA (F1), overlap (F4), EDCA/aggregation
+(F6), capture/carrier sensing (F7) and receive-context v2 (F12).
+**It is not the implementation baseline or an instruction to merge branches.**
+The named commits were unavailable in the inspected repository; no matching
+`feature/*` heads were advertised by its origin during this review. Their code,
+tests and claimed legacy equivalence therefore remain unverified.
+
+Two useful ideas already align with this plan: separate power/noise/sensing,
+and specify cross-feature dependencies before combining models. However:
+
+- Its base-series claim is stale: RDK already has `0032`/`0033` for Console NG.
+  Its proposed opcode 17 and capability bit 16 collide with `EXPLORER_DETAIL`.
+  Future protocol IDs require a shared registry, not that allocation table.
+- Native receive contexts, including passive channels and empty/off reception,
+  already exist in hwsim `0011` and the paired medium patch. F12 would extend
+  them with explicit state/dwell, not introduce reception eligibility.
+- Existing `-Q` means bounded priority admission. It must not silently acquire
+  different EDCA/aggregation semantics. New timing models need a separate opt-in.
+- None of those proposed medium changes supplies room/compiler/native-adapter/
+  optimizer integration. Capability is not activation, measurement or qualification.
+
+Keep only those compatible lessons; defer the external implementations. F6/F7
+change core scheduling and loss behavior and are not low-risk first work.
+
+### Ordered low-risk delivery
+
+These are bounded implementation packages, not assertions of zero risk.
+Keep current room defaults, native reporting periods and policy thresholds.
+
+| Order | Package / owner | Deliverable and acceptance |
+| --- | --- | --- |
+| A | Property catalog and protocol registry / common | Extend existing `rf_contract.py` definitions with scope, unit, source, support, active mode, freshness and consumer usage; reserve existing opcodes/bits. Unknown features fail closed. No RF behavior change. |
+| B | Shared observations and independent publication / common plus native adapters | Add an optional versioned RF observation envelope alongside existing snapshots; retain schema-1/2 compatibility. Publish cached RF changes independently of candidate completion. All views report the same sample identity/value or an explicit unavailable reason. |
+| C | Consistent room/topology/console inspection / common UI | Show configured, applied, observed and decision-used values distinctly; frequency, age, source and validity travel together. UI reads do not create scans, policy work or medium writes. |
+| D | Backhaul explanations / common, RDK/prpl identity adapters | Join actual native parent/path, signal, radio load and available traffic. Show missing evidence and shared-channel hops without inventing capacity. Observation-only; no target-ranking changes. |
+| E | Short RF-access qualification / both stacks | Replay missing/stale/zero, owner/channel changes and blocked-candidate cases; use existing low/high/off traffic and receive/discovery rooms. Check publication and policy-input parity before new RF physics. |
+| F | Independent power/noise/CCA / common medium and platform adapters | First new model only after A–E pass: explicit opt-in, versioned actuation/readback, room playback/restoration and truthful native observations. Keep legacy rooms unchanged; then consider overlap and receive-context extensions separately. |
+
+Implement **A–C first**, then D–E. Do not enable load steering merely to make
+new observations visible. Changes remain observation-only until a separately
+selected policy and its acceptance prove a use for each new field.
+
+**A–D implementation status:** both source trees have the property/protocol
+catalog, versioned cached native-load/activity envelope, independent room
+publisher and matching room/topology/Console NG freshness/context labels.
+Schema-1/2 policy inputs and thresholds remain unchanged. Unjoined native
+BSSID reports never become policy evidence; unknown context stays unknown.
+Read-only native backhaul paths and per-hop evidence are now included. This
+does not unify every diagnostic, establish capacity or complete room acceptance.
+The short `rf-access-smoke.py` checks GET-only access and freshness; it is not
+a substitute for low/high/off traffic, receive/discovery and branch-room runs.
+See the [operator/API contract](../radio/console-rf-properties.md#shared-rf-observations).
+
+**F preparation, not activation:** `wmdcfg/rf_environment.py` specifies explicit
+opt-in inputs and reference power/noise/CCA calculations with bounded unit tests.
+No daemon opcode or capability is advertised for it. Runtime activation fails
+closed, even if a caller supplies a hypothetical capability. Before wiring it
+into a room, complete E, allocate nonconflicting negotiated operations, implement
+atomic apply/readback and restoration, and verify native reports on both stacks.
+Existing room defaults and the medium/driver binaries remain unchanged.
+
+The remaining F work is deliberately sequenced:
+
+1. After RF-access qualification, negotiate versioned per-radio/frequency
+   apply/readback with instance, generation and context identity; do not reuse
+   opcode 17. Make forward reception, reverse ACK and frame sensing consume
+   the same settings. Disabled mode must reproduce the existing model.
+2. Keep administrative room exclusion authoritative: positive power offsets
+   must never reactivate excluded radios. Journal every setting and restore it
+   on pause/world replacement, lease loss and shutdown. Reject unsupported peers
+   before changing any SNR or radio parameter.
+3. Extend the native survey bridge/driver and RDK/prpl adapters together.
+   Received power/RCPI must not change merely because receiver noise rises.
+   A configured noise floor is not measured physical noise, nor a generated
+   background waveform. Carry source, context and validity to all consumers.
+4. Qualify default equivalence, power-only, noise-only and CCA-only cases,
+   reverse asymmetry, retune/restart, exclusion and restoration in bounded
+   dedicated scenarios. Keep steering use separately opt-in; observation alone
+   does not authorize a new target-ranking rule.
+
+#### Observation and access contract
+
+Reuse the existing native report receiver, survey bridge, room event stream
+and Console NG demand-limited diagnostics. Do not add a broker, database,
+per-container collector, synchronous per-frame IPC or another full-matrix poll.
+Share schema/projection logic, not a mandatory console process: the optimizer
+must continue collecting with every browser and the console closed.
+
+Each field carries a stable property ID, typed value/unit, scope and provenance;
+radio/context identity includes band/frequency, width when known, BSSID/VIF
+mapping, medium instance and context/owner epoch. Keep measurement time/window,
+receipt time, publication time and decision time distinct. A field with no
+native measurement window must say unknown, not adopt the polling interval.
+Keep valid zero, unsupported, missing, stale and invalid states explicit.
+Restart, retune, reassociation and world changes invalidate the affected joins.
+
+Initial coverage: SNR/RSSI/RCPI and measurement kind; local channel utilization;
+native AP-report load and station count; received beacon load; packet/byte/
+retry/error deltas; actual parent/path and hop count; receive eligibility;
+configured noise/CCA references and active RF modes. Model constants remain
+diagnostics, not fabricated measured noise. Linux survey fields have explicit
+support flags; populate only supported observations through the existing native
+path. [Linux survey contract](https://docs.kernel.org/driver-api/80211/cfg80211.html)
+
+Use four views over that data, not four collectors:
+
+1. **Room stimulus:** editable supported inputs and applied-generation readback,
+   with one RF writer and restoration; unsupported controls remain disabled.
+2. **Room/topology inspection:** native and diagnostic observations, clearly
+   labeled. Room-excluded, supplicant-disconnected, receive-off and no recent
+   frames are separate states, especially for the 80 unused clients.
+3. **Optimizer input:** native/fresh eligible measurements through its adapter;
+   scenario truth is excluded unless an explicitly labeled idealized profile
+   allows it. Availability does not mean the policy currently uses the field.
+4. **Decision history:** the exact samples and reasons used at decision time,
+   not a join against newer values that would rewrite the explanation.
+
+Publication should use immutable bounded caches and coalesced change events;
+a slow browser or candidate query cannot delay ingestion or medium work.
+Packets/subtypes/header leases remain selected, diagnostic-only collection.
+Record publication cost and cache age independently of native cadence. No new
+daemon/kernel rebuild is expected for A–C; D may expose native reporting gaps
+which must be marked unavailable rather than solved by guessing.
+
+#### Focused acceptance after the current suite
+
+- Contract/replay: all existing schema-1/2 decisions unchanged; units, epoch
+  changes, valid-zero, malformed records and missing providers handled explicitly.
+- Presentation: matching radio/BSS values across views, no double-counted shared
+  BSS utilization, stable panels, and preserved freshness during candidate timeouts.
+- Bounded room checks: low/high/off load, received discovery/recovery, and a
+  branch/backhaul room; verify 20-present/100-bound distinction and restore state.
+- Observation overhead: same bounded workload with console closed, open and
+  selected details; unchanged policy, bounded collection and measured overhead.
+- First noise room, later: hold desired received power constant, step modeled
+  noise, verify the intended decode change and recovery without falsely claiming
+  measured noise or turning ambient noise into packet airtime.
+
+Use current-suite evidence as the baseline, but rerun affected short cases after
+implementation. Neither source inspection nor a passing fixture is a new
+physical-capacity qualification. Do not claim current prpl deployment parity
+from RDK Console NG results.
 
 ## 1. Objective and assessment
 

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>wmediumd console ng</title><link rel="stylesheet" href="/ng/style.css"></head>
+<body>
+<header><div><strong>wmediumd console <span class="accent">ng</span></strong><span id="world" class="subtle"></span></div><div class="header-actions"><span id="connection" role="status">Connecting…</span><button id="freeze">Freeze view</button><button id="export">Export evidence</button><button id="fullscreen">Full screen</button><a href="/ng/rf-properties.html" target="_blank" rel="noopener">RF properties ↗</a><a href="/ng/manual.html" target="_blank" rel="noopener">Manual ↗</a></div></header>
+<div id="health" role="status">Waiting for the read-only observer. No RF controls are enabled.</div>
+<main id="workspace">
+<aside id="navigation" aria-label="Explorer filters">
+  <h2>Explore the medium</h2><p class="hint">Configuration is not an association. Observed paths include delivery candidates.</p>
+  <label>Collection<select id="mode"><option value="observed">Observed packet paths</option><option value="configured">Configured RF pairs</option><option value="matrix">Directed RF matrix</option></select></label>
+  <label>Find a device or radio<input id="search" type="search" placeholder="sta-05, ext-2, container or MAC"></label>
+  <div class="quick"><button data-preset="present">Room clients</button><button data-preset="excluded">Excluded pool</button><button data-preset="drops">Drops</button><button data-preset="mesh">Mesh</button><button data-preset="clear">Clear filters</button></div>
+  <label>Band<select id="band"><option value="">All bands</option><option>2.4GHz</option><option>5GHz</option><option>6GHz</option></select></label>
+  <label>Exact frequency<select id="frequency"><option value="">All frequencies</option></select></label>
+  <label>Room presence<select id="presence"><option value="">All / unknown</option><option value="present">Present</option><option value="room-excluded">Room-excluded (still bound)</option><option value="unknown">Unknown / no matching room</option></select></label>
+  <label>Role<select id="role"><option value="">All roles</option><option value="controller-agent">Controller / Agent-1</option><option value="extender">Extender</option><option value="wlan-client">Station</option><option value="iot-client">IoT</option></select></label>
+  <label>Activity<select id="traffic"><option value="">All maintained paths</option><option value="recent">Seen within 5 seconds</option><option value="drops">Has lifetime drops</option><option value="fanout">Includes multicast fan-out</option></select></label>
+  <label>Last frame class<select id="type"><option value="">All frame classes</option><option value="0">Management</option><option value="1">Control</option><option value="2">Data</option></select></label>
+  <label>Minimum SNR (dB)<input id="minSNR" type="number" min="-100" max="100" placeholder="No limit"></label>
+  <label>Sort<select id="sort"><option value="label">Name</option><option value="snr">SNR</option><option value="rate">Frames / second</option><option value="drops">Lifetime drops</option><option value="age">Last seen age</option><option value="frequency_mhz">Frequency</option></select></label>
+  <label>Order<select id="direction"><option value="asc">Ascending</option><option value="desc">Descending</option></select></label>
+  <label class="check"><input id="showMAC" type="checkbox">Show radio MACs</label>
+  <div id="pool" class="card"></div><div id="coverage" class="card"></div>
+  <button id="services-toggle" aria-expanded="false">Control services &amp; sources</button><div id="services" hidden></div>
+</aside>
+<div id="divider" role="separator" aria-orientation="vertical" aria-label="Resize navigation panel" tabindex="0" aria-valuemin="180" aria-valuemax="500" aria-valuenow="240"></div>
+<section id="content" aria-label="Medium workspace">
+  <div class="scene-toolbar"><label>Arrangement<select id="arrangement"><option value="medium">Medium / band layers</option><option value="room">Room coordinates</option></select></label><button id="fit">Fit view</button><label class="check"><input id="allEdges" type="checkbox">All filtered paths (≤200)</label><label class="check"><input id="fanout" type="checkbox">Fan-out edges</label><label class="check"><input id="animate" type="checkbox" checked>Activity</label><span class="hint">Drag: orbit · right-drag: pan · wheel: zoom</span></div>
+  <div id="scene"></div>
+  <div class="table-tools"><strong>Maintained radios &amp; directed paths</strong><span id="table-count"></span><button id="expand">Expand</button><button id="collapse">Collapse</button><button id="csv">Table CSV</button></div>
+  <div class="table-head"><span>Device / destination</span><span>Band · MHz</span><span>SNR</span><span>Frames/s</span><span>Drops</span><span>Last seen</span><span>Last frame / presence</span></div>
+  <div id="table" role="treegrid" aria-label="Maintained radios and directed packet paths" tabindex="0"><div id="table-spacer"></div><div id="table-rows"></div></div>
+  <div class="timeline-tools"><strong>Recent medium events</strong><span class="hint">Not a packet capture; bounded daemon ring.</span><label class="check"><input id="events-enabled" type="checkbox">Collect events</label></div><div id="timeline"></div>
+</section>
+<aside id="inspector" aria-label="Selected properties"><h2 id="selection-title">Select a radio or path</h2><p class="hint">Click a device in 3D, a directed matrix cell, or a table row. Properties are collected only when needed.</p><div id="selection-controls"></div><nav class="tabs" aria-label="Inspector tabs"><button data-tab="rf" aria-pressed="true">RF</button><button data-tab="traffic">Traffic</button><button data-tab="load">Load</button><button data-tab="evidence">Evidence</button></nav><div id="properties"></div><div id="history"></div></aside>
+</main><div id="toast" role="status" hidden></div>
+<script type="module" src="/ng/app.mjs"></script>
+</body></html>

@@ -1,0 +1,136 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RF properties: simulation and observation</title><link rel="stylesheet" href="/ng/style.css"></head><body><article class="manual"><nav><a href="/">← Console NG</a><a href="/ng/manual.html">Operator manual</a><a href="/ng/rf-properties.html">RF properties</a></nav><details><summary>On this page</summary><ul><li><a href="#shared-rf-observations">Shared RF observations</a></li><li><a href="#frequency-band-and-channel">Frequency, band and channel</a></li><li><a href="#channel-width-and-phy-fidelity">Channel width and PHY fidelity</a></li><li><a href="#directed-snr">Directed SNR</a></li><li><a href="#distance-walls-and-movement">Distance, walls and movement</a></li><li><a href="#rssi-and-rcpi">RSSI and RCPI</a></li><li><a href="#noise-reference-and-cca">Noise reference and CCA</a></li><li><a href="#packet-error-probability-and-loss">Packet error probability and loss</a></li><li><a href="#fading-and-interference">Fading and interference</a></li><li><a href="#airtime-busy-time-and-spatial-visibility">Airtime, busy time and spatial visibility</a></li><li><a href="#visibility-aware-contention">Visibility-aware contention</a></li><li><a href="#channel-utilization">Channel utilization</a></li><li><a href="#synthetic-utilization-fixtures">Synthetic utilization fixtures</a></li><li><a href="#native-bss-load-and-station-count">Native BSS load and station count</a></li><li><a href="#advertised-beacon-bss-load">Advertised beacon BSS Load</a></li><li><a href="#ack-direction-retries-and-rate-outcomes">ACK direction, retries and rate outcomes</a></li><li><a href="#frame-classes-multicast-and-discovery">Frame classes, multicast and discovery</a></li><li><a href="#access-categories-and-scheduling-delay">Access categories and scheduling delay</a></li><li><a href="#room-exclusion-and-fronthaul-availability">Room exclusion and fronthaul availability</a></li><li><a href="#steering-and-properties-not-simulated">Steering and properties not simulated</a></li><li><a href="#implementation-sources">Implementation sources</a></li></ul></details><h1 id="rf-properties-simulation-and-observation">RF properties: simulation and observation</h1>
+<p>This is the Console NG field guide, also available offline through <strong>RF properties</strong> in the console header. The console <strong>observes</strong>, never changes RF. Open <strong>Control services &amp; sources</strong> to see which optional modes this daemon actually runs. A supported capability does not mean its mode is enabled.</p>
+<p>For each property below, <strong>Model</strong> identifies its producer, <strong>Observe</strong> gives the console location, and <strong>Boundary</strong> explains what the observation cannot prove. Configured inputs, medium outcomes, driver surveys, native reports and controller decisions are different evidence; missing or stale is never zero.</p>
+<h2 id="shared-rf-observations">Shared RF observations</h2>
+<p>The room&#x27;s <strong>RF inspector → RF property catalog</strong> and Console NG&#x27;s <strong>RF</strong> details use the same generated property definitions: scope, units, source category, activation requirements and potential policy usage. Definitions are not proof that a running feature is enabled. Actual modes remain in Services.</p>
+<p>The room publishes native BSS load and client activity from the existing receiver independently of candidate queries, coalesced to at most two updates per second. No browser read starts a scan, AP query or RF write. The collector does not depend on Console NG or an open browser. Load-aware steering remains opt-in; <strong>Optimizer decision</strong> shows the historical values actually used, not the latest inspection sample.</p>
+<ul>
+<li>Room <code>GET /api/demo/rf-catalog</code> returns property and wire-allocation metadata.</li>
+<li>Room <code>GET /api/demo/rf-observations</code> returns the cached inspection with an <code>easymesh.rf-observations.v1</code> envelope. Records carry units, identity, provider epoch, source/transport, receipt time, age and explicit validity. This normalized projection is built from cached rows on demand, outside the event lock; live events retain compact rows rather than repeated metadata.</li>
+<li>Room <code>GET /api/demo/mesh-layout</code> and <code>/api/demo/observer</code> carry the same AP-load projection for topology and Console NG; they omit client-activity records to keep these frequent reads bounded.</li>
+<li>Console <code>GET /api/v2/rf-catalog</code> serves embedded metadata without collection; <code>/api/v2/overview</code> exposes the existing cached room source. Rebuild the Console binary after changing embedded assets.</li>
+</ul>
+<p>Reports expire after five seconds. A fresh native BSSID/device report can remain visible while the inventory join is unavailable: radio, channel and frequency then say <strong>unverified</strong>, and client activity is withheld. Such a report is not valid policy evidence. Native report windows are unknown; receipt time is not measurement duration. Native packet/byte/retry/error rates retain their actual counter-delta window. Valid zero remains zero; unknown is not zero. Record validity describes publication time; readers must also check current receipt age, including when replaying or inspecting a stopped session.</p>
+<p>Snapshots 1/2 remain compatible. The optimizer&#x27;s <code>Snapshot.rf_observations()</code> accessor projects existing load/activity for inspection without changing policy state. The envelope does not yet unify signal, scans, modeled surveys or backhaul paths; their existing configured/native/decision views remain authoritative. The protocol registry reserves existing IDs, including detail opcode 17/capability bit 16; it allocates no new medium operation.</p>
+<p>This integration is implemented in both source trees; runtime deployment and room acceptance are separate gates. No current room-test result is claimed.</p>
+<h2 id="frequency-band-and-channel">Frequency, band and channel</h2>
+<ul>
+<li><strong>Model:</strong> hwsim supplies the transmitting channel context. The patched medium schedules independent frequencies and rejects off-channel receiver candidates. One RDK radio can have several concurrent frequency contexts.</li>
+<li><strong>Observe:</strong> table Band/MHz filters, expanded radio/frequency rows and RF context details; Traffic reports off-channel drops. MAC addresses identify radios, while VIF/BSSID aliases appear in Evidence.</li>
+<li><strong>Boundary:</strong> a maintained context is historical activity, not proof that every VIF is currently tuned there. A band label does not prove capacity.</li>
+</ul>
+<h2 id="channel-width-and-phy-fidelity">Channel width and PHY fidelity</h2>
+<ul>
+<li><strong>Model:</strong> the qualified airtime/survey provider uses <strong>legacy 20 MHz</strong> contexts. Modeled selected-rate metadata is returned to hwsim; Linux rate flags are handled without claiming calibrated modern PHY behavior.</li>
+<li><strong>Observe:</strong> Load lists published radio contexts, provider and epoch; Services lists the medium fidelity profile. Traffic shows outcomes rather than an invented negotiated PHY speed.</li>
+<li><strong>Boundary:</strong> HT/VHT/HE/EHT capacity, bonding, MIMO streams, OFDMA and MLO are not faithfully simulated by these legacy airtime numbers.</li>
+</ul>
+<h2 id="directed-snr">Directed SNR</h2>
+<ul>
+<li><strong>Model:</strong> each source→destination pair has an SNR input in dB. A matching exact-frequency override wins over the pair fallback. Reverse-direction values can differ. Atomic writes advance the medium generation.</li>
+<li><strong>Observe:</strong> Configured RF pairs or Directed RF matrix; select a destination and frequency for forward/reverse readbacks. RF separately lists the observer-start baseline, current pair and effective-frequency value.</li>
+<li><strong>Boundary:</strong> last-packet SNR is not necessarily the current input. Matrix pages from different generations cannot form one verified snapshot.</li>
+</ul>
+<h2 id="distance-walls-and-movement">Distance, walls and movement</h2>
+<ul>
+<li><strong>Model:</strong> the room/configurator converts distance, per-band reference SNR, path-loss exponent, crossed-wall attenuation and optional seeded shadowing into bounded SNR values. Motion generates new frequency-qualified values; wmediumd consumes those values, not the room geometry itself.</li>
+<li><strong>Observe:</strong> Room coordinates arrangement, RF readbacks and Services writer generation. The room viewer remains the place to edit positions.</li>
+<li><strong>Boundary:</strong> walls are an attenuation model, not ray tracing, diffraction, multipath, Doppler or a calibrated building propagation measurement.</li>
+</ul>
+<h2 id="rssi-and-rcpi">RSSI and RCPI</h2>
+<ul>
+<li><strong>Model:</strong> the medium derives receive signal from link SNR plus its fixed noise reference, with optional fading/interference adjustments. Patched hwsim/native reporting paths expose signal to the mesh stack. RCPI is the stack&#x27;s normalized representation, not another independently measured RF input.</li>
+<li><strong>Observe:</strong> Traffic shows last signal in dBm and last SNR in dB; RF shows the configured SNR. Use topology/room metrics for native RCPI reports.</li>
+<li><strong>Boundary:</strong> received signal, candidate matrix lookup and native report freshness must not be conflated. The console does not issue candidate queries.</li>
+</ul>
+<h2 id="noise-reference-and-cca">Noise reference and CCA</h2>
+<ul>
+<li><strong>Model:</strong> current daemon constants are <strong>−91 dBm noise reference</strong> and <strong>−90 dBm CCA threshold</strong>. The threshold gates candidate reception and radio-local visibility. These are fixed model references, not measurements.</li>
+<li><strong>Observe:</strong> Services reports the compiled constants; Traffic distinguishes CCA drops from PER and off-channel drops.</li>
+<li><strong>Boundary:</strong> there is no independently calibrated noise-floor generator, adjacent-channel spectral leakage or noise survey. Do not derive a measured noise floor by subtracting reported SNR from signal.</li>
+</ul>
+<h2 id="packet-error-probability-and-loss">Packet error probability and loss</h2>
+<ul>
+<li><strong>Model:</strong> in the normal SNR model, frame length, modeled legacy rate and effective SNR determine error probability. Random delivery decisions produce actual failed attempts. Upstream error-probability/path-loss modes are identified separately by the daemon; rooms normally use the SNR matrix.</li>
+<li><strong>Observe:</strong> Traffic shows last PER, attempts, retries, ACK/no-ACK, injections and separate PER/CCA/interference/off-channel/no-receiver drop counts.</li>
+<li><strong>Boundary:</strong> last PER is not a measured average loss percentage; TX attempts and receiver candidates are different counting boundaries. Packet loss alone does not establish why an application stalled.</li>
+</ul>
+<h2 id="fading-and-interference">Fading and interference</h2>
+<ul>
+<li><strong>Model:</strong> optional daemon fading perturbs effective signal. Optional per-frequency interference accounting affects modeled receive outcomes. Neither feature should be assumed enabled merely because its code exists.</li>
+<li><strong>Observe:</strong> Services exposes fading coefficient and interference-enabled state. Traffic shows last effective signal/SNR and interference outcomes.</li>
+<li><strong>Boundary:</strong> this is not a spectrum analyzer, independently adjustable thermal noise, calibrated hidden-terminal collision model or physical fading trace. A zero coefficient means no configured fading perturbation.</li>
+</ul>
+<h2 id="airtime-busy-time-and-spatial-visibility">Airtime, busy time and spatial visibility</h2>
+<ul>
+<li><strong>Model:</strong> actual submitted frames, retry attempts and modeled legacy transmission durations feed occupied-time accounting. Wait/backoff is not counted as transmitted airtime. Global frequency occupancy and each radio&#x27;s sensed busy time have different scopes.</li>
+<li><strong>Observe:</strong> Load shows global channel windows plus published radio-local active/busy microseconds, source, provider and context epoch.</li>
+<li><strong>Boundary:</strong> a radio-local value cannot be replaced by a global percentage. Occupancy is modeled airtime, not calibrated goodput or available capacity.</li>
+</ul>
+<h2 id="visibility-aware-contention">Visibility-aware contention</h2>
+<ul>
+<li><strong>Model:</strong> optional <code>-F</code> enables conservative visibility reservations and spatial reuse. Reception visibility derives from directed RF state; the normal scheduler remains distinguishable from this opt-in behavior.</li>
+<li><strong>Observe:</strong> Services reports Visibility contention and the survey fidelity profile; Load provides the resulting radio-local survey publication.</li>
+<li><strong>Boundary:</strong> not receiver-local collision/capture physics or full EDCA. Opening the console never enables this mode.</li>
+</ul>
+<h2 id="channel-utilization">Channel utilization</h2>
+<ul>
+<li><strong>Model:</strong> the survey bridge publishes valid active/busy counter contexts into the hwsim RF survey ABI. Native HAL/OneWifi consumes these observations. Utilization is busy/active over an identified interval; native AP reports encode a byte from 0 to 255.</li>
+<li><strong>Observe:</strong> Load keeps global occupancy, radio-local published counters and native BSS-load records separate. A native byte is displayed as <code>100 × byte / 255</code> percent. The bridge&#x27;s cache expires after one second; the inspector does not query whether the driver consumed it.</li>
+<li><strong>Boundary:</strong> a valid zero means idle in that window; missing, resetting, unsupported-width or stale means unavailable. Native receipt time does not reveal the stack&#x27;s exact measurement window.</li>
+</ul>
+<h2 id="synthetic-utilization-fixtures">Synthetic utilization fixtures</h2>
+<ul>
+<li><strong>Model:</strong> an explicitly configured fixed-utilization bridge fixture can publish a selected byte independently of offered traffic. This tests field propagation, encoding, queries and thresholds, not congestion performance.</li>
+<li><strong>Observe:</strong> Load identifies <code>synthetic-field-test</code> rather than modeled airtime, alongside the actual provider contexts and native reports.</li>
+<li><strong>Boundary:</strong> high fixture utilization must not be described as a congested RF medium or as throughput pressure created by wmediumd.</li>
+</ul>
+<h2 id="native-bss-load-and-station-count">Native BSS load and station count</h2>
+<ul>
+<li><strong>Model:</strong> the mesh agent builds native AP Metrics reports from its platform observations and association state. The room&#x27;s existing RF collector caches these; Console NG does not send additional AP-metric queries.</li>
+<li><strong>Observe:</strong> select an AP radio, then Load: BSSID, utilization byte/percent, station count, report age, source and epoch. VIF/BSSID correlation matters because several BSSs share one underlying radio.</li>
+<li><strong>Boundary:</strong> station count is per BSS, not channel airtime or the size of the configured container pool. Counts from several BSSs must not multiply one shared radio&#x27;s utilization. Disabled native collection stays unavailable.</li>
+</ul>
+<h2 id="advertised-beacon-bss-load">Advertised beacon BSS Load</h2>
+<ul>
+<li><strong>Model:</strong> hostapd produces the actual beacon IE. A selected AP→receiver frequency window parses the bounded header/IE data already processed by wmediumd; no capture process is spawned. It retains BSSID, station count, utilization byte and available admission capacity.</li>
+<li><strong>Observe:</strong> choose an AP source, receiver and exact MHz; open Load and wait for a fresh beacon. Traffic lists beacon subtype counts and recent header outcomes. Admission capacity is in <strong>32 µs/s units</strong>.</li>
+<li><strong>Boundary:</strong> a native AP Metrics report is not proof of a beacon IE. Processing a beacon candidate is not proof of successful reception. Admission capacity may be an unqualified platform value, not free bandwidth.</li>
+</ul>
+<h2 id="ack-direction-retries-and-rate-outcomes">ACK direction, retries and rate outcomes</h2>
+<ul>
+<li><strong>Model:</strong> the reverse ACK link has its own RF success decision, so data delivery can succeed while the sender retries after a lost ACK. Rate/retry information originates with mac80211 and is consumed by the medium.</li>
+<li><strong>Observe:</strong> RF forward/reverse values; Traffic ACK/no-ACK, attempts/retries and RX injections. Correlate native counters separately in the topology.</li>
+<li><strong>Boundary:</strong> summed TX and RX counters double-count different events. A monitor trace, modeled legacy rate or successful ACK does not prove modern PHY throughput, nor does every modeled ACK appear as a captured radio frame.</li>
+</ul>
+<h2 id="frame-classes-multicast-and-discovery">Frame classes, multicast and discovery</h2>
+<ul>
+<li><strong>Model:</strong> real hwsim management/data/control submissions are forwarded according to frequency and learned VIF/radio receive eligibility. A multicast submission can produce many directed receiver-candidate records.</li>
+<li><strong>Observe:</strong> table frame-class filter, fan-out toggle, per-radio counters; select a path for leased TX/RX subtype histograms, EAPOL counts and recent header metadata. There are at most eight 15-second selected windows, each retaining 16 headers without payload.</li>
+<li><strong>Boundary:</strong> a maintained path is not a connection or an association. No detailed history exists before selection; header-ring overwrites and unavailable observations must remain visible.</li>
+</ul>
+<h2 id="access-categories-and-scheduling-delay">Access categories and scheduling delay</h2>
+<ul>
+<li><strong>Model:</strong> optional <code>-Q</code> priority admission plus the lab&#x27;s classification support prioritizes bounded control traffic. Per-frequency queueing and scheduler deadlines remain host processes, not physical RF clocks.</li>
+<li><strong>Observe:</strong> Services shows Priority queues and endpoint handler cost; Traffic shows last access category. Summary exposes queue depth and scheduler/netlink counters through Evidence/Services.</li>
+<li><strong>Boundary:</strong> not calibrated EDCA, WMM admission, ESP or a zero-overhead timing guarantee. CPU contention/netlink rejection is infrastructure evidence, not an RF impairment to hide as a weak signal.</li>
+</ul>
+<h2 id="room-exclusion-and-fronthaul-availability">Room exclusion and fronthaul availability</h2>
+<ul>
+<li><strong>Model:</strong> a room with 20 clients still has 100 bound client containers and hwsim radios. Excluded clients receive low-SNR gating plus explicit client disconnection. Extender fronthaul presence is distinct from its backhaul.</li>
+<li><strong>Observe:</strong> Client pool counts and Excluded pool filter; RF shows requested disconnection, fresh room presence and directed readback. Traffic may still show management submissions, retries and receiver candidates.</li>
+<li><strong>Boundary:</strong> exclusion does not delete a radio or guarantee silence. A stale or mismatched room instance is unknown, never automatically offline.</li>
+</ul>
+<h2 id="steering-and-properties-not-simulated">Steering and properties not simulated</h2>
+<h3 id="native-backhaul-explanations">Native backhaul explanations</h3>
+<p>The room RF inspector, topology node hover and Console NG Load tab share <code>easymesh.backhaul-observations.v1</code> under <code>rf_observations.backhaul</code>. They show the actual controller parent/path, wireless hops, frequency and fresh native signal/load where an exact parent-BSSID/device/context join exists. Missing parents, cycles, conflicting parents and stale topology invalidate the path. Retunes invalidate load joins until a new report arrives. Geometry and configured SNR never fill missing native measurements.</p>
+<p>RDK <code>/api/v1/bsses</code> now includes backhaul AP radio/channel identity. Only known AP-mode records qualify; station-mode copies cannot establish an AP context. This changes observation coverage, not client steering eligibility.</p>
+<p>Repeated same-frequency hops flag potential contention, not additive utilization or an inferred capacity/bottleneck score. Backhaul traffic remains unavailable until a qualified backhaul counter window exists; client traffic is not a substitute. These cached joins issue no additional native queries and never change optimizer ranking. Signal values without measurement timestamps remain unknown even when the topology itself was just polled.</p>
+<p>BTM/non-BTM actions, roaming, parent choice and band steering are native mesh or optimizer decisions, not RF properties invented by the observer. Use the room/topology views for decisions and actual associations. Console NG explains the medium inputs and outcomes that accompany them, not optimality by itself.</p>
+<p>Independent transmit-power/noise calibration, receiver-local collisions, realistic interference spectra, ESP/service capacity, modern PHY capacity and physical-radio measurements remain outside the qualified legacy RF model. Consult the RF assessment for development scope, not as a claim that every planned feature is active.</p>
+<h2 id="implementation-sources">Implementation sources</h2>
+<ul>
+<li>Medium patch series implements channel, signal, ACK, airtime, visibility, priority and read-only observer behavior.</li>
+<li>World compiler generates room RF inputs; survey bridge publishes the driver-facing modeled observations.</li>
+<li>Room integration exposes read-only intent and exclusion; <a href="/ng/manual.html">Console manual</a> describes collection limits, freshness and navigation.</li>
+</ul></article></body></html>
