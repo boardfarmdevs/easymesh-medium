@@ -140,7 +140,10 @@
       lines.push('LOCAL AP METRICS — reported by the AP');
       if (observations.schema === 'easymesh.rf-inspection.v2') lines.push(
         'Publication: independent of optimizer completion · ' + (age(observations.published_at)?.toFixed(1) ?? 'unknown') + ' s ago',
-        'Load policy: ' + (observations.policy_enabled ? 'enabled; inspect decision-used values separately' : 'not enabled; inspection only'));
+        'Load policy: ' + (observations.policy_enabled ? 'enabled; inspect decision-used values separately' : 'not enabled; inspection only'),
+        'Native counter guard: ' + (observations.counter_guard_enabled
+          ? 'configured for load balancing; weak-signal rescue bypasses it'
+          : 'not enabled; counters remain available for inspection'));
       if (!records.length) lines.push(observations.enabled
         ? 'Native AP load: — no matching fresh report' : 'Native AP load collector unavailable; inspect room service status.');
       if (observations.error) lines.push('AP load collection: ' + observations.error);

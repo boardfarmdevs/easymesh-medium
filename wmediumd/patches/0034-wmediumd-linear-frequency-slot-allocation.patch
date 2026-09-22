@@ -1,0 +1,62 @@
+Subject: [PATCH] wmediumd: bound cold frequency slot reservation
+
+A full room installs 3,060 frequency overrides. Searching every free candidate
+from slot zero and rescanning all earlier reservations takes cubic work on an
+empty table, blocking the radio event loop for seconds and causing beacon loss.
+Reserve previously inactive slots with one monotonic cursor instead. Existing
+slots remain unchanged during validation; removals are not recycled within the
+same transaction. Invalid requests still leave the entire generation untouched.
+Only free-slot reservation becomes linear; key lookup and duplicate validation
+retain their existing bounds and all protocol and RF semantics are unchanged.
+
+--- a/wmediumd/control.c
++++ b/wmediumd/control.c
+@@ -916,17 +916,6 @@
+ 	return WMDC_OK;
+ }
+ 
+-static bool slot_is_planned(const struct resolved_frequency_update *resolved,
+-			    uint32_t count, int slot)
+-{
+-	uint32_t i;
+-
+-	for (i = 0; i < count; i++)
+-		if (resolved[i].override && resolved[i].slot == slot)
+-			return true;
+-	return false;
+-}
+-
+ static int resolve_frequency_links(struct wmediumd *ctx, const uint8_t *payload,
+ 				   uint32_t count,
+ 				   struct resolved_frequency_update *resolved)
+@@ -934,6 +923,7 @@
+ 	const struct wmdc_frequency_link *links =
+ 		(const struct wmdc_frequency_link *)payload;
+ 	uint32_t i, j;
++	size_t next_free_slot = 0;
+ 
+ 	if (!ctx->frequency_overrides)
+ 		return WMDC_ERR_INTERNAL;
+@@ -966,17 +956,12 @@
+ 		slot = frequency_override_slot(ctx, resolved[i].source,
+ 			resolved[i].destination, resolved[i].frequency_mhz);
+ 		if (resolved[i].override && slot < 0) {
+-			size_t candidate;
+-
+-			for (candidate = 0;
+-			     candidate < ctx->frequency_override_capacity; candidate++)
+-				if (!ctx->frequency_overrides[candidate].active &&
+-				    !slot_is_planned(resolved, i, candidate)) {
+-					slot = candidate;
+-					break;
+-				}
+-			if (slot < 0)
++			while (next_free_slot < ctx->frequency_override_capacity &&
++			       ctx->frequency_overrides[next_free_slot].active)
++				next_free_slot++;
++			if (next_free_slot == ctx->frequency_override_capacity)
+ 				return WMDC_ERR_INTERNAL;
++			slot = next_free_slot++;
+ 		}
+ 		resolved[i].slot = slot;
+ 	}

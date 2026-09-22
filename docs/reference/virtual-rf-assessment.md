@@ -5,9 +5,10 @@
 **Status: Phases 0–2 and the bounded Phase 3 profile are qualified; Phase 4 is partially implemented.**
 The [supported profile](#124-implemented-phases-12-survey-and-native-bss-load)
 is legacy-rate, 20 MHz; optional visibility is not calibrated capacity or full DCF.
-Source baseline: `codex/0916-clean`, RDK `f0bac18`, prpl backport `02b5673`,
-plus local changes below. The operator RDK suite had 60 passes, eight failures
-and three skips. Bounded fixes/checks do not replace room requalification.
+Current development branch: `codex/0916-clean` in both repositories. The
+[property-to-room coverage and live gates](rf-property-coverage.md#native-load-action-qualification)
+separate implementation, measured behavior and remaining qualification failures.
+Bounded diagnostics do not replace clean-source release acceptance.
 
 See [Console NG properties](console-rf-properties.md),
 [integration priorities](../proposals/easymesh-rf-assessment-and-development-plan.md#current-integration-review),
@@ -323,21 +324,23 @@ socket shapes do not establish equal model fidelity.
 
 ### 4.10 Capture and host delay are observation limits
 
-`hwsim0` is the global transmitter-side monitor for one VM's virtual radios.
-It is useful for beacon fields; it is not a local spectrum analyzer or proof
-that every intended receiver accepted a frame. Modeled retries/ACKs also need
-their own interpretation rather than assuming a hardware-equivalent trace.
+`hwsim0` monitors all VM radios at the transmitter side. It exposes beacon
+fields, not local spectrum or proof of receiver acceptance. Modeled retries
+and ACKs are not hardware-equivalent traces.
 
-The current patch set contains the multichannel monitor-ACK fix. Older blanket
-warnings that dynamic capture is always unsafe do not describe that fix.
-Nevertheless, verify the loaded module, preserve monitor state, bound capture
-duration and record drops. The room trace helper's normal management filter
-excludes beacons/probes, so use a deliberately chosen beacon capture for BSS Load.
+Current patches include the multichannel monitor-ACK fix. Verify the loaded
+module, preserve monitor state, bound capture duration and record drops.
+The room trace's management filter excludes beacons/probes; deliberately
+capture beacons to inspect BSS Load.
 
-CPU contention, netlink backlog, container scheduling, polling, candidate
-admission and browser rendering add real latency. They are not RF congestion.
-Fast emulation requires measuring and bounding these costs, not claiming zero
-cost or interpreting a loaded host as a busy wireless channel.
+CPU contention, netlink backlog, scheduling, polling, candidate admission and
+rendering add real latency, not RF congestion. Measure and bound those costs;
+never assume zero overhead or interpret host load as wireless channel load.
+
+Cold room initialization also needs this distinction: a cubic frequency-slot
+reservation search previously blocked the medium event loop for seconds and
+caused beacon loss. The shared linear-reservation fix preserves atomic RF
+updates and native policy; see [cold initialization qualification](rf-property-coverage.md#cold-room-initialization).
 
 ## 5. Required measurement contract
 
@@ -570,25 +573,47 @@ the room's BSS-load projection. Native BSSID/device reports remain observable
 when inventory is stale, but radio/channel joins become explicitly unverified
 and client activity is withheld. Policy freshness/ownership gates are unchanged.
 
-The prpl source port awaits runtime qualification. Console NG also reads
-modeled surveys, RF profile and selected packet details: diagnostics, not
-optimizer inputs. Catalog support is not activation or fresh evidence.
+Fresh prpl follow-up passes five strict load samples and twenty native backhaul
+RSSI observations; spaced band names preserve frequency identity. Console NG
+matches 115 radios and live room/survey data. Its diagnostics are not policy
+inputs; catalog support alone is not activation or fresh evidence.
 
-Read-only backhaul explanations now join actual native paths, timestamped
-signal and exact parent-BSSID load. They reject stale/ambiguous paths and
-invalidate channel/owner joins on change. Shared-frequency hops are diagnostic,
-not capacity; backhaul traffic is unavailable without a qualified counter window.
-Room, topology and Console NG consume the same cached projection. Policy
-inputs and target ranking are unchanged.
+Read-only backhaul explanations join native paths, timestamped signal and
+parent-BSSID load. Stale/ambiguous paths and changed channel/owner joins fail
+closed. Shared-frequency hops are diagnostic, not capacity; traffic requires
+qualified counter windows. Views share cached projections; policy is unchanged.
 
 The RDK BSS inventory includes backhaul APs with native radio/channel identity;
 station-mode and unknown-mode entries are excluded. Client candidate filtering
 still uses the client's SSID, not every observed BSS.
 
-Next: finish qualification on both deployments. RDK handover readiness can still
-fail on missing native candidates; isolation withdraws the backhaul AP while
-fronthauls remain operating. Keep both acceptance gates. Browser inspection
-adds no native queries or RF writes; closing Console NG cannot stop collection.
+The shared HTTP observer rejects malformed inventory with a typed availability
+error. RDK's interactive worker retries without steering; noninteractive checks
+still fail. Empty arrays remain empty; missing measurements never become zero.
+
+RDK **0207** rejects unready/occupied radios before global query admission;
+pending commands previously could indefinitely block unrelated agents. Ownership
+and freshness remain unchanged. Same-MID retry candidate **0206** passes fixtures
+but remains held. Installed **0207-only** passes bounded handover/return and
+default restoration with unchanged native identities; this is not soak coverage.
+
+Candidate HAL **0044** separates beaconing from root admission, retaining
+generation-bound proof and fail-closed child admission. Its isolation/return
+room passes, but branch convergence fails. It is **not enabled in the recipe**;
+keep the original HAL. Startup/down-interface and hostapd readmission regressions
+have fixtures, but these do not qualify native parent selection with persistent
+unrooted beacons.
+
+Native builds and extracted-source regressions pass; see
+[bounded results](../testing/room-acceptance.md#candidate-admission-and-isolated-beacons).
+Keep initial readiness, outage beaconing and return-convergence gates.
+prpl's branch and 5/6 GHz BTM checks pass. Missing station ubus registration
+explains `Not found`: checked root dispatch preserves native BTM without retries.
+Cold 100-client acceptance passes; subsequent controller OOM halts qualification.
+Observers remain paused; growth cause unproven. Qualify startup/resources before
+power/noise/CCA actuation.
+Browser inspection adds no native queries or RF writes; closing Console NG
+cannot stop collection.
 See the [access contract](console-rf-properties.md#shared-rf-observations) and
 [ordered integration plan](../proposals/easymesh-rf-assessment-and-development-plan.md#ordered-low-risk-delivery).
 
@@ -1249,41 +1274,26 @@ Earlier lifecycle, byte-rate and RF14 threshold/query results remain in
 [bounded acceptance](../testing/room-acceptance.md#rdk-threshold-and-query-qualification).
 They are not performance guarantees or a full-catalog qualification.
 
-Symbolized evidence confirms a cross-thread `dm_sta_t` use-after-free between topology
-encoding and disassociation deletion. Patch **0193** shares the topology mutex
-and unlocks before dispatch. Its contract, Yocto build and one live disconnect/
-reconnect pass; extended ASan churn was intentionally stopped. A dedicated
-data-model mutex with immutable snapshots remains the stronger design.
+Patch **0193** protects `dm_sta_t` topology encoding against concurrent
+disassociation deletion. Its contract, build and bounded reconnect pass;
+extended ASan churn was intentionally stopped. Immutable data-model snapshots
+remain the stronger design.
 
-The current counter/inspection work remains observation-only:
+Counter inspection remains observation-only. Four downlink trials cover baseline,
+pulsed loss, lost ACKs and recovery; RX corruption remains unqualified.
+Keep native 1905 counters, driver counters and delivered UDP distinct.
+prpl patch 0022 repairs omitted TX-failure/RX-drop mappings.
 
-- **Retry/error counters:** four eight-second downlink trials cover baseline,
-  pulsed data loss, lost ACKs and recovery. Compare native 1905 counters with
-  AP driver counters and sequenced UDP delivery. prpl patch 0022 fixes omitted
-  TX-failure/RX-drop mappings. Missing/malformed/reset deltas stay unavailable;
-  wrap and independent directions have deterministic tests. RX corruption
-  remains unqualified; lost ACKs can cause TX failures despite delivered data.
-- **AP inspection:** interactive rooms passively collect native reports, without
-  enabling load steering. Topology hover shows per-BSS utilization, station
-  counts and age. The room separately shows client-heard advertisements with
-  receiver/source, scan identity and two-second per-neighbor freshness.
-  Stale counters stay hidden; shared-radio utilization is not additive.
-
-Next: qualify the [shared consumer access and backhaul evidence](#94-current-consumer-access-gaps).
-Independent power/noise/CCA remains the
-first new physical-model increment, but only after shared contracts, safe
-protocol allocation and native/UI observation are ready. The supplied branch
-summary is reviewed in the [development plan](../proposals/easymesh-rf-assessment-and-development-plan.md#current-integration-review);
-its implementation claims are not release qualifications.
+Current consumer behavior and the next gate are in
+[section 9.4](#94-current-consumer-access-gaps). External implementation claims
+are reviewed in the [development plan](../proposals/easymesh-rf-assessment-and-development-plan.md#current-integration-review),
+not treated as release qualifications.
 
 `wmdcfg/rf_environment.py` contains the next increment's strict opt-in input
-contract and executable reference calculations, **not live actuation**. Power
-offset changes received power; receiver noise changes decoding SNR without
-changing received power; CCA separately classifies a frame's energy. Defaults
-retain the legacy −91 dBm reference and −90 dBm CCA. It does not synthesize
-background traffic or claim measured noise. Unknown input fields, non-finite
-numbers and runtime activation fail closed. No room or native daemon uses this
-prototype yet. Remaining work is negotiated wire actuation/readback, per-context
-native reporting, room restoration and bounded cross-stack qualification.
+contract and executable reference calculations, **not live actuation**. Power,
+noise and CCA remain independent; defaults retain −91/−90 dBm. No background
+traffic or measured noise is invented. Invalid inputs and activation fail
+closed. Wire negotiation/readback, native context reporting, room restoration
+and cross-stack qualification remain required.
 
 Modern PHY/aggregation, ESP and full collision/DCF calibration remain later.

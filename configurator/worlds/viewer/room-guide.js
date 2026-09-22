@@ -8,6 +8,20 @@
   };
 
   const entries = {
+    'rf-packet-size-counters': {
+      title: 'RF · Packet Size / Native Counters', seconds: 30, clients: 10, pauses: [],
+      rf: 'Fixed load-comparison geometry. sta_static_03 offers 1 UDP Mbps with 256-byte payloads during 5–13 s, then the same offered bitrate with 1200-byte payloads during 15–23 s. The intervening and final intervals stop experimental traffic; background frames continue.',
+      optimizer: 'Payload size and offered rate never enter candidate ranking. The default signal policy remains unchanged. The optional load-counter-guard policy requires fresh owner/epoch-matched native rates; missing counters abstain and excessive AP retries, TX failures or RX drops veto load balancing. Weak-link signal rescue keeps its existing gates.',
+      watch: 'Compare actual sender/receiver results, native packet and byte deltas with their windows, and separate retry/TX-failure/RX-drop rates. Smaller payloads request more datagrams at the same bitrate; do not assert an exact native packet ratio across setup, background traffic or reassociation. Inspect decision reasons and actual BSSID.',
+      limits: 'Requires iperf3 and the private gateway route. No retuning or policy activation occurs on load. Same-channel targets remain excluded for load balancing. Zero is valid, unavailable is not zero; summed AP packets are not TX attempts or PHY capacity. Live qualification must be recorded separately.',
+    },
+    'rf-asymmetric-ack': {
+      title: 'RF · Asymmetric ACK / Counter Guard', seconds: 30, clients: 10, pauses: [],
+      rf: 'Fixed load-comparison geometry with a −45 dB configured transmit-gain offset on sta_static_03 across all three bands. AP→client SNR stays strong near extender_1 while client→AP SNR is weaker. Bounded 30 packet/s ICMP echo traffic runs during 5–23 s, exercising both directions.',
+      optimizer: 'Use only native serving/candidate evidence for steering. Configured asymmetry does not select an AP. With the explicit counter guard, excessive native AP TX retries/failures or RX drops abstain from load balancing; missing windows and changed ownership also abstain. Existing weak-link signal rescue remains available.',
+      watch: 'Verify frequency-qualified forward/reverse readbacks, selected medium ACK/no-ACK and PER outcomes, native AP counters, traffic replies and actual association. Strong downlink reception does not prove reverse ACK success. A counter-pressure decision requires measured counter pressure, never the room name or gain offset.',
+      limits: 'The gain is a scenario SNR offset, not native transmit-power control. ICMP and ACK outcomes are stochastic and rate-dependent; nonzero AP retries are not guaranteed. AP RX drops need not measure over-the-air loss. No noise/CCA changes, target pinning or capacity estimate is introduced.',
+    },
     'traffic-low-high-off': {
       title: 'Traffic · Low → High → Off', seconds: 30, clients: 10, pauses: [],
       rf: 'Fixed geometry; sta_static_01 offers 1 UDP Mbps during 5–10 s, then 8 Mbps during 10–23 s, using 1200-byte datagrams through its existing wlan0. Setup and result collection consume part of each phase. The first five and last seven seconds have no experimental traffic.',
@@ -38,7 +52,7 @@
     },
     'backhaul-branch-formation': {
       title: 'Backhaul · Branch Formation', seconds: 24, clients: 10, pauses: [12], backhaul: 'geometry',
-      rf: 'Extender roles 3 and 4 leave the gateway area for the far courtyard corners. A partition weakens direct gateway paths while roles 1 and 2 offer stronger relay links. Two nearby clients move with those extenders. All AP-to-AP RF follows geometry.',
+      rf: 'Extender roles 3 and 4 move to the far courtyard corners with two nearby clients. A branch-divider wall separates the moving extenders while preserving the original weak gateway paths. At the checkpoint, 5 GHz SNR is 13 dB to the intended relay, 0 dB to the other moving extender and -7 dB to the gateway: a 13 dB advantage, exceeding native 6 dB hysteresis without forcing parents.',
       optimizer: 'Client steering remains the external lab policy; backhaul parent selection belongs to native software. At 12 s inspect whether roles 3 and 4 use roles 1 and 2 respectively. No target BSSID or parent is forced.',
       watch: 'Compare applied bidirectional 5 GHz SNR, physical uplink BSSID, controller parents and gateway reachability at the 12 s pause. Resume to return by 22 s, finishing at 24 s. Report native reparenting or failure separately from correct RF application.',
       limits: 'A stronger relay is an opportunity, not proof that native parent selection is implemented or converges. A persistent star or lost uplink is a recorded result. This room does not silently restore strong root links or run the assisted parent planner.',

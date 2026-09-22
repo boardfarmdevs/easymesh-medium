@@ -8,6 +8,15 @@
       "scope": "client-link",
       "kind": "native_observation",
       "usage": "signal",
+      "demonstration": {
+        "rooms": [
+          "received-same-band-roam",
+          "home-a-border-hover"
+        ],
+        "check": "signal_policy",
+        "expectation": "Fresh eligible gain, hold and native association; missing/stale signal abstains.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "requires_fresh_evidence",
       "activation": "Inspect active RF capabilities and the source view; catalog membership does not enable a mode",
       "observation_endpoint": null,
@@ -21,6 +30,14 @@
       "scope": "directed-link",
       "kind": "scenario",
       "usage": "diagnostic",
+      "demonstration": {
+        "rooms": [
+          "rf-asymmetric-ack"
+        ],
+        "check": "directed_readback",
+        "expectation": "Read back both directions and exact frequency in one generation; never rank from room truth.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "requires_fresh_evidence",
       "activation": "Inspect active RF capabilities and the source view; catalog membership does not enable a mode",
       "observation_endpoint": null,
@@ -34,6 +51,15 @@
       "scope": "directed-link",
       "kind": "model_observation",
       "usage": "diagnostic",
+      "demonstration": {
+        "rooms": [
+          "rf-asymmetric-ack",
+          "received-same-band-roam"
+        ],
+        "check": "received_evidence",
+        "expectation": "Preserve direction/source/time; a last packet is not a fresh native candidate.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "requires_fresh_evidence",
       "activation": "Inspect active RF capabilities and the source view; catalog membership does not enable a mode",
       "observation_endpoint": null,
@@ -47,6 +73,14 @@
       "scope": "medium",
       "kind": "model_parameter",
       "usage": "diagnostic",
+      "demonstration": {
+        "rooms": [
+          "home-a-stationary"
+        ],
+        "check": "model_profile",
+        "expectation": "Observe compiled -91 dBm reference; no noise or power action.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "requires_fresh_evidence",
       "activation": "Inspect active RF capabilities and the source view; catalog membership does not enable a mode",
       "observation_endpoint": null,
@@ -60,6 +94,14 @@
       "scope": "medium",
       "kind": "model_parameter",
       "usage": "diagnostic",
+      "demonstration": {
+        "rooms": [
+          "received-discovery-recovery"
+        ],
+        "check": "model_profile",
+        "expectation": "Observe compiled -90 dBm threshold and separate CCA drops; no threshold control.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "requires_fresh_evidence",
       "activation": "Inspect active RF capabilities and the source view; catalog membership does not enable a mode",
       "observation_endpoint": null,
@@ -73,6 +115,14 @@
       "scope": "radio-context",
       "kind": "native_observation",
       "usage": "unsupported",
+      "demonstration": {
+        "rooms": [
+          "home-a-stationary"
+        ],
+        "check": "unsupported",
+        "expectation": "Independent noise remains unsupported, never zero or inferred from signal minus SNR.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "unsupported",
       "activation": "Inspect active RF capabilities and the source view; catalog membership does not enable a mode",
       "observation_endpoint": null,
@@ -86,6 +136,15 @@
       "scope": "bss",
       "kind": "native_observation",
       "usage": "load_opt_in",
+      "demonstration": {
+        "rooms": [
+          "traffic-low-high-off",
+          "traffic-quieter-ap"
+        ],
+        "check": "load_policy",
+        "expectation": "Fresh native octets only; same-channel targets excluded; no overload means no balancing.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "requires_fresh_evidence",
       "activation": "Native report receiver; load policy is a separate opt-in",
       "observation_endpoint": "/api/demo/rf-observations",
@@ -99,6 +158,14 @@
       "scope": "bss",
       "kind": "native_observation",
       "usage": "inspection",
+      "demonstration": {
+        "rooms": [
+          "home-a-flash-crowd"
+        ],
+        "check": "native_observation",
+        "expectation": "Observe native per-BSS counts after membership settles; counts do not rank load targets.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "requires_fresh_evidence",
       "activation": "Native report receiver; load policy is a separate opt-in",
       "observation_endpoint": "/api/demo/rf-observations",
@@ -112,6 +179,14 @@
       "scope": "received-bss",
       "kind": "native_observation",
       "usage": "inspection",
+      "demonstration": {
+        "rooms": [
+          "rf-packet-size-counters"
+        ],
+        "check": "selected_beacon",
+        "expectation": "Require a fresh received beacon IE for exact BSSID/receiver/MHz; native AP report is not a substitute.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "requires_fresh_evidence",
       "activation": "Inspect active RF capabilities and the source view; catalog membership does not enable a mode",
       "observation_endpoint": null,
@@ -125,6 +200,14 @@
       "scope": "radio-context",
       "kind": "model_observation",
       "usage": "diagnostic",
+      "demonstration": {
+        "rooms": [
+          "traffic-low-high-off"
+        ],
+        "check": "modeled_survey",
+        "expectation": "Inspect separate global and radio-local windows; no direct policy input or capacity estimate.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "requires_fresh_evidence",
       "activation": "Inspect active RF capabilities and the source view; catalog membership does not enable a mode",
       "observation_endpoint": null,
@@ -138,6 +221,14 @@
       "scope": "client-link",
       "kind": "native_observation",
       "usage": "load_opt_in",
+      "demonstration": {
+        "rooms": [
+          "rf-packet-size-counters"
+        ],
+        "check": "native_counter",
+        "expectation": "Fresh owner/epoch-matched delta window gates activity; off phase still has background packets.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "requires_fresh_evidence",
       "activation": "Native report receiver; load policy is a separate opt-in",
       "observation_endpoint": "/api/demo/rf-observations",
@@ -151,6 +242,14 @@
       "scope": "client-link",
       "kind": "native_observation",
       "usage": "inspection",
+      "demonstration": {
+        "rooms": [
+          "rf-packet-size-counters"
+        ],
+        "check": "native_counter",
+        "expectation": "Observe byte-unit-normalized deltas; do not infer goodput or divide retries by aggregate packets.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "requires_fresh_evidence",
       "activation": "Native report receiver; load policy is a separate opt-in",
       "observation_endpoint": "/api/demo/rf-observations",
@@ -163,7 +262,16 @@
       "unit": "retries/s",
       "scope": "client-link",
       "kind": "native_observation",
-      "usage": "inspection",
+      "usage": "load_guard_opt_in",
+      "demonstration": {
+        "rooms": [
+          "rf-asymmetric-ack",
+          "rf-packet-size-counters"
+        ],
+        "check": "counter_guard",
+        "expectation": "Opt-in counter guard vetoes load moves above absolute retry rate; missing counters abstain.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "requires_fresh_evidence",
       "activation": "Native report receiver; load policy is a separate opt-in",
       "observation_endpoint": "/api/demo/rf-observations",
@@ -176,7 +284,15 @@
       "unit": "failures/s",
       "scope": "client-link",
       "kind": "native_observation",
-      "usage": "inspection",
+      "usage": "load_guard_opt_in",
+      "demonstration": {
+        "rooms": [
+          "rf-asymmetric-ack"
+        ],
+        "check": "counter_guard",
+        "expectation": "Opt-in AP TX-failure rate guard; zero is valid and not guaranteed to increase.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "requires_fresh_evidence",
       "activation": "Native report receiver; load policy is a separate opt-in",
       "observation_endpoint": "/api/demo/rf-observations",
@@ -189,7 +305,15 @@
       "unit": "drops/s",
       "scope": "client-link",
       "kind": "native_observation",
-      "usage": "inspection",
+      "usage": "load_guard_opt_in",
+      "demonstration": {
+        "rooms": [
+          "rf-asymmetric-ack"
+        ],
+        "check": "counter_guard",
+        "expectation": "Opt-in AP RX-drop rate guard; a drop counter is not over-the-air packet loss.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "requires_fresh_evidence",
       "activation": "Native report receiver; load policy is a separate opt-in",
       "observation_endpoint": "/api/demo/rf-observations",
@@ -203,6 +327,16 @@
       "scope": "device",
       "kind": "native_observation",
       "usage": "load_opt_in",
+      "demonstration": {
+        "rooms": [
+          "backhaul-branch-formation",
+          "backhaul-isolation-recovery",
+          "traffic-quieter-ap"
+        ],
+        "check": "native_path",
+        "expectation": "Native valid paths only; unknown/additional hops exclude load targets, geometry never supplies parents.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "requires_fresh_evidence",
       "activation": "Native report receiver; load policy is a separate opt-in",
       "observation_endpoint": "/api/demo/rf-observations",
@@ -216,6 +350,14 @@
       "scope": "radio-context",
       "kind": "native_observation",
       "usage": "inspection",
+      "demonstration": {
+        "rooms": [
+          "received-discovery-recovery"
+        ],
+        "check": "received_evidence",
+        "expectation": "Fresh exact-frequency passive reception qualifies candidates; stale/absent reception cannot be filled from geometry.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "requires_fresh_evidence",
       "activation": "Inspect active RF capabilities and the source view; catalog membership does not enable a mode",
       "observation_endpoint": null,
@@ -229,6 +371,15 @@
       "scope": "radio",
       "kind": "scenario",
       "usage": "eligibility",
+      "demonstration": {
+        "rooms": [
+          "home-a-disappear-reappear",
+          "received-discovery-recovery"
+        ],
+        "check": "presence_eligibility",
+        "expectation": "Absent roles are ineligible; restored presence alone does not establish native ownership or signal.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "requires_fresh_evidence",
       "activation": "Inspect active RF capabilities and the source view; catalog membership does not enable a mode",
       "observation_endpoint": null,
@@ -242,6 +393,16 @@
       "scope": "radio-context",
       "kind": "native_observation",
       "usage": "eligibility",
+      "demonstration": {
+        "rooms": [
+          "band-upgrade-24-5",
+          "band-upgrade-5-6",
+          "traffic-quieter-ap"
+        ],
+        "check": "context_eligibility",
+        "expectation": "Check native band/channel, candidate capability and retune floors; same-channel load is shared.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "requires_fresh_evidence",
       "activation": "Inspect active RF capabilities and the source view; catalog membership does not enable a mode",
       "observation_endpoint": null,
@@ -255,6 +416,14 @@
       "scope": "radio-context",
       "kind": "native_observation",
       "usage": "inspection",
+      "demonstration": {
+        "rooms": [
+          "rf-packet-size-counters"
+        ],
+        "check": "context_eligibility",
+        "expectation": "Inspect configured width; qualified survey requires legacy 20 MHz, unsupported contexts abstain.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "requires_fresh_evidence",
       "activation": "Inspect active RF capabilities and the source view; catalog membership does not enable a mode",
       "observation_endpoint": null,
@@ -268,6 +437,15 @@
       "scope": "directed-link",
       "kind": "model_observation",
       "usage": "diagnostic",
+      "demonstration": {
+        "rooms": [
+          "rf-asymmetric-ack",
+          "received-discovery-recovery"
+        ],
+        "check": "selected_frames",
+        "expectation": "Inspect bounded selected management/data/control headers; candidates and injections are different counts.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "requires_fresh_evidence",
       "activation": "Inspect active RF capabilities and the source view; catalog membership does not enable a mode",
       "observation_endpoint": null,
@@ -281,6 +459,14 @@
       "scope": "directed-link",
       "kind": "model_observation",
       "usage": "diagnostic",
+      "demonstration": {
+        "rooms": [
+          "rf-asymmetric-ack"
+        ],
+        "check": "selected_frames",
+        "expectation": "Inspect PER/CCA/off-channel/no-ACK separately; last PER is not measured application loss.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "requires_fresh_evidence",
       "activation": "Inspect active RF capabilities and the source view; catalog membership does not enable a mode",
       "observation_endpoint": null,
@@ -294,6 +480,14 @@
       "scope": "medium",
       "kind": "diagnostic",
       "usage": "diagnostic",
+      "demonstration": {
+        "rooms": [
+          "rf-packet-size-counters"
+        ],
+        "check": "scheduler_observation",
+        "expectation": "Observe queue/deadline/netlink counters; host delay never becomes a weak-signal decision.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "requires_fresh_evidence",
       "activation": "Inspect active RF capabilities and the source view; catalog membership does not enable a mode",
       "observation_endpoint": null,
@@ -307,6 +501,15 @@
       "scope": "medium",
       "kind": "model_parameter",
       "usage": "diagnostic",
+      "demonstration": {
+        "rooms": [
+          "home-a-stationary",
+          "rf-packet-size-counters"
+        ],
+        "check": "model_profile",
+        "expectation": "Observe actual fading/interference/visibility/priority flags; disabled is not a demonstrated mode.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "requires_fresh_evidence",
       "activation": "Inspect active RF capabilities and the source view; catalog membership does not enable a mode",
       "observation_endpoint": null,
@@ -320,6 +523,14 @@
       "scope": "radio-context",
       "kind": "native_observation",
       "usage": "unsupported",
+      "demonstration": {
+        "rooms": [
+          "rf-packet-size-counters"
+        ],
+        "check": "unsupported",
+        "expectation": "Calibrated capacity is unsupported; offered/sender/receiver rates remain separate observations.",
+        "qualification": "contract_defined_live_evidence_required"
+      },
       "availability": "unsupported",
       "activation": "Inspect active RF capabilities and the source view; catalog membership does not enable a mode",
       "observation_endpoint": null,

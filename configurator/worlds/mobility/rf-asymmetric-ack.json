@@ -1,0 +1,18 @@
+{
+  "schema": "wmdcfg.mobility.v1",
+  "name": "rf-asymmetric-ack",
+  "tags": ["directed-snr", "reverse-ack", "native-counters", "clients-10"],
+  "duration_ms": 30000,
+  "tick_ms": 30000,
+  "seed": 1921,
+  "traffic_experiment": {
+    "schema": "easymesh.room-traffic.v1",
+    "phases": [
+      {"role": "sta_static_03", "start_ms": 5000, "end_ms": 23000, "packets_per_second": 30, "payload_bytes": 1200}
+    ]
+  },
+  "nodes": [
+    {"role": "sta_static_03", "tx_gain_db_by_band": {"2.4": -45, "5": -45, "6": -45},
+     "path": [{"time_ms": 0, "position": [18.9, 12]}]}
+  ]
+}

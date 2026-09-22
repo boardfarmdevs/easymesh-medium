@@ -4,6 +4,10 @@
 
 RF delivery, configurator and Console.
 
+- [RF property demonstration coverage](rf-property-coverage.md): every catalog
+  property and medium sub-property, named rooms, policy/observation checks,
+  counter guard, focused suite and explicit live qualification gaps.
+
 - [Virtual RF assessment and implementation roadmap](virtual-rf-assessment.md):
   current attributes, implemented survey/BSS Load setup and acceptance,
   Phase 3 airtime/ACK/visibility profiles, measured overhead and open gates.
