@@ -30,14 +30,11 @@ drag a client, move it to a clicked destination at a selected speed, show
 crossed walls and predicted links, or preview disappearance. These operations
 are local visualization overrides and do not change wmediumd.
 
-The public viewer is published as a static site from the repository's
-`gh-pages` branch:
-
-To refresh it, use `python3 stage-pages.py /path/to/clean/gh-pages-checkout`.
-This replaces only the generated `viewer/` and `golden/` trees, preserves the
-landing page/explorer, and requires a disconnected default. Test the staged
-site before committing and pushing `gh-pages`; no live endpoints belong in
-the public viewer's startup path.
+The public viewer, manual and `golden/` rooms are published with the explorer
+by the Pages workflow on every push to `main` (see `gen/explorer/README.md`).
+The build requires a disconnected default; no live endpoints belong in the
+public viewer's startup path. The viewer is a full-screen tool, so it opts out of
+the shared labs bar (`<meta name="labs-bar" content="off">`).
 
 Run `node gen/tests/viewer-public-site-browser-test.js SITE_BASE_URL` from
 the repository root with Playwright Core/Chromium configured. It loads and

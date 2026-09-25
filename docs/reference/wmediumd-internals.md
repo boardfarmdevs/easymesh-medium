@@ -147,6 +147,11 @@ Using `02:...` in `ifaces.ids` causes sender lookup failures and can silently
 lose frames from secondary VAPs. The generator has a guard that rejects any ID
 without the `0x40` bit.
 
+A container that is not a lab role joins the medium as a guest when it carries
+the LXD key `user.wmediumd.guest=true`, for example an OpenSync pod that an
+EasyMesh adapter hands to the controller. All of a guest's radios are included,
+at the default SNR to every other radio; the lab's own links are unchanged.
+
 Only active container radios are included. Free pool radios remain in the host
 namespace, are omitted from the matrix and have their `virt-wlan*` interface
 set down. Including unused, channel-less pool radios causes unnecessary

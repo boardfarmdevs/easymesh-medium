@@ -10,6 +10,12 @@ mapfile -t MESH < <(lxc list -c n --format csv 2>/dev/null \
   | grep -E '^(bpibroadband|bpiap|bpiap-[0-9]{3})$' | sort -V)
 mapfile -t CLIENTS < <(lxc list -c n --format csv 2>/dev/null \
   | grep -E '^(wlan-client|wlan-client-[0-9]{3})$' | sort -V)
+# Guest devices that are not lab roles (e.g. an OpenSync pod handed to the
+# controller by an adapter) join the medium when their container carries
+# user.wmediumd.guest=true. All of a guest's radios are included, at the
+# default SNR to every other radio; nothing else in the matrix changes.
+mapfile -t GUESTS < <(lxc list -c n,config:user.wmediumd.guest --format csv 2>/dev/null \
+  | awk -F, '$2 == "true" {print $1}' | sort -V)
 case "${WMEDIUMD_ALLOW_INCOMPLETE_RADIOS:-0}" in
   0|1) ;;
   *) echo "gen-config: FATAL WMEDIUMD_ALLOW_INCOMPLETE_RADIOS must be 0 or 1" >&2; exit 2 ;;
@@ -38,6 +44,12 @@ for c in "${MESH[@]}" "${CLIENTS[@]}"; do
   IDX[$c]=$i
   IDS+=("$a")
   i=$((i+1))
+done
+for c in "${GUESTS[@]}"; do
+  for a in $(lxc exec "$c" -- sh -c 'cat /sys/class/ieee80211/*/macaddress 2>/dev/null' </dev/null 2>/dev/null); do
+    IDS+=("$(printf '%02x%s' $(( 0x${a:0:2} | 0x40 )) "${a:2}")")
+    i=$((i+1))
+  done
 done
 if [ "${#MISSING[@]}" -gt 0 ] && [ "${WMEDIUMD_ALLOW_INCOMPLETE_RADIOS:-0}" != 1 ]; then
   echo "gen-config: FATAL managed containers are missing active hwsim radios:" >&2

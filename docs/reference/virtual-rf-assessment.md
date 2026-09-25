@@ -5,7 +5,7 @@
 **Status: Phases 0–2 and the bounded Phase 3 profile are qualified; Phase 4 is partially implemented.**
 The [supported profile](#124-implemented-phases-12-survey-and-native-bss-load)
 is legacy-rate, 20 MHz; optional visibility is not calibrated capacity or full DCF.
-Current development branch: `codex/0916-clean` in both repositories. The
+Current development branch: `main` in both repositories. The
 [property-to-room coverage and live gates](rf-property-coverage.md#native-load-action-qualification)
 separate implementation, measured behavior and remaining qualification failures.
 Bounded diagnostics do not replace clean-source release acceptance.
@@ -597,21 +597,20 @@ and freshness remain unchanged. Same-MID retry candidate **0206** passes fixture
 but remains held. Installed **0207-only** passes bounded handover/return and
 default restoration with unchanged native identities; this is not soak coverage.
 
-Candidate HAL **0044** separates beaconing from root admission, retaining
-generation-bound proof and fail-closed child admission. Its isolation/return
-room passes, but branch convergence fails. It is **not enabled in the recipe**;
-keep the original HAL. Startup/down-interface and hostapd readmission regressions
-have fixtures, but these do not qualify native parent selection with persistent
-unrooted beacons.
+Enabled HAL **0044** separates hwsim beaconing from generation-bound root
+admission; unrooted child admission fails closed. Branch, handover and isolation
+playback pass together, including traffic, convergence, Default recovery and
+unchanged native identities. Isolated backhaul/fronthaul APs remain operating;
+physical radios are unchanged. An earlier cold branch attempt failed on
+incomplete candidate responses; this is not cold-start or full-suite acceptance.
 
 Native builds and extracted-source regressions pass; see
 [bounded results](../testing/room-acceptance.md#candidate-admission-and-isolated-beacons).
 Keep initial readiness, outage beaconing and return-convergence gates.
 prpl's branch and 5/6 GHz BTM checks pass. Missing station ubus registration
 explains `Not found`: checked root dispatch preserves native BTM without retries.
-Cold 100-client acceptance passes; subsequent controller OOM halts qualification.
-Observers remain paused; growth cause unproven. Qualify startup/resources before
-power/noise/CCA actuation.
+The earlier controller OOM is historical; current prpl resource and room status
+is maintained in [RF coverage](rf-property-coverage.md#room-catalog-qualification-and-open-failures).
 Browser inspection adds no native queries or RF writes; closing Console NG
 cannot stop collection.
 See the [access contract](console-rf-properties.md#shared-rf-observations) and
@@ -1284,10 +1283,10 @@ pulsed loss, lost ACKs and recovery; RX corruption remains unqualified.
 Keep native 1905 counters, driver counters and delivered UDP distinct.
 prpl patch 0022 repairs omitted TX-failure/RX-drop mappings.
 
-Current consumer behavior and the next gate are in
-[section 9.4](#94-current-consumer-access-gaps). External implementation claims
-are reviewed in the [development plan](../proposals/easymesh-rf-assessment-and-development-plan.md#current-integration-review),
-not treated as release qualifications.
+Current consumer behavior is in [section 9.4](#94-current-consumer-access-gaps).
+[Bounded qualification](rf-property-coverage.md#bounded-qualification-follow-up)
+records pressure/rescue, terminal candidate responses, browser expiry and
+preflight separately from full-suite acceptance.
 
 `wmdcfg/rf_environment.py` contains the next increment's strict opt-in input
 contract and executable reference calculations, **not live actuation**. Power,
