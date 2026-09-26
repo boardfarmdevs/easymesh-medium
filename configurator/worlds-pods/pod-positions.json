@@ -1,0 +1,15 @@
+{
+  "schema": "emosa.pod-positions.v1",
+  "description": "Where the two OpenSync pods (pod_1, pod_2; EMOSA adapter) stand in each native layout. Mid-edge between extenders in the homes and large rooms, between the gateway and the far extenders in the lanes and courtyards; in the band-steering lane in the corners behind the gateway, off the band-steered clients' paths (build-goldens.py checks that no pod comes within 3 dB of the best native 2.4 GHz AP of a band-steered client).",
+  "layouts": {
+    "home-five-agent": {"pod_1": [10, 2], "pod_2": [10, 12]},
+    "home-five-agent-shifted": {"pod_1": [14, 7], "pod_2": [4, 12]},
+    "band-steering-lane": {"pod_1": [0, 0], "pod_2": [0, 24]},
+    "load-comparison-lane": {"pod_1": [30, 4], "pod_2": [45, 4]},
+    "large-room-five-agent": {"pod_1": [20, 4], "pod_2": [20, 36]},
+    "large-room-client-cluster": {"pod_1": [20, 4], "pod_2": [20, 36]},
+    "large-room-fifty-clients": {"pod_1": [20, 4], "pod_2": [20, 36]},
+    "backhaul-branches": {"pod_1": [36, 12], "pod_2": [36, 24]},
+    "backhaul-courtyard": {"pod_1": [36, 12], "pod_2": [36, 24]}
+  }
+}

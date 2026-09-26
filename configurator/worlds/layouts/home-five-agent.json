@@ -26,7 +26,7 @@
     {"role": "sta_static_01", "kind": "station", "position": [1, 1]},
     {"role": "sta_static_02", "kind": "station", "position": [4, 3]},
     {"role": "sta_static_03", "kind": "station", "position": [8, 2]},
-    {"role": "sta_static_04", "kind": "station", "position": [12, 2]},
+    {"role": "sta_static_04", "kind": "station", "position": [11, 3]},
     {"role": "sta_static_05", "kind": "station", "position": [19, 1]},
     {"role": "sta_static_06", "kind": "station", "position": [1, 13]},
     {"role": "sta_static_07", "kind": "station", "position": [5, 11]},

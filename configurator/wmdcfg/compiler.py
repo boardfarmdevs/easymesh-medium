@@ -112,6 +112,8 @@ def _bind(
             result[role]["fronthaul_frequencies_mhz"] = frequencies
             if item.get("band_radios"):
                 result[role]["band_radios"] = item["band_radios"]
+            if item.get("adapter"):
+                result[role]["adapter"] = item["adapter"]
         else:
             result[role]["station_mac"] = item.get(
                 "station_mac", item["permanent_mac"]
@@ -120,6 +122,38 @@ def _bind(
             result[role]["ssid"] = item.get("ssid")
         used.add(container)
     return result
+
+
+def adapter_devices(inventory: dict[str, Any]) -> list[dict[str, Any]]:
+    """The controller-model shape of each adapter-managed mesh node (an OpenSync
+    pod through EMOSA): one radio per band it serves, one BSS per operating AP
+    interface. The lab's own nodes keep their fixed tri-band shape."""
+    return [
+        {
+            "container": item["container"],
+            "radios": len(item.get("band_radios", {})),
+            "bsses": sum(
+                1 for iface in item.get("interfaces", [])
+                if iface.get("type") == "AP" and iface.get("frequency_mhz")
+            ),
+        }
+        for item in inventory.get("radios", [])
+        if item.get("kind") == "mesh" and item.get("adapter")
+    ]
+
+
+def _unserved(
+    action: LinkAction, scenario: Scenario, bindings: dict[str, dict[str, Any]]
+) -> bool:
+    """A link on a band that an adapter-managed AP (an OpenSync pod) does not
+    serve. The pod has no radio there, so the link has no medium key; a native
+    AP without the band remains an error."""
+    band = _action_band(action, scenario, bindings)
+    return band is not None and any(
+        scenario.roles[role] == "fronthaul_ap" and bindings[role].get("adapter")
+        and band not in bindings[role].get("band_radios", {})
+        for role in (action.source, action.destination)
+    )
 
 
 def _directions(action: LinkAction) -> list[tuple[str, str]]:
@@ -231,6 +265,8 @@ def compile_scenario(
                 continue
             if not isinstance(action, LinkAction):
                 continue
+            if _unserved(action, scenario, bindings):
+                continue
             sample_offsets = [0]
             if action.end_snr_db is not None:
                 sample_offsets = list(range(0, phase.duration_ms, scenario.tick_ms))
@@ -299,9 +335,14 @@ def compile_scenario(
 
     inventory_radios = inventory.get("radios", [])
     expected_lab = {
-        "mesh_devices": sum(item.get("kind") == "mesh" for item in inventory_radios),
+        "mesh_devices": sum(
+            item.get("kind") == "mesh" and not item.get("adapter") for item in inventory_radios
+        ),
         "clients": sum(item.get("kind") == "station" for item in inventory_radios),
     }
+    adapters = adapter_devices(inventory)
+    if adapters:
+        expected_lab["adapter_devices"] = adapters
 
     return {
         "schema": "wmdcfg.event-plan.v1",

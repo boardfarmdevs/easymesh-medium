@@ -16,7 +16,8 @@
 # association ownership for rejecting stale hwsim AP peer rows, and learned-VIF
 # resolution for association queries made with live NL80211 endpoint MACs, and
 # bounded paged pair/frequency dumps for 100-client observer snapshots, and
-# TX-status frequency return for channel-context-safe monitor ACKs.
+# TX-status frequency return for channel-context-safe monitor ACKs, and
+# frequency overrides indexed per radio pair beyond one control frame.
 #
 #   ./build-wmediumd.sh          # clone (or reuse ./src), patch, build -> ./src/wmediumd/wmediumd
 #   ./build-wmediumd.sh --refresh-prebuilt

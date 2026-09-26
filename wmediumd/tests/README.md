@@ -35,6 +35,12 @@ automatic ACKs also disables libnl's implicit strict sequence check; explicit
 sequence numbers remain available for correlating negative replies. The
 asynchronous radio parser is unchanged.
 
+`test-frequency-override-capacity.sh` starts the built daemon without radios
+(110 vhost-user stations) and applies 3,400 frequency overrides, more than one
+64-KiB control frame, as consecutive generations through the configurator's
+client; it reads them back, pages the dump and clears one frequency of a pair
+(patch 0035: overrides indexed per radio pair). The previous daemon rejects it.
+
 These tests do not qualify a live lab. A daemon replacement loses learned
 medium state. Native health, complete client traffic coverage, root-proof
 continuity, and kernel receive-drop deltas still require runtime evidence;

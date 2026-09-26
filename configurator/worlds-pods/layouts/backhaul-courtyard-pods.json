@@ -1,0 +1,190 @@
+{
+  "schema": "wmdcfg.world-layout.v1",
+  "name": "backhaul-courtyard-pods",
+  "tags": [
+    "backhaul",
+    "native-parent-selection",
+    "opensync-pods",
+    "quick-demo"
+  ],
+  "space": {
+    "width_m": 64,
+    "height_m": 36
+  },
+  "propagation": {
+    "reference_distance_m": 1,
+    "reference_snr_db_by_band": {
+      "5": 48,
+      "6": 45,
+      "2.4": 52
+    },
+    "path_loss_exponent": 2.8,
+    "shadowing_stddev_db": 0,
+    "minimum_snr_db": -20,
+    "maximum_snr_db": 60
+  },
+  "walls": [
+    {
+      "name": "courtyard-partition",
+      "start": [
+        30,
+        11
+      ],
+      "end": [
+        30,
+        25
+      ],
+      "loss_db": 12
+    },
+    {
+      "name": "isolation-wall",
+      "start": [
+        48,
+        0
+      ],
+      "end": [
+        48,
+        36
+      ],
+      "loss_db": 70
+    }
+  ],
+  "nodes": [
+    {
+      "role": "gateway",
+      "kind": "fronthaul_ap",
+      "position": [
+        8,
+        18
+      ]
+    },
+    {
+      "role": "extender_1",
+      "kind": "fronthaul_ap",
+      "position": [
+        22,
+        8
+      ]
+    },
+    {
+      "role": "extender_2",
+      "kind": "fronthaul_ap",
+      "position": [
+        22,
+        28
+      ]
+    },
+    {
+      "role": "extender_3",
+      "kind": "fronthaul_ap",
+      "position": [
+        12,
+        10
+      ]
+    },
+    {
+      "role": "extender_4",
+      "kind": "fronthaul_ap",
+      "position": [
+        12,
+        26
+      ]
+    },
+    {
+      "role": "sta_static_01",
+      "kind": "station",
+      "position": [
+        7,
+        17
+      ]
+    },
+    {
+      "role": "sta_static_02",
+      "kind": "station",
+      "position": [
+        9,
+        19
+      ]
+    },
+    {
+      "role": "sta_static_03",
+      "kind": "station",
+      "position": [
+        21,
+        7
+      ]
+    },
+    {
+      "role": "sta_static_04",
+      "kind": "station",
+      "position": [
+        23,
+        9
+      ]
+    },
+    {
+      "role": "sta_static_05",
+      "kind": "station",
+      "position": [
+        21,
+        27
+      ]
+    },
+    {
+      "role": "sta_static_06",
+      "kind": "station",
+      "position": [
+        23,
+        29
+      ]
+    },
+    {
+      "role": "sta_static_07",
+      "kind": "station",
+      "position": [
+        10,
+        18
+      ]
+    },
+    {
+      "role": "sta_static_08",
+      "kind": "station",
+      "position": [
+        8,
+        20
+      ]
+    },
+    {
+      "role": "sta_static_09",
+      "kind": "station",
+      "position": [
+        13,
+        10
+      ]
+    },
+    {
+      "role": "sta_static_10",
+      "kind": "station",
+      "position": [
+        13,
+        26
+      ]
+    },
+    {
+      "role": "pod_1",
+      "kind": "fronthaul_ap",
+      "position": [
+        36,
+        12
+      ]
+    },
+    {
+      "role": "pod_2",
+      "kind": "fronthaul_ap",
+      "position": [
+        36,
+        24
+      ]
+    }
+  ]
+}

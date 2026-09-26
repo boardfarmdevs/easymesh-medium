@@ -14,6 +14,10 @@ from .model import ScenarioError
 
 MESH_NAME = re.compile(r"^(bpibroadband|bpiap(?:-\d{3})?)$")
 CLIENT_NAME = re.compile(r"^wlan-client(?:-\d{3})?$")
+# OpenSync pods handed to the controller by the EMOSA adapter (emosa-lab
+# deploy/rdk-lab). They are mesh nodes like the lab's own, but carry only the
+# bands on which they serve an AP; their backhaul station is not a room radio.
+ADAPTER_NAME = re.compile(r"^pod-\d+$")
 
 
 def _run(*args: str, attempts: int = 2, timeout_seconds: float = 4.0) -> str:
@@ -78,6 +82,8 @@ def _parse_iw(text: str) -> list[dict[str, Any]]:
             interfaces.append(current)
         elif current is not None and value.startswith("addr "):
             current["mac"] = value.split()[1].lower()
+        elif current is not None and value.startswith("type "):
+            current["type"] = value.split(None, 1)[1]
         elif current is not None and value.startswith("ssid "):
             current["ssid"] = value.split(None, 1)[1]
         elif current is not None and value.startswith("channel "):
@@ -115,6 +121,7 @@ def discover(client_names: set[str] | None = None) -> dict[str, Any]:
             if state.strip().upper() == "RUNNING"
             and (
                 MESH_NAME.fullmatch(name)
+                or ADAPTER_NAME.fullmatch(name)
                 or (
                     CLIENT_NAME.fullmatch(name)
                     and (client_names is None or name in client_names)
@@ -170,9 +177,13 @@ def discover(client_names: set[str] | None = None) -> dict[str, Any]:
         # RDK's hwsim HAL deliberately presents all three logical radios as
         # VIFs of one passed-through hwsim PHY. Preserve that single stable
         # station identity while recording the one live frequency per band.
+        adapter = bool(ADAPTER_NAME.fullmatch(name))
         band_radios: dict[str, dict[str, Any]] = {}
         for phy, permanent in permanent_by_phy.items():
-            phy_interfaces = [item for item in interfaces if item.get("phy") == phy]
+            phy_interfaces = [
+                item for item in interfaces if item.get("phy") == phy
+                and (not adapter or item.get("type") == "AP")
+            ]
             frequencies_by_band: dict[str, set[int]] = {}
             for item in phy_interfaces:
                 frequency = item.get("frequency_mhz")
@@ -195,14 +206,21 @@ def discover(client_names: set[str] | None = None) -> dict[str, Any]:
                         if _band(item.get("frequency_mhz")) == band
                     ],
                 }
-        if set(band_radios) != {"2.4", "5", "6"}:
+        if adapter:
+            # An adapter-managed pod: only the bands it serves as an AP.
+            if not band_radios:
+                raise ScenarioError(f"{name}: no operating AP radio")
+            default = band_radios[sorted(band_radios)[0]]
+        elif set(band_radios) != {"2.4", "5", "6"}:
             raise ScenarioError(
                 f"{name}: expected tri-band radio inventory, found {sorted(band_radios)}"
             )
-        default = band_radios["5"]
+        else:
+            default = band_radios["5"]
         return {
             "container": name,
             "kind": "mesh",
+            **({"adapter": "emosa"} if adapter else {}),
             "permanent_mac": default["permanent_mac"],
             "tx_mac": default["tx_mac"],
             "interfaces": interfaces,

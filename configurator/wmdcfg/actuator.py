@@ -10,6 +10,10 @@ VERSION = 1
 HEADER = struct.Struct("!IHHIIQ")
 LINK = struct.Struct("!6s6shH")
 FREQUENCY_LINK = struct.Struct("!6s6sIhH")
+# The control socket's frame limit (wmediumd patch 0008, WMDC_MAX_FRAME): the
+# most frequency-qualified link updates one generation can carry.
+MAX_FRAME = 64 * 1024
+MAX_FREQUENCY_UPDATES_PER_FRAME = (MAX_FRAME - struct.calcsize("!IHHIIQ")) // FREQUENCY_LINK.size
 INFO = struct.Struct("!QQIIII")
 PAGE_REQUEST = struct.Struct("!QII")
 PAGE_HEADER = struct.Struct("!QQIIII")
@@ -391,3 +395,16 @@ class ControlClient:
             raise ActuatorError("daemon frequency apply echo differs from requested generation")
         self.status()
         return applied
+
+
+def apply_frequency_frames(client, generation: int, updates: list[dict]) -> tuple[list[dict], int]:
+    """Apply frequency-qualified updates from ``generation`` on, one generation per
+    control frame. A set that fits one frame (every native room) is one atomic
+    generation; a larger one (rooms with OpenSync pods) spans consecutive ones.
+    Returns the applied rows and the last generation."""
+    applied: list[dict] = []
+    for start in range(0, len(updates), MAX_FREQUENCY_UPDATES_PER_FRAME):
+        applied.extend(client.apply_frequency(generation, updates[start:start + MAX_FREQUENCY_UPDATES_PER_FRAME]))
+        generation += 1
+    return applied, generation - 1
+

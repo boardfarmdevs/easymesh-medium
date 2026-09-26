@@ -51,7 +51,17 @@ def snapshot(plan: dict) -> dict:
     }
 
 
-def mesh_health(expected_agents: int | None = None, expected_clients: int | None = None) -> dict:
+def mesh_health(
+    expected_agents: int | None = None,
+    expected_clients: int | None = None,
+    adapters: list[dict] | None = None,
+) -> dict:
+    """Topology and controller-model completeness. ``expected_agents`` counts the
+    lab's own mesh nodes (tri-band, ten BSSes, a backhaul station below the
+    gateway); ``adapters`` (compiler.adapter_devices) adds mesh nodes managed
+    through an adapter with their own radio and BSS counts and no backhaul
+    station in the controller's model."""
+    adapters = adapters or []
     topology = json.loads(_run("curl", "-fsS", "http://127.0.0.1:8888/api/v1/topology"))
     nodes = topology.get("nodes", [])
     clients = {
@@ -92,14 +102,14 @@ def mesh_health(expected_agents: int | None = None, expected_clients: int | None
             raise RuntimeError(f"unexpected EasyMesh model counts: {text!r}")
         result.update(
             {
-                "expected_topology_nodes": expected_agents + 1,
+                "expected_topology_nodes": expected_agents + len(adapters) + 1,
                 "model_devices": values[0],
                 "model_radios": values[1],
                 "model_bsses": values[2],
                 "model_associated": values[3],
-                "expected_model_devices": expected_agents,
-                "expected_model_radios": expected_agents * 3,
-                "expected_model_bsses": expected_agents * 10,
+                "expected_model_devices": expected_agents + len(adapters),
+                "expected_model_radios": expected_agents * 3 + sum(item["radios"] for item in adapters),
+                "expected_model_bsses": expected_agents * 10 + sum(item["bsses"] for item in adapters),
                 "expected_model_associated": expected_clients + expected_agents - 1,
             }
         )

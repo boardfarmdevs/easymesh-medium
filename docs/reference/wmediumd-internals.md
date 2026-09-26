@@ -151,6 +151,12 @@ A container that is not a lab role joins the medium as a guest when it carries
 the LXD key `user.wmediumd.guest=true`, for example an OpenSync pod that an
 EasyMesh adapter hands to the controller. All of a guest's radios are included,
 at the default SNR to every other radio; the lab's own links are unchanged.
+A guest can pin links of its own radios with `user.wmediumd.links` (read
+expanded, so a profile may carry it): a space-separated list of
+`IFACE=PEER/PEER_IFACE:SNR`, where the peer is another guest. The EMOSA lab uses
+it for a pod's wired-equivalent backhaul to its gateway tunnel point,
+`bhaul-sta-50=em-gtp/wlan0:45`. A malformed entry stops the generator; a link
+whose radio is not up yet (a guest still starting) is skipped with a warning.
 
 Only active container radios are included. Free pool radios remain in the host
 namespace, are omitted from the matrix and have their `virt-wlan*` interface

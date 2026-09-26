@@ -189,3 +189,24 @@ class ActuatorIntegrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_apply_frequency_frames_spans_generations_only_beyond_one_frame():
+    from wmdcfg.actuator import MAX_FREQUENCY_UPDATES_PER_FRAME as frame, apply_frequency_frames
+
+    class Client:
+        def __init__(self):
+            self.calls = []
+
+        def apply_frequency(self, generation, updates):
+            self.calls.append((generation, len(updates)))
+            return list(updates)
+
+    rows = [{"source": "42:00:00:00:00:01", "destination": "42:00:00:00:00:02",
+             "frequency_mhz": 2437, "value": index % 60} for index in range(frame + 1)]
+    client = Client()
+    applied, last = apply_frequency_frames(client, 7, rows)
+    assert (len(applied), last, client.calls) == (frame + 1, 8, [(7, frame), (8, 1)])
+    client = Client()
+    applied, last = apply_frequency_frames(client, 3, rows[:10])
+    assert (len(applied), last, client.calls) == (10, 3, [(3, 10)])

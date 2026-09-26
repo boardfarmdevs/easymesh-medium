@@ -1,0 +1,267 @@
+Subject: [PATCH] wmediumd: index frequency overrides per radio pair
+
+The frequency-override table was sized to one 64-KiB control frame (about
+3,275 overrides) and every lookup scanned it whole: each delivered frame and
+each validated update. The lab's own rooms install about 3,060 overrides; the
+rooms with two OpenSync pods (EMOSA adapter) need about 3,480, and the
+daemon rejected them.
+
+Chain the active overrides of each source/destination pair and keep a head
+per pair, so a lookup walks the pair's few frequencies instead of the table.
+Size the table by its declared slots per pair rather than by one frame; a
+room larger than a frame is applied as consecutive generations by the
+configurator. Updating an active key changes its value in place and keeps
+its place in the index. Advertise paged dumps to every client (the handlers
+already serve any client); the unpaged dump refuses with a length error when
+the active overrides no longer fit one frame. Lookups without an index (the
+self-test's hand-built context, an out-of-range station) keep the linear
+scan. RF values, generations and validation are unchanged.
+---
+diff --git a/wmediumd/control.c b/wmediumd/control.c
+index 3fadcb7..7ca850f 100644
+--- a/wmediumd/control.c
++++ b/wmediumd/control.c
+@@ -588,6 +588,9 @@ static int send_info(struct wmd_control_client *client, uint16_t opcode)
+ 		if (ctx->frequency_override_capacity > max_updates)
+ 			max_updates = ctx->frequency_override_capacity;
+ 	}
++	/* every client may page its dumps (the handlers serve any client);
++	 * a room larger than one frame can only be dumped that way */
++	capabilities |= WMDC_CAP_PAGED_DUMPS;
+ 	if (client->read_only)
+ 		capabilities |= WMDC_CAP_READ_ONLY;
+ 	if (client->telemetry)
+@@ -608,11 +611,61 @@ static int send_info(struct wmd_control_client *client, uint16_t opcode)
+ 			     ctx->control_generation, &info, sizeof(info));
+ }
+ 
++static int *frequency_override_head(struct wmediumd *ctx, int source,
++				   int destination)
++{
++	if (!ctx->frequency_override_heads || source < 0 || destination < 0 ||
++	    source >= ctx->num_stas || destination >= ctx->num_stas)
++		return NULL;
++	return &ctx->frequency_override_heads[(size_t)source * ctx->num_stas +
++					      destination];
++}
++
++/* Chain an active slot into its pair's list (the index of every lookup). */
++void wmd_frequency_override_link(struct wmediumd *ctx, int slot)
++{
++	struct wmd_frequency_override *entry = &ctx->frequency_overrides[slot];
++	int *head = frequency_override_head(ctx, entry->source, entry->destination);
++
++	entry->next = -1;
++	if (!head)
++		return;
++	entry->next = *head;
++	*head = slot;
++}
++
++void wmd_frequency_override_unlink(struct wmediumd *ctx, int slot)
++{
++	struct wmd_frequency_override *entry = &ctx->frequency_overrides[slot];
++	int *link = frequency_override_head(ctx, entry->source, entry->destination);
++
++	while (link && *link >= 0) {
++		if (*link == slot) {
++			*link = entry->next;
++			break;
++		}
++		link = &ctx->frequency_overrides[*link].next;
++	}
++	entry->next = -1;
++}
++
+ static int frequency_override_slot(struct wmediumd *ctx, int source,
+ 				   int destination, uint32_t frequency_mhz)
+ {
++	int *head = frequency_override_head(ctx, source, destination);
+ 	size_t i;
+ 
++	if (head) {
++		/* a pair has at most a few frequencies: no scan of the table */
++		int slot;
++
++		for (slot = *head; slot >= 0;
++		     slot = ctx->frequency_overrides[slot].next)
++			if (ctx->frequency_overrides[slot].frequency_mhz ==
++			    frequency_mhz)
++				return slot;
++		return -1;
++	}
+ 	for (i = 0; i < ctx->frequency_override_capacity; i++) {
+ 		struct wmd_frequency_override *entry = &ctx->frequency_overrides[i];
+ 
+@@ -1187,14 +1240,21 @@ static int handle_frequency_apply(struct wmd_control_client *client,
+ 	for (i = 0; i < count; i++) {
+ 		if (!resolved[i].override) {
+ 			if (resolved[i].slot >= 0) {
++				wmd_frequency_override_unlink(ctx, resolved[i].slot);
+ 				memset(&ctx->frequency_overrides[resolved[i].slot], 0,
+ 				       sizeof(ctx->frequency_overrides[resolved[i].slot]));
++				ctx->frequency_overrides[resolved[i].slot].next = -1;
+ 				ctx->frequency_override_count--;
+ 			}
+ 			continue;
+ 		}
+-		if (!ctx->frequency_overrides[resolved[i].slot].active)
+-			ctx->frequency_override_count++;
++		if (ctx->frequency_overrides[resolved[i].slot].active) {
++			/* same key: change the value, keep its place in the pair index */
++			ctx->frequency_overrides[resolved[i].slot].snr_db =
++				resolved[i].snr_db;
++			continue;
++		}
++		ctx->frequency_override_count++;
+ 		ctx->frequency_overrides[resolved[i].slot] =
+ 			(struct wmd_frequency_override) {
+ 				.source = resolved[i].source,
+@@ -1202,7 +1262,9 @@ static int handle_frequency_apply(struct wmd_control_client *client,
+ 				.frequency_mhz = resolved[i].frequency_mhz,
+ 				.snr_db = resolved[i].snr_db,
+ 				.active = true,
++				.next = -1,
+ 			};
++		wmd_frequency_override_link(ctx, resolved[i].slot);
+ 	}
+ 	ctx->control_generation = generation;
+ 	wmd_telemetry_generation(ctx, generation, true, count);
+@@ -1246,6 +1308,12 @@ static int handle_frequency_dump(struct wmd_control_client *client)
+ 	size_t i;
+ 	int result;
+ 
++	/* The table may hold more than one frame: an unpaged dump answers only
++	 * while every active override fits; larger rooms use the paged dump. */
++	if (ctx->frequency_override_count * sizeof(*links) >
++	    WMDC_MAX_FRAME - sizeof(struct wmdc_header))
++		return send_response(client->loop.fd, WMDC_OP_DUMP_FREQUENCIES,
++			WMDC_ERR_LENGTH, ctx->control_generation, NULL, 0);
+ 	links = calloc(ctx->frequency_override_capacity, sizeof(*links));
+ 	if (!links)
+ 		return send_response(client->loop.fd, WMDC_OP_DUMP_FREQUENCIES,
+@@ -1969,7 +2037,7 @@ static void control_listener_start(struct wmediumd *ctx, const char *path,
+ void wmd_control_start(struct wmediumd *ctx, const char *path)
+ {
+ 	uint64_t instance[2];
+-	size_t payload_capacity, desired_capacity;
++	size_t desired_capacity;
+ 	ssize_t bytes;
+ 
+ 	bytes = getrandom(instance, sizeof(instance), 0);
+@@ -1980,14 +2048,31 @@ void wmd_control_start(struct wmediumd *ctx, const char *path)
+ 	ctx->control_instance_hi = instance[0];
+ 	ctx->control_instance_lo = instance[1];
+ 	ctx->control_generation = 0;
+-	payload_capacity = (WMDC_MAX_FRAME - sizeof(struct wmdc_header)) /
+-		sizeof(struct wmdc_frequency_link);
++	/* Every pair may hold its declared frequency slots. The table is no
++	 * longer bounded by one control frame: a room larger than a frame is
++	 * applied as consecutive generations, and lookups use the pair index. */
+ 	desired_capacity = (size_t)ctx->num_stas * ctx->num_stas *
+ 		WMDC_FREQUENCY_SLOTS_PER_PAIR;
+-	ctx->frequency_override_capacity = desired_capacity < payload_capacity ?
+-		desired_capacity : payload_capacity;
++	ctx->frequency_override_capacity = desired_capacity;
+ 	ctx->frequency_overrides = calloc(ctx->frequency_override_capacity,
+ 					  sizeof(*ctx->frequency_overrides));
++	ctx->frequency_override_heads = calloc((size_t)ctx->num_stas *
++					       ctx->num_stas,
++					       sizeof(*ctx->frequency_override_heads));
++	if (!ctx->frequency_overrides || !ctx->frequency_override_heads) {
++		free(ctx->frequency_overrides);
++		free(ctx->frequency_override_heads);
++		ctx->frequency_overrides = NULL;
++		ctx->frequency_override_heads = NULL;
++		ctx->frequency_override_capacity = 0;
++	} else {
++		size_t i;
++
++		for (i = 0; i < (size_t)ctx->num_stas * ctx->num_stas; i++)
++			ctx->frequency_override_heads[i] = -1;
++		for (i = 0; i < ctx->frequency_override_capacity; i++)
++			ctx->frequency_overrides[i].next = -1;
++	}
+ 	association_init(ctx);
+ 	control_listener_start(ctx, path, false, false);
+ }
+diff --git a/wmediumd/wmediumd.c b/wmediumd/wmediumd.c
+index b1806ec..13a3dc1 100644
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -2587,6 +2587,48 @@ static int wmd_selftest(void)
+ 		t.frequency_override_count = 0;
+ 	}
+ 
++	/* ---------- WMD35: pair-indexed frequency overrides ---------- */
++	{
++		struct station a = {.index = 0}, b = {.index = 1};
++		struct wmd_frequency_override table[4] = {
++			{.source = 0, .destination = 1, .frequency_mhz = 5180, .snr_db = 7, .active = true},
++			{.source = 0, .destination = 1, .frequency_mhz = 2437, .snr_db = 9, .active = true},
++			{.source = 1, .destination = 0, .frequency_mhz = 5180, .snr_db = 11, .active = true},
++			{0},
++		};
++		int heads[4] = {-1, -1, -1, -1};
++		int matrix[4] = {0, 35, 35, 0};
++		bool ok;
++
++		t.num_stas = 2;
++		t.snr_matrix = matrix;
++		t.get_link_snr = selftest_pair_snr;
++		t.frequency_overrides = table;
++		t.frequency_override_capacity = 4;
++		t.frequency_override_count = 3;
++		t.frequency_override_heads = heads;
++		for (int slot = 0; slot < 3; slot++)
++			wmd_frequency_override_link(&t, slot);
++		ok = wmd_get_link_snr(&t, &a, &b, 5180) == 7 &&
++		     wmd_get_link_snr(&t, &a, &b, 2437) == 9 &&
++		     wmd_get_link_snr(&t, &b, &a, 5180) == 11 &&
++		     wmd_get_link_snr(&t, &a, &b, 5975) == 35;
++		/* clearing one frequency keeps the pair's others reachable */
++		wmd_frequency_override_unlink(&t, 0);
++		table[0].active = false;
++		t.frequency_override_count = 2;
++		ok = ok && wmd_get_link_snr(&t, &a, &b, 5180) == 35 &&
++		     wmd_get_link_snr(&t, &a, &b, 2437) == 9 &&
++		     heads[1] == 1 && table[1].next == -1;
++		printf("%s frequency index: per-pair lookup, fallback, unlink keeps the rest\n",
++		       ok ? "PASS" : "FAIL");
++		fails += !ok;
++		t.frequency_overrides = NULL;
++		t.frequency_override_heads = NULL;
++		t.frequency_override_capacity = 0;
++		t.frequency_override_count = 0;
++	}
++
+ 	/* ---------- WMD1 v2: ownership invariant vs RX-filter churn ---------- */
+ 	{
+ 		struct station r3 = {}, apa = {};
+diff --git a/wmediumd/wmediumd.h b/wmediumd/wmediumd.h
+index ba3b6fc..a5b200c 100644
+--- a/wmediumd/wmediumd.h
++++ b/wmediumd/wmediumd.h
+@@ -268,6 +268,9 @@ struct wmediumd {
+ 	struct wmd_frequency_override *frequency_overrides;
+ 	size_t frequency_override_capacity;
+ 	size_t frequency_override_count;
++	/* first active slot per (source, destination) pair, -1 when none; the
++	 * pair's slots are chained through wmd_frequency_override.next */
++	int *frequency_override_heads;
+ 	/* Current station ownership learned only from successful 802.11
+ 	 * association completion or ACKed infrastructure data.  Entries contain
+ 	 * provisioned base-radio indices, never learned VIF/BSSID identities. */
+@@ -283,8 +286,12 @@ struct wmd_frequency_override {
+ 	u32 frequency_mhz;
+ 	int snr_db;
+ 	bool active;
++	int next;	/* next active slot of the same pair, -1 at the end */
+ };
+ 
++void wmd_frequency_override_link(struct wmediumd *ctx, int slot);
++void wmd_frequency_override_unlink(struct wmediumd *ctx, int slot);
++
+ struct hwsim_tx_rate {
+ 	signed char idx;
+ 	unsigned char count;

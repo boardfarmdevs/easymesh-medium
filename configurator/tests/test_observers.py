@@ -84,5 +84,23 @@ class ObserverTests(unittest.TestCase):
         self.assertEqual(health["expected_model_associated"], 1)
 
 
+    @patch("wmdcfg.observers._run")
+    def test_adapter_devices_add_their_own_model_shape(self, run):
+        # the gateway's agent plus two OpenSync pods (one radio, five BSSes,
+        # no backhaul station in the controller's model)
+        nodes = [{"name": "Controller", "STAList": [], "haulTypes": []},
+                 {"name": "Agent-1", "STAList": [{"staMAC": "02:00:00:00:05:00"}], "haulTypes": []},
+                 {"name": "Pod-1", "STAList": [], "haulTypes": []},
+                 {"name": "Pod-2", "STAList": [], "haulTypes": []}]
+        run.side_effect = [json.dumps({"nodes": nodes}), "3 5 20 1"]
+        pods = [{"container": "pod-1", "radios": 1, "bsses": 5},
+                {"container": "pod-2", "radios": 1, "bsses": 5}]
+        health = mesh_health(expected_agents=1, expected_clients=1, adapters=pods)
+        self.assertEqual((health["expected_topology_nodes"], health["expected_model_devices"],
+                          health["expected_model_radios"], health["expected_model_bsses"],
+                          health["expected_model_associated"]), (4, 3, 5, 20, 1))
+        self.assertEqual(health["complete_nodes"], 4)
+
+
 if __name__ == "__main__":
     unittest.main()

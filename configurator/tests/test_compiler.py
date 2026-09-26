@@ -195,3 +195,82 @@ scenario bad {
 
 if __name__ == "__main__":
     unittest.main()
+
+
+POD_SOURCE = """
+scenario pod_bands {
+  require frequency_qualified_snr
+  protect backhaul
+  restore captured
+  role client : station
+  role ap_a : fronthaul_ap
+  role pod : fronthaul_ap
+  phase baseline for 1s {
+    link client <-> ap_a band 2.4GHz snr = 30dB
+    link client <-> ap_a band 5GHz snr = 31dB
+    link client <-> ap_a band 6GHz snr = 32dB
+    link client <-> pod band 2.4GHz snr = 20dB
+    link client <-> pod band 5GHz snr = 21dB
+    link client <-> pod band 6GHz snr = 22dB
+  }
+}
+"""
+
+
+def _pod_inventory(adapter=True):
+    inventory = copy.deepcopy(INVENTORY)
+    ap = next(item for item in inventory["radios"] if item["container"] == "bpibroadband")
+    ap["interfaces"] = [
+        {"name": "wifi0.1", "mac": "02:00:00:10:00:02", "ssid": "private_ssid", "frequency_mhz": 2437},
+        {"name": "wifi1.1", "mac": "02:00:00:10:00:01", "ssid": "private_ssid", "frequency_mhz": 5180},
+        {"name": "wifi2.1", "mac": "02:00:00:10:00:03", "ssid": "private_ssid", "frequency_mhz": 5975},
+    ]
+    ap["band_radios"] = {
+        band: {"tx_mac": "42:00:00:00:00:00", "frequency_mhz": frequency}
+        for band, frequency in (("2.4", 2437), ("5", 5180), ("6", 5975))
+    }
+    pod = {
+        "container": "pod-1", "kind": "mesh", "permanent_mac": "02:00:00:00:6d:00",
+        "tx_mac": "42:00:00:00:6d:00",
+        "interfaces": [{"name": "home-ap-24", "mac": "82:00:00:00:6d:00", "ssid": "private_ssid",
+                        "type": "AP", "frequency_mhz": 2437}],
+        "band_radios": {"2.4": {"tx_mac": "42:00:00:00:6d:00", "frequency_mhz": 2437}},
+    }
+    if adapter:
+        pod["adapter"] = "emosa"
+    inventory["radios"].append(pod)
+    return inventory
+
+
+class AdapterApTests(unittest.TestCase):
+    def test_an_adapter_ap_has_links_only_on_the_bands_it_serves(self):
+        plan = compile_scenario(
+            parse(POD_SOURCE), POD_SOURCE, _pod_inventory(),
+            {"client": "wlan-client", "ap_a": "bpibroadband", "pod": "pod-1"},
+        )
+        updates = plan["events"][0]["updates"]
+        pod = {item["frequency_mhz"] for item in updates if "pod" in (item["source_role"], item["destination_role"])}
+        native = {item["frequency_mhz"] for item in updates if "ap_a" in (item["source_role"], item["destination_role"])}
+        self.assertEqual(pod, {2437})
+        self.assertEqual(native, {2437, 5180, 5975})
+        self.assertEqual(plan["bindings"]["pod"]["adapter"], "emosa")
+
+    def test_a_native_ap_missing_a_band_remains_an_error(self):
+        with self.assertRaises(ScenarioError):
+            compile_scenario(
+                parse(POD_SOURCE), POD_SOURCE, _pod_inventory(adapter=False),
+                {"client": "wlan-client", "ap_a": "bpibroadband", "pod": "pod-1"},
+            )
+
+    def test_expected_lab_describes_adapter_devices_apart(self):
+        inventory = _pod_inventory()
+        plan = compile_scenario(
+            parse(POD_SOURCE), POD_SOURCE, inventory,
+            {"client": "wlan-client", "ap_a": "bpibroadband", "pod": "pod-1"},
+        )
+        # bpiap stays a native mesh device; the pod is described by its own shape
+        self.assertEqual(plan["expected_lab"], {
+            "mesh_devices": 2, "clients": 1,
+            "adapter_devices": [{"container": "pod-1", "radios": 1, "bsses": 1}],
+        })
+

@@ -41,7 +41,24 @@ def _mesh_iw(first: int) -> str:
     )
 
 
+def _pod_iw() -> str:
+    # an OpenSync pod: 2.4 GHz fronthaul APs on one PHY; the other PHY carries
+    # its backhaul station (to the adapter's tunnel point) and idle AP VIFs
+    return "\n".join((
+        "phy#110\n Interface bhaul-sta-50\n  addr 02:00:00:00:6e:00\n  type managed\n  channel 44 (5220 MHz)",
+        " Interface home-ap-50\n  addr 02:00:00:00:6e:01\n  type AP",
+        "phy#109\n Interface home-ap-24\n  addr 82:00:00:00:6d:00\n  ssid private_ssid\n  type AP\n  channel 6 (2437 MHz)",
+        " Interface bhaul-sta-24\n  addr 02:00:00:00:6d:01\n  type managed",
+        " Interface fh-24\n  addr a2:00:00:00:6d:00\n  ssid iot_ssid\n  type AP\n  channel 6 (2437 MHz)",
+    ))
+
+
 def _inspect(container: str, command: str) -> str:
+    if container == "pod-1":
+        if "macaddress" in command:
+            return "phy109 02:00:00:00:6d:00\nphy110 02:00:00:00:6e:00"
+        if command == "iw dev 2>/dev/null":
+            return _pod_iw()
     first = 0 if container == "bpibroadband" else 3
     if "macaddress" in command:
         if container.startswith("wlan-client"):
@@ -118,3 +135,19 @@ def test_discover_can_limit_station_probes_without_omitting_mesh_radios():
         "wlan-client-001",
     ]
     assert inspected == {"bpiap", "bpibroadband", "wlan-client-001"}
+
+
+def test_discover_maps_an_adapter_pod_by_its_ap_bands_only():
+    listing = "\n".join(("bpibroadband,RUNNING", "pod-1,RUNNING", "pod-2,STOPPED", "wlan-client,RUNNING"))
+    with patch("wmdcfg.inventory._run", return_value=listing), patch(
+        "wmdcfg.inventory._exec", side_effect=_inspect
+    ):
+        inventory = discover()
+    pod = next(item for item in inventory["radios"] if item["container"] == "pod-1")
+    assert pod["kind"] == "mesh" and pod["adapter"] == "emosa"
+    # the backhaul station's 5 GHz channel is not a room band
+    assert set(pod["band_radios"]) == {"2.4"}
+    assert pod["band_radios"]["2.4"]["frequency_mhz"] == 2437
+    assert pod["tx_mac"] == "42:00:00:00:6d:00"
+    native = next(item for item in inventory["radios"] if item["container"] == "bpibroadband")
+    assert "adapter" not in native and set(native["band_radios"]) == {"2.4", "5", "6"}

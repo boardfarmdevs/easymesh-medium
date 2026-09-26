@@ -1,0 +1,165 @@
+{
+  "schema": "wmdcfg.world-layout.v1",
+  "name": "load-comparison-lane-pods",
+  "tags": [
+    "clients-10",
+    "guarded-comparison",
+    "native-load",
+    "opensync-pods"
+  ],
+  "space": {
+    "width_m": 50,
+    "height_m": 24
+  },
+  "propagation": {
+    "reference_distance_m": 1,
+    "reference_snr_db_by_band": {
+      "5": 50,
+      "6": 47,
+      "2.4": 54
+    },
+    "path_loss_exponent": 2.2,
+    "shadowing_stddev_db": 0,
+    "minimum_snr_db": -20,
+    "maximum_snr_db": 60
+  },
+  "walls": [],
+  "nodes": [
+    {
+      "role": "gateway",
+      "kind": "fronthaul_ap",
+      "position": [
+        8,
+        12
+      ]
+    },
+    {
+      "role": "extender_1",
+      "kind": "fronthaul_ap",
+      "position": [
+        18,
+        12
+      ]
+    },
+    {
+      "role": "extender_2",
+      "kind": "fronthaul_ap",
+      "position": [
+        20,
+        12
+      ]
+    },
+    {
+      "role": "extender_3",
+      "kind": "fronthaul_ap",
+      "position": [
+        35,
+        20
+      ]
+    },
+    {
+      "role": "extender_4",
+      "kind": "fronthaul_ap",
+      "position": [
+        45,
+        20
+      ]
+    },
+    {
+      "role": "sta_static_01",
+      "kind": "station",
+      "position": [
+        8.5,
+        12
+      ]
+    },
+    {
+      "role": "sta_static_02",
+      "kind": "station",
+      "position": [
+        8.5,
+        12.5
+      ]
+    },
+    {
+      "role": "sta_static_03",
+      "kind": "station",
+      "position": [
+        18.9,
+        12
+      ]
+    },
+    {
+      "role": "sta_static_04",
+      "kind": "station",
+      "position": [
+        20.5,
+        12
+      ]
+    },
+    {
+      "role": "sta_static_05",
+      "kind": "station",
+      "position": [
+        20,
+        12.5
+      ]
+    },
+    {
+      "role": "sta_static_06",
+      "kind": "station",
+      "position": [
+        35.5,
+        20
+      ]
+    },
+    {
+      "role": "sta_static_07",
+      "kind": "station",
+      "position": [
+        35,
+        20.5
+      ]
+    },
+    {
+      "role": "sta_static_08",
+      "kind": "station",
+      "position": [
+        45.5,
+        20
+      ]
+    },
+    {
+      "role": "sta_static_09",
+      "kind": "station",
+      "position": [
+        45,
+        20.5
+      ]
+    },
+    {
+      "role": "sta_static_10",
+      "kind": "station",
+      "position": [
+        8,
+        12.5
+      ]
+    },
+    {
+      "role": "pod_1",
+      "kind": "fronthaul_ap",
+      "position": [
+        30,
+        4
+      ]
+    },
+    {
+      "role": "pod_2",
+      "kind": "fronthaul_ap",
+      "position": [
+        45,
+        4
+      ]
+    }
+  ]
+}

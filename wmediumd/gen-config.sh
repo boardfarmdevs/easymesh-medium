@@ -14,6 +14,11 @@ mapfile -t CLIENTS < <(lxc list -c n --format csv 2>/dev/null \
 # controller by an adapter) join the medium when their container carries
 # user.wmediumd.guest=true. All of a guest's radios are included, at the
 # default SNR to every other radio; nothing else in the matrix changes.
+# A guest may pin links of its own radios in user.wmediumd.links, a
+# space-separated list of IFACE=PEER/PEER_IFACE:SNR (PEER another guest), for
+# example an adapter's wired-equivalent backhaul: bhaul-sta-50=em-gtp/wlan0:45
+# (read expanded, so a profile may carry it). A link whose radio is not up yet
+# is skipped with a warning.
 mapfile -t GUESTS < <(lxc list -c n,config:user.wmediumd.guest --format csv 2>/dev/null \
   | awk -F, '$2 == "true" {print $1}' | sort -V)
 case "${WMEDIUMD_ALLOW_INCOMPLETE_RADIOS:-0}" in
@@ -45,12 +50,16 @@ for c in "${MESH[@]}" "${CLIENTS[@]}"; do
   IDS+=("$a")
   i=$((i+1))
 done
+declare -A GIDX
 for c in "${GUESTS[@]}"; do
   for a in $(lxc exec "$c" -- sh -c 'cat /sys/class/ieee80211/*/macaddress 2>/dev/null' </dev/null 2>/dev/null); do
     IDS+=("$(printf '%02x%s' $(( 0x${a:0:2} | 0x40 )) "${a:2}")")
+    GIDX[$a]=$i
     i=$((i+1))
   done
 done
+# the matrix index of a guest's radio behind one interface
+guest_radio(){ local a; a=$(lxc exec "$1" -- cat "/sys/class/net/$2/phy80211/macaddress" </dev/null 2>/dev/null); [ -n "$a" ] && echo "${GIDX[$a]:-}"; }
 if [ "${#MISSING[@]}" -gt 0 ] && [ "${WMEDIUMD_ALLOW_INCOMPLETE_RADIOS:-0}" != 1 ]; then
   echo "gen-config: FATAL managed containers are missing active hwsim radios:" >&2
   printf 'gen-config:   %s\n' "${MISSING[@]}" >&2
@@ -101,6 +110,20 @@ for c in "${CLIENTS[@]}"; do
   [ -n "$bss" ] || continue
   home=${OWNER[$bss]:-}
   [ -n "$home" ] && [ -n "${IDX[$home]}" ] && add ${IDX[$c]} ${IDX[$home]} 50
+done
+# pinned guest links
+for c in "${GUESTS[@]}"; do
+  for spec in $(lxc config get "$c" user.wmediumd.links --expanded 2>/dev/null); do
+    if [[ ! $spec =~ ^([^=/:]+)=([^=/:]+)/([^=/:]+):(-?[0-9]+)$ ]]; then
+      echo "gen-config: FATAL $c: bad user.wmediumd.links entry '$spec' (IFACE=PEER/PEER_IFACE:SNR)" >&2; exit 1
+    fi
+    left=$(guest_radio "$c" "${BASH_REMATCH[1]}"); right=$(guest_radio "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}")
+    if [ -z "$left" ] || [ -z "$right" ]; then
+      # a guest that is still starting has no such interface yet: its link waits for the next run
+      echo "gen-config: WARNING $c: link '$spec' skipped: its radio is not on the medium (yet)" >&2; continue
+    fi
+    add "$left" "$right" "${BASH_REMATCH[4]}"
+  done
 done
 {
   echo "ifaces : {"; echo "  ids = ["
