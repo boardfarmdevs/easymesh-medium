@@ -245,6 +245,7 @@ class Runner:
                 ))
                 # adapter-managed mesh nodes (OpenSync pods), only when the lab has them
                 adapters = {"adapters": expected_lab["adapter_devices"]} if expected_lab.get("adapter_devices") else {}
+                adapters["wired"] = int(expected_lab.get("wired_devices", 0))
                 initial_health = mesh_health(expected_agents, expected_clients, **adapters)
                 _append(health_log, {"event": "preflight", **initial_health})
                 self._require_healthy(initial_health, "preflight")

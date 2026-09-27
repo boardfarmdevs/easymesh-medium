@@ -70,6 +70,10 @@ def _validate_layout(layout: dict[str, Any]) -> None:
         roles.add(role)
         if node.get("kind") not in KINDS:
             raise ScenarioError(f"role {role} has unsupported kind {node.get('kind')!r}")
+        # An AP on a wired backhaul (its LAN port on the controller's LAN) has no
+        # Wi-Fi backhaul: no backhaul links, geometry or not.
+        if "backhaul" in node and (node["backhaul"] != "wired" or node.get("kind") != "fronthaul_ap"):
+            raise ScenarioError(f"role {role}: backhaul may only be 'wired', on a fronthaul_ap")
         x, y = point(node.get("position"), f"role {role} position")
         if not (0 <= x <= width and 0 <= y <= height):
             raise ScenarioError(f"role {role} lies outside the world")
@@ -213,6 +217,8 @@ def compile_world(layout: dict[str, Any], mobility: dict[str, Any]) -> dict[str,
                 )
         for index, left in enumerate(agents):
             for right in agents[index + 1 :]:
+                if left.get("backhaul") == "wired" or right.get("backhaul") == "wired":
+                    continue
                 links.append(
                     directed_link(left, right, positions, presence, layout, mobility, time_ms, "backhaul")
                 )
@@ -248,6 +254,8 @@ def compile_world(layout: dict[str, Any], mobility: dict[str, Any]) -> dict[str,
         "bands": list(BANDS),
         "counts": {"agents": len(agents), "stations": len(stations)},
         "roles": {item["role"]: item["kind"] for item in nodes},
+        **({"wired_backhaul": wired} if (wired := sorted(
+            item["role"] for item in agents if item.get("backhaul") == "wired")) else {}),
         "walls": layout.get("walls", []),
         "generations": generations,
     }

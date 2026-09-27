@@ -118,6 +118,19 @@ class ObserverTests(unittest.TestCase):
         self.assertEqual((health["expected_model_bsses"], health["expected_model_associated"]), (21, 2))
         self.assertEqual(health["complete_nodes"], 4)
 
+    @patch("wmdcfg.observers._run")
+    def test_a_wired_extender_has_no_backhaul_station_association(self, run):
+        # the gateway's agent and two extenders, one of them wired: one backhaul
+        # station associated (the Wi-Fi extender's), not two
+        nodes = [{"name": "Controller", "STAList": [], "haulTypes": []},
+                 {"name": "Agent-1", "STAList": [{"staMAC": "02:00:00:00:05:00"}], "haulTypes": []},
+                 {"name": "Extender-1", "STAList": [], "haulTypes": []},
+                 {"name": "Extender-2", "STAList": [], "haulTypes": []}]
+        run.side_effect = [json.dumps({"nodes": nodes}), "3 9 30 2"]
+        health = mesh_health(expected_agents=3, expected_clients=1, wired=1)
+        self.assertEqual(health["expected_model_associated"], 2)
+        self.assertEqual(health["complete_nodes"], 4)
+
 
 if __name__ == "__main__":
     unittest.main()

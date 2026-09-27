@@ -102,10 +102,19 @@ L=(); add(){ [ -n "$1" ] && [ -n "$2" ] && [ -n "$3" ] || return; L+=("($1, $2, 
 # Full strong backhaul graph. Controller-to-extender links are strongest; the
 # slightly lower extender-to-extender links still allow repeatable multi-hop
 # experiments without excluding newly added extenders from the medium.
+# An extender on a wired backhaul (user.easymesh.backhaul=wired, its LAN port
+# bridged to the controller's LAN) has no Wi-Fi backhaul: no RF between it and
+# any other mesh node, so its backhaul station cannot join a second path into
+# the LAN (an L2 loop). Its links to clients are unchanged.
+declare -A WIRED
+for m in "${MESH[@]}"; do
+  [ "$(lxc config get "$m" user.easymesh.backhaul </dev/null 2>/dev/null)" = wired ] && WIRED[$m]=1
+done
 for ((left=0; left < ${#MESH[@]}; left++)); do
   for ((right=left+1; right < ${#MESH[@]}; right++)); do
     left_node=${MESH[$left]}; right_node=${MESH[$right]}; snr=45
     if [ "$left_node" = bpibroadband ] || [ "$right_node" = bpibroadband ]; then snr=50; fi
+    if [ -n "${WIRED[$left_node]:-}" ] || [ -n "${WIRED[$right_node]:-}" ]; then snr=-20; fi
     add "${IDX[$left_node]:-}" "${IDX[$right_node]:-}" "$snr"
   done
 done

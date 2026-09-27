@@ -217,10 +217,15 @@ def discover(client_names: set[str] | None = None) -> dict[str, Any]:
             )
         else:
             default = band_radios["5"]
+        # A lab extender on a wired backhaul (gen/wired-extender.sh): its LAN port on the
+        # controller's LAN, no backhaul station.
+        wired = not adapter and _run(
+            "lxc", "config", "get", name, "user.easymesh.backhaul").strip() == "wired"
         return {
             "container": name,
             "kind": "mesh",
             **({"adapter": "emosa"} if adapter else {}),
+            **({"backhaul": "wired"} if wired else {}),
             "permanent_mac": default["permanent_mac"],
             "tx_mac": default["tx_mac"],
             "interfaces": interfaces,

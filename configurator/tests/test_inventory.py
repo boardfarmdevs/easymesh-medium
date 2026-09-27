@@ -151,3 +151,20 @@ def test_discover_maps_an_adapter_pod_by_its_ap_bands_only():
     assert pod["tx_mac"] == "42:00:00:00:6d:00"
     native = next(item for item in inventory["radios"] if item["container"] == "bpibroadband")
     assert "adapter" not in native and set(native["band_radios"]) == {"2.4", "5", "6"}
+
+
+def test_a_wired_extender_is_marked_and_counted_in_the_plans_expected_lab():
+    listing = "\n".join(("bpibroadband,RUNNING", "bpiap,RUNNING", "bpiap-004,RUNNING"))
+
+    def run(*args, **_kwargs):
+        if args[:3] == ("lxc", "config", "get"):
+            return "wired\n" if args[3] == "bpiap-004" else "\n"
+        return listing
+
+    with patch("wmdcfg.inventory._run", side_effect=run), patch(
+        "wmdcfg.inventory._exec", side_effect=_inspect
+    ):
+        inventory = discover()
+
+    backhaul = {item["container"]: item.get("backhaul") for item in inventory["radios"]}
+    assert backhaul == {"bpiap": None, "bpiap-004": "wired", "bpibroadband": None}

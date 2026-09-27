@@ -55,6 +55,25 @@ def _mobility():
 
 
 class WorldTests(unittest.TestCase):
+    def test_a_wired_ap_has_no_backhaul_links_and_is_listed(self):
+        layout = _layout()
+        layout["nodes"].append({"role": "agent_3", "kind": "fronthaul_ap", "position": [5, 4],
+                                "backhaul": "wired"})
+        world = compile_world(layout, _mobility())
+        self.assertEqual(world["wired_backhaul"], ["agent_3"])
+        for generation in world["generations"]:
+            backhaul = [(link["source_role"], link["destination_role"])
+                        for link in generation["links"] if link["link_class"] == "backhaul"]
+            self.assertEqual(sorted(backhaul), [("agent_1", "agent_2"), ("agent_2", "agent_1")])
+            fronthaul = {link["source_role"] for link in generation["links"] if link["link_class"] == "fronthaul"}
+            self.assertIn("agent_3", fronthaul)  # its clients are in the room like any AP's
+        # without a wired AP the world is unchanged: no new key
+        self.assertNotIn("wired_backhaul", compile_world(_layout(), _mobility()))
+        for bad in ({"role": "sta_02", "kind": "station", "position": [3, 3], "backhaul": "wired"},
+                    {"role": "agent_4", "kind": "fronthaul_ap", "position": [3, 3], "backhaul": "wifi"}):
+            with self.assertRaises(ScenarioError):
+                compile_world({**_layout(), "nodes": _layout()["nodes"] + [bad]}, _mobility())
+
     def test_backhaul_rf_policy_is_validated_signed_and_preserved(self):
         for policy in ("fixed", "geometry"):
             mobility = {**_mobility(), "backhaul_rf": policy}

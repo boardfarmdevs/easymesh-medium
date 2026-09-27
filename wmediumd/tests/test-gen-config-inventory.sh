@@ -14,13 +14,14 @@ if [ "${1:-}" = list ]; then
     if [ "${FAKE_GUESTS:-0}" = 1 ] && [[ $* == *config:user.wmediumd.guest* ]]; then
         printf '%s\n' bpibroadband, wlan-client, pod-1,true em-gtp,true
     else
-        printf '%s\n' bpibroadband wlan-client
+        printf '%s\n' bpibroadband ${FAKE_EXTENDER:+bpiap} wlan-client
     fi
     exit 0
 fi
 
 if [ "${1:-}" = config ] && [ "${2:-}" = get ]; then
     [ "$3" = pod-1 ] && [ "$4" = user.wmediumd.links ] && printf '%s\n' "${FAKE_LINKS:-}"
+    [ "$3" = bpiap ] && [ "$4" = user.easymesh.backhaul ] && printf '%s\n' "${FAKE_BPIAP_BACKHAUL:-}"
     exit 0
 fi
 
@@ -41,6 +42,7 @@ case "$command_text" in
   *macaddress*)
     case "$container" in
       bpibroadband) printf '%s\n' 02:00:00:00:01:00 ;;
+      bpiap) printf '%s\n' 02:00:00:00:06:00 ;;
       pod-1) printf '%s\n' 02:00:00:00:03:00 02:00:00:00:04:00 ;;
       em-gtp) printf '%s\n' 02:00:00:00:05:00 ;;
       wlan-client)
@@ -96,6 +98,14 @@ PATH="$tmp/bin:$PATH" FAKE_CLIENT_ACTIVE=1 FAKE_GUESTS=1 FAKE_LINKS='wlan1=bpibr
     "$repo/gen/wmediumd/gen-config.sh" 8 >"$tmp/mesh-peer.cfg"
 grep -q '(4, 0, 40)' "$tmp/mesh-peer.cfg"
 grep -q '(0, 4, 40)' "$tmp/mesh-peer.cfg"
+# an extender with a wired backhaul: no RF to the other mesh nodes (indices: bpiap 0, bpibroadband 1)
+PATH="$tmp/bin:$PATH" FAKE_CLIENT_ACTIVE=1 FAKE_EXTENDER=1 \
+    "$repo/gen/wmediumd/gen-config.sh" 40 >"$tmp/wireless-extender.cfg"
+grep -q '(0, 1, 50)' "$tmp/wireless-extender.cfg"
+PATH="$tmp/bin:$PATH" FAKE_CLIENT_ACTIVE=1 FAKE_EXTENDER=1 FAKE_BPIAP_BACKHAUL=wired \
+    "$repo/gen/wmediumd/gen-config.sh" 40 >"$tmp/wired-extender.cfg"
+grep -q '(0, 1, -20)' "$tmp/wired-extender.cfg"
+grep -q '(1, 0, -20)' "$tmp/wired-extender.cfg"
 # a radio that is not up yet: the link is skipped, the rest of the medium stands
 PATH="$tmp/bin:$PATH" FAKE_CLIENT_ACTIVE=1 FAKE_GUESTS=1 FAKE_LINKS='wlan9=em-gtp/wlan0:45' \
     "$repo/gen/wmediumd/gen-config.sh" 8 >"$tmp/pending.cfg" 2>"$tmp/pending.err"

@@ -114,6 +114,8 @@ def _bind(
                 result[role]["band_radios"] = item["band_radios"]
             if item.get("adapter"):
                 result[role]["adapter"] = item["adapter"]
+            if item.get("backhaul") == "wired":
+                result[role]["backhaul"] = "wired"
         else:
             result[role]["station_mac"] = item.get(
                 "station_mac", item["permanent_mac"]
@@ -343,6 +345,9 @@ def compile_scenario(
     adapters = adapter_devices(inventory)
     if adapters:
         expected_lab["adapter_devices"] = adapters
+    wired = sum(item.get("kind") == "mesh" and item.get("backhaul") == "wired" for item in inventory_radios)
+    if wired:
+        expected_lab["wired_devices"] = wired
 
     return {
         "schema": "wmdcfg.event-plan.v1",
