@@ -15,8 +15,10 @@ mapfile -t CLIENTS < <(lxc list -c n --format csv 2>/dev/null \
 # user.wmediumd.guest=true. All of a guest's radios are included, at the
 # default SNR to every other radio; nothing else in the matrix changes.
 # A guest may pin links of its own radios in user.wmediumd.links, a
-# space-separated list of IFACE=PEER/PEER_IFACE:SNR (PEER another guest), for
-# example an adapter's wired-equivalent backhaul: bhaul-sta-50=em-gtp/wlan0:45
+# space-separated list of IFACE=PEER/PEER_IFACE:SNR (PEER another guest or a
+# lab mesh node), for example an adapter's wired-equivalent backhaul,
+# bhaul-sta-50=em-gtp/wlan0:45, or a pod's Wi-Fi backhaul to the gateway,
+# bhaul-sta-50=bpibroadband/wifi1:40
 # (read expanded, so a profile may carry it). A link whose radio is not up yet
 # is skipped with a warning.
 mapfile -t GUESTS < <(lxc list -c n,config:user.wmediumd.guest --format csv 2>/dev/null \
@@ -59,7 +61,15 @@ for c in "${GUESTS[@]}"; do
   done
 done
 # the matrix index of a guest's radio behind one interface
-guest_radio(){ local a; a=$(lxc exec "$1" -- cat "/sys/class/net/$2/phy80211/macaddress" </dev/null 2>/dev/null); [ -n "$a" ] && echo "${GIDX[$a]:-}"; }
+# (a lab mesh node has one radio for every band: its index, whatever the interface)
+guest_radio(){
+  local a
+  if [ -n "${IDX[$1]:-}" ]; then
+    lxc exec "$1" -- test -e "/sys/class/net/$2/phy80211" </dev/null 2>/dev/null && echo "${IDX[$1]}"
+    return
+  fi
+  a=$(lxc exec "$1" -- cat "/sys/class/net/$2/phy80211/macaddress" </dev/null 2>/dev/null); [ -n "$a" ] && echo "${GIDX[$a]:-}"
+}
 if [ "${#MISSING[@]}" -gt 0 ] && [ "${WMEDIUMD_ALLOW_INCOMPLETE_RADIOS:-0}" != 1 ]; then
   echo "gen-config: FATAL managed containers are missing active hwsim radios:" >&2
   printf 'gen-config:   %s\n' "${MISSING[@]}" >&2

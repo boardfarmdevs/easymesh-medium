@@ -59,8 +59,10 @@ def mesh_health(
     """Topology and controller-model completeness. ``expected_agents`` counts the
     lab's own mesh nodes (tri-band, ten BSSes, a backhaul station below the
     gateway); ``adapters`` (compiler.adapter_devices) adds mesh nodes managed
-    through an adapter with their own radio and BSS counts and no backhaul
-    station in the controller's model."""
+    through an adapter with their own radio and BSS counts. An adapter node
+    on a wired path has no backhaul station in the controller's model; one on
+    a Wi-Fi backhaul (the topology's backhaulMedia) has one, which is also a
+    station associated with its parent's backhaul BSS."""
     adapters = adapters or []
     topology = json.loads(_run("curl", "-fsS", "http://127.0.0.1:8888/api/v1/topology"))
     nodes = topology.get("nodes", [])
@@ -86,6 +88,10 @@ def mesh_health(
             ) == 10
         ),
     }
+    wifi_adapters = sum(
+        1 for node in nodes
+        if node.get("kind") == "opensync-pod" and node.get("backhaulMedia") == "Wireless LAN"
+    )
     if expected_agents is not None and expected_clients is not None:
         query = (
             "select (select count(*) from DeviceList),"
@@ -109,8 +115,9 @@ def mesh_health(
                 "model_associated": values[3],
                 "expected_model_devices": expected_agents + len(adapters),
                 "expected_model_radios": expected_agents * 3 + sum(item["radios"] for item in adapters),
-                "expected_model_bsses": expected_agents * 10 + sum(item["bsses"] for item in adapters),
-                "expected_model_associated": expected_clients + expected_agents - 1,
+                "expected_model_bsses": expected_agents * 10 + sum(item["bsses"] for item in adapters)
+                + wifi_adapters,
+                "expected_model_associated": expected_clients + expected_agents - 1 + wifi_adapters,
             }
         )
         # The WebUI is allowed to use its compact topology response profile.

@@ -91,10 +91,15 @@ if PATH="$tmp/bin:$PATH" FAKE_CLIENT_ACTIVE=1 FAKE_GUESTS=1 FAKE_LINKS='wlan1=em
     echo "FAIL: a malformed guest link was accepted" >&2
     exit 1
 fi
+# a pod's Wi-Fi backhaul pinned to a lab mesh node: its one radio (index 0)
+PATH="$tmp/bin:$PATH" FAKE_CLIENT_ACTIVE=1 FAKE_GUESTS=1 FAKE_LINKS='wlan1=bpibroadband/wifi1:40' \
+    "$repo/gen/wmediumd/gen-config.sh" 8 >"$tmp/mesh-peer.cfg"
+grep -q '(4, 0, 40)' "$tmp/mesh-peer.cfg"
+grep -q '(0, 4, 40)' "$tmp/mesh-peer.cfg"
 # a radio that is not up yet: the link is skipped, the rest of the medium stands
 PATH="$tmp/bin:$PATH" FAKE_CLIENT_ACTIVE=1 FAKE_GUESTS=1 FAKE_LINKS='wlan9=em-gtp/wlan0:45' \
     "$repo/gen/wmediumd/gen-config.sh" 8 >"$tmp/pending.cfg" 2>"$tmp/pending.err"
 grep -q 'skipped' "$tmp/pending.err"
 grep -q '42:00:00:00:05:00' "$tmp/pending.cfg"
 
-echo "PASS: wmediumd config rejects incomplete managed radio inventories; guest links pinned"
+echo "PASS: wmediumd config rejects incomplete managed radio inventories; guest links pinned (to guests and mesh nodes)"

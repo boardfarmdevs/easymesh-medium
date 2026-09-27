@@ -101,6 +101,23 @@ class ObserverTests(unittest.TestCase):
                           health["expected_model_associated"]), (4, 3, 5, 20, 1))
         self.assertEqual(health["complete_nodes"], 4)
 
+    @patch("wmdcfg.observers._run")
+    def test_an_adapter_on_wifi_backhaul_adds_its_backhaul_station(self, run):
+        # pod-2 joined the gateway's backhaul BSS: its backhaul STA row and its
+        # association there are in the model; pod-1 stays on its wired path
+        nodes = [{"name": "Controller", "STAList": [], "haulTypes": []},
+                 {"name": "Agent-1", "STAList": [{"staMAC": "02:00:00:00:05:00"}], "haulTypes": []},
+                 {"name": "Pod-1", "kind": "opensync-pod", "backhaulMedia": "Ethernet",
+                  "STAList": [], "haulTypes": []},
+                 {"name": "Pod-2", "kind": "opensync-pod", "backhaulMedia": "Wireless LAN",
+                  "STAList": [], "haulTypes": []}]
+        run.side_effect = [json.dumps({"nodes": nodes}), "3 5 21 2"]
+        pods = [{"container": "pod-1", "radios": 1, "bsses": 5},
+                {"container": "pod-2", "radios": 1, "bsses": 5}]
+        health = mesh_health(expected_agents=1, expected_clients=1, adapters=pods)
+        self.assertEqual((health["expected_model_bsses"], health["expected_model_associated"]), (21, 2))
+        self.assertEqual(health["complete_nodes"], 4)
+
 
 if __name__ == "__main__":
     unittest.main()
