@@ -70,8 +70,9 @@ def _validate_layout(layout: dict[str, Any]) -> None:
         roles.add(role)
         if node.get("kind") not in KINDS:
             raise ScenarioError(f"role {role} has unsupported kind {node.get('kind')!r}")
-        # An AP on a wired backhaul (its LAN port on the controller's LAN) has no
-        # Wi-Fi backhaul: no backhaul links, geometry or not.
+        # An AP on a wired backhaul (its LAN port on the controller's LAN): its backhaul
+        # links make it a Wi-Fi extender's possible parent; the lab gives them RF only when
+        # its HAL never connects its own backhaul station (wired_guard).
         if "backhaul" in node and (node["backhaul"] != "wired" or node.get("kind") != "fronthaul_ap"):
             raise ScenarioError(f"role {role}: backhaul may only be 'wired', on a fronthaul_ap")
         x, y = point(node.get("position"), f"role {role} position")
@@ -100,6 +101,32 @@ def playback_pause_points(document: dict[str, Any]) -> list[int]:
             or pauses != sorted(set(pauses))):
         raise ScenarioError("pause_at_ms must be ordered unique integer times inside the duration")
     return pauses
+
+
+def validate_ap_expectations(world: dict[str, Any]) -> None:
+    """ap_expectations: at a pause checkpoint or at the final settle, the AP each named
+    client must be on, e.g. [{"at": "final", "roles": {"sta_mobile_01": "extender_5"}}]."""
+    expectations = world.get("ap_expectations")
+    if expectations is None:
+        return
+    roles = world["roles"]
+    pauses = set(world.get("pause_at_ms", []))
+    if not isinstance(expectations, list) or not expectations:
+        raise ScenarioError("ap_expectations must be a non-empty list")
+    seen = set()
+    for item in expectations:
+        at = item.get("at") if isinstance(item, dict) else None
+        if at != "final" and at not in pauses:
+            raise ScenarioError("an ap_expectation is at 'final' or at a pause_at_ms checkpoint")
+        if at in seen:
+            raise ScenarioError(f"two ap_expectations at {at}")
+        seen.add(at)
+        wanted = item.get("roles")
+        if not isinstance(wanted, dict) or not wanted:
+            raise ScenarioError("an ap_expectation names its client roles")
+        for station, ap in wanted.items():
+            if roles.get(station) != "station" or roles.get(ap) != "fronthaul_ap":
+                raise ScenarioError(f"ap_expectation {station} -> {ap}: a station on a fronthaul AP")
 
 
 def backhaul_rf_policy(document: dict[str, Any]) -> str:
@@ -217,8 +244,6 @@ def compile_world(layout: dict[str, Any], mobility: dict[str, Any]) -> dict[str,
                 )
         for index, left in enumerate(agents):
             for right in agents[index + 1 :]:
-                if left.get("backhaul") == "wired" or right.get("backhaul") == "wired":
-                    continue
                 links.append(
                     directed_link(left, right, positions, presence, layout, mobility, time_ms, "backhaul")
                 )
@@ -262,10 +287,11 @@ def compile_world(layout: dict[str, Any], mobility: dict[str, Any]) -> dict[str,
     pauses = playback_pause_points(mobility)
     if pauses:
         result["pause_at_ms"] = list(pauses)
-    for key in ("band_steering", "band_steering_expectations", "backhaul_rf", "traffic_experiment"):
+    for key in ("band_steering", "band_steering_expectations", "backhaul_rf", "traffic_experiment", "ap_expectations"):
         if key in mobility:
             result[key] = copy.deepcopy(mobility[key])
     validate_traffic(result)
+    validate_ap_expectations(result)
     result["golden_sha256"] = _hash(result)
     # Keep the serialized artifact byte-stable across jq/Python versions.
     # Some serializers preserve an exact float as ``5.0`` while others emit

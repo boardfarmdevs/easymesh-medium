@@ -9,22 +9,26 @@ is an ordinary tri-band `fronthaul_ap` role, `extender_5`, marked
 
 - `golden/`: one variant per pod world, **same world ID**.
 - `layouts/NAME-pods-wired.json`: the pod layout plus `extender_5` at
-  `wired-positions.json`. `mobility` is the native mobility tree.
+  `../worlds-wired/wired-positions.json` (where it stands in the lab's own rooms
+  with it, `../worlds-wired`). `mobility` is the native mobility tree.
 - `build-goldens.py --check|--write` rebuilds both from the native and pod
   trees; the room tests fail on a stale world.
 
 What the wired extender changes and what it does not:
 
-- It has no Wi-Fi backhaul. The world compiler gives a `"backhaul": "wired"`
-  AP no backhaul links, geometry or not, and lists it in the world's
-  `wired_backhaul`; the room accepts a wired AP without mesh-peer links; the
-  acceptance's `meshConnected` expects no backhaul edge for it; the room's
-  OneWifi backhaul adapter leaves it out.
-- On the medium it has no RF to the other mesh nodes (gen-config gives a
-  container with `user.easymesh.backhaul=wired` -20 dB to each, and the room
-  engine sets no AP-pair override that involves it), so its backhaul station
-  can never make a second path into the LAN. The extender's unit keeps every
-  station interface down as well.
+- It has no Wi-Fi backhaul of its own: the world lists it in `wired_backhaul`,
+  the acceptance's `meshConnected` wants it as an Ethernet child of the gateway
+  in the controller's topology and never a Wi-Fi child, and the room's OneWifi
+  backhaul adapter leaves it out. The world compiler gives it backhaul links
+  like any AP, so a Wi-Fi extender may take it as its parent.
+- On the medium it gets RF to the other mesh nodes only when its HAL never
+  connects its backhaul station (rdk-wifi-hal 0045, which `gen/wired-extender.sh`
+  records as `user.easymesh.wired_guard=hal`): then no station of it can make a
+  second path into the LAN, and its backhaul BSSs stay open to children. With
+  an older image it keeps no RF to the other mesh nodes (gen-config gives it
+  -20 dB to each, and the room engine sets no AP-pair override that involves
+  it), as before. The extender's unit keeps every station interface down in
+  both cases.
 - Its fronthaul is a room AP like the others. A band-steered client's scripted
   band changes assume the native APs, so `build-goldens.py` refuses a world
   where the wired extender comes within 3 dB of such a client's best native AP

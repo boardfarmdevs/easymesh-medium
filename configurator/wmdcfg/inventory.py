@@ -221,11 +221,16 @@ def discover(client_names: set[str] | None = None) -> dict[str, Any]:
         # controller's LAN, no backhaul station.
         wired = not adapter and _run(
             "lxc", "config", "get", name, "user.easymesh.backhaul").strip() == "wired"
+        # Its HAL never connects its backhaul station (rdk-wifi-hal 0045), which
+        # gen/wired-extender.sh records: only then may it have RF to the other mesh nodes.
+        guarded = wired and _run(
+            "lxc", "config", "get", name, "user.easymesh.wired_guard").strip() == "hal"
         return {
             "container": name,
             "kind": "mesh",
             **({"adapter": "emosa"} if adapter else {}),
             **({"backhaul": "wired"} if wired else {}),
+            **({"wired_guard": "hal"} if guarded else {}),
             "permanent_mac": default["permanent_mac"],
             "tx_mac": default["tx_mac"],
             "interfaces": interfaces,

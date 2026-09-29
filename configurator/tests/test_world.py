@@ -55,7 +55,20 @@ def _mobility():
 
 
 class WorldTests(unittest.TestCase):
-    def test_a_wired_ap_has_no_backhaul_links_and_is_listed(self):
+    def test_ap_expectations_name_a_station_on_an_ap_at_final_or_a_checkpoint(self):
+        good = {**_mobility(), "pause_at_ms": [1_000],
+                "ap_expectations": [{"at": "final", "roles": {"sta_01": "agent_1"}},
+                                    {"at": 1_000, "roles": {"sta_01": "agent_2"}}]}
+        world = compile_world(_layout(), good)
+        self.assertEqual(world["ap_expectations"][0]["roles"], {"sta_01": "agent_1"})
+        for bad in ([{"at": 500, "roles": {"sta_01": "agent_1"}}],        # not a checkpoint
+                    [{"at": "final", "roles": {"agent_1": "agent_2"}}],   # not a station
+                    [{"at": "final", "roles": {"sta_01": "sta_01"}}],     # not an AP
+                    [{"at": "final", "roles": {}}], []):
+            with self.assertRaises(ScenarioError):
+                compile_world(_layout(), {**good, "ap_expectations": bad})
+
+    def test_a_wired_ap_is_listed_and_a_possible_backhaul_parent(self):
         layout = _layout()
         layout["nodes"].append({"role": "agent_3", "kind": "fronthaul_ap", "position": [5, 4],
                                 "backhaul": "wired"})
@@ -64,7 +77,8 @@ class WorldTests(unittest.TestCase):
         for generation in world["generations"]:
             backhaul = [(link["source_role"], link["destination_role"])
                         for link in generation["links"] if link["link_class"] == "backhaul"]
-            self.assertEqual(sorted(backhaul), [("agent_1", "agent_2"), ("agent_2", "agent_1")])
+            self.assertEqual(sorted(backhaul), [("agent_1", "agent_2"), ("agent_1", "agent_3"), ("agent_2", "agent_1"),
+                                                ("agent_2", "agent_3"), ("agent_3", "agent_1"), ("agent_3", "agent_2")])
             fronthaul = {link["source_role"] for link in generation["links"] if link["link_class"] == "fronthaul"}
             self.assertIn("agent_3", fronthaul)  # its clients are in the room like any AP's
         # without a wired AP the world is unchanged: no new key

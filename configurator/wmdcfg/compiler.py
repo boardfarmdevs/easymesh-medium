@@ -116,6 +116,8 @@ def _bind(
                 result[role]["adapter"] = item["adapter"]
             if item.get("backhaul") == "wired":
                 result[role]["backhaul"] = "wired"
+                if item.get("wired_guard"):
+                    result[role]["wired_guard"] = item["wired_guard"]
         else:
             result[role]["station_mac"] = item.get(
                 "station_mac", item["permanent_mac"]

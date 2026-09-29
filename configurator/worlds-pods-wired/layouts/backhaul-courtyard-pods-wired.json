@@ -191,7 +191,7 @@
       "role": "extender_5",
       "kind": "fronthaul_ap",
       "position": [
-        60,
+        40,
         18
       ],
       "backhaul": "wired"

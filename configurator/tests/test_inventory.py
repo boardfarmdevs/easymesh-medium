@@ -109,6 +109,30 @@ def test_discover_ignores_stopped_matching_containers_and_maps_tri_band_radios()
     assert station["cohort"] == "iot"
 
 
+def test_discover_marks_a_wired_extender_and_its_hal_guard():
+    listing = "bpibroadband,RUNNING\nbpiap,RUNNING\nbpiap-004,RUNNING"
+
+    def run(*arguments):
+        if arguments[:3] == ("lxc", "config", "get"):
+            name, key = arguments[3], arguments[4]
+            if name == "bpiap-004" and key == "user.easymesh.backhaul":
+                return "wired\n"
+            if name == "bpiap-004" and key == "user.easymesh.wired_guard":
+                return guard
+            return "\n"
+        return listing
+
+    for guard, expected in (("hal\n", {"backhaul": "wired", "wired_guard": "hal"}), ("\n", {"backhaul": "wired"})):
+        with patch("wmdcfg.inventory._run", side_effect=run), patch(
+            "wmdcfg.inventory._exec", side_effect=_inspect
+        ):
+            inventory = discover()
+        wired = next(item for item in inventory["radios"] if item["container"] == "bpiap-004")
+        assert {key: wired[key] for key in ("backhaul", "wired_guard") if key in wired} == expected
+        other = next(item for item in inventory["radios"] if item["container"] == "bpiap")
+        assert "backhaul" not in other and "wired_guard" not in other
+
+
 def test_discover_can_limit_station_probes_without_omitting_mesh_radios():
     listing = "\n".join(
         (

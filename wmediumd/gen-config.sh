@@ -107,8 +107,12 @@ L=(); add(){ [ -n "$1" ] && [ -n "$2" ] && [ -n "$3" ] || return; L+=("($1, $2, 
 # any other mesh node, so its backhaul station cannot join a second path into
 # the LAN (an L2 loop). Its links to clients are unchanged.
 declare -A WIRED
+# Its HAL never connecting its backhaul station (rdk-wifi-hal 0045, user.easymesh.wired_guard=hal
+# from gen/wired-extender.sh) lifts that: it then hears the mesh like any extender and can be a
+# Wi-Fi extender's backhaul parent.
 for m in "${MESH[@]}"; do
-  [ "$(lxc config get "$m" user.easymesh.backhaul </dev/null 2>/dev/null)" = wired ] && WIRED[$m]=1
+  [ "$(lxc config get "$m" user.easymesh.backhaul </dev/null 2>/dev/null)" = wired ] &&
+    [ "$(lxc config get "$m" user.easymesh.wired_guard </dev/null 2>/dev/null)" != hal ] && WIRED[$m]=1
 done
 for ((left=0; left < ${#MESH[@]}; left++)); do
   for ((right=left+1; right < ${#MESH[@]}; right++)); do
