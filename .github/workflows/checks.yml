@@ -1,6 +1,7 @@
 # The medium's checks, without a lab: the patched wmediumd builds and passes its
 # self-test, the configurator's tests pass and every room tree regenerates its
-# goldens identically, the console's Go tests pass and it builds.
+# goldens identically, the console's Go tests pass and it builds; the labs block and
+# the documentation's links hold.
 name: checks
 on:
   push:
@@ -12,6 +13,12 @@ permissions:
   contents: read
 
 jobs:
+  docs:
+    # the labs' shared documentation check (pages/check-docs.py, the same in every repository)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: python3 pages/check-docs.py
   wmediumd:
     runs-on: ubuntu-24.04
     steps:

@@ -590,9 +590,9 @@ These are existing extension points, not instructions to edit every file. RDK pa
 
 | Workstream | RDK location | prpl counterpart |
 | --- | --- | --- |
-| Medium | `wmediumd/patches/`, assembled `wmediumd.c`, `control.c`, `airtime.c`, `per.c` | `patches/wmediumd/`, assembled equivalent |
-| Kernel/context/survey | `hwsim/patches/` | `patches/hwsim/` |
-| Scenario and RF contracts | `configurator/wmdcfg/`: `geometry.py`, `world.py`, `compiler.py`, `actuator.py`, `runner.py`, `rf_contract.py`, `survey_bridge.py` | `wmediumd/configurator/wmdcfg/` |
+| Medium | `wmediumd/patches/`, assembled `wmediumd.c`, `control.c`, `airtime.c`, `per.c` | the same (since the medium is one repository) |
+| Kernel/context/survey | `hwsim/patches/` | the same |
+| Scenario and RF contracts | `configurator/wmdcfg/`: `geometry.py`, `world.py`, `compiler.py`, `actuator.py`, `runner.py`, `rf_contract.py`, `survey_bridge.py` | the same |
 | Optimizer schema/policy | `gen/optimizer/optimizer/`: `model.py`, `observer.py`, `load_observer.py`, `load_policy.py`, `candidates.py`, `planners.py` | `optimizer/optimizer/` |
 | Actions and evidence | Same package: `actuator.py`, `verifier.py`, `recorder.py`, `experiments.py`, `traffic.py` | Equivalent optimizer package |
 | Room orchestration | `gen/demo/room_demo/`: `server.py`, `conductor.py`, `engine.py`, `interactions.py`, `journal.py`, `events.py` | `demo/room_demo/` |

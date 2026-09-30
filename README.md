@@ -1,5 +1,21 @@
 # easymesh-medium: the RF medium of the EasyMesh labs
 
+<!-- labs block: the same in every repository of the EasyMesh labs, but for the Site line -->
+**Site:** none of its own; the labs' is <https://boardfarmdevs.github.io/easymesh-labs/>.
+The [EasyMesh labs](https://boardfarmdevs.github.io/easymesh-labs/) serve three
+goals: EasyMesh optimizer development in a rich virtual lab, on both stacks
+([RDK EasyMesh](https://boardfarmdevs.github.io/meta-cmf-bananapi-vcpe/),
+[prplMesh](https://boardfarmdevs.github.io/prplmesh-lab/)); unchanged OpenSync
+pods as EasyMesh agents under a local controller, without the OpenSync cloud
+([EMOSA](https://boardfarmdevs.github.io/emosa-lab/), with the
+[OpenSync lab](https://boardfarmdevs.github.io/opensync-lab/)'s pods); and
+EasyMesh on physical hardware
+([Protocol lab](https://boardfarmdevs.github.io/easymesh-lab/)). Two core
+components carry them: the RF medium
+([easymesh-medium](https://github.com/boardfarmdevs/easymesh-medium)) and EMOSA's
+OVSDB ⇄ EasyMesh conversion. The rest is infrastructure and learning around them.
+<!-- /labs block -->
+
 The virtual radio medium every EasyMesh lab runs on: `mac80211_hwsim` radios
 whose frames pass through **wmediumd**, which decides for every frame, from a
 room model, what each receiver hears. It is one of the two core components of

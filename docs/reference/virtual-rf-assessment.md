@@ -100,11 +100,11 @@ Room exclusion does not delete bound radios. Presence, association, receive
 eligibility and observed traffic are different states. Pool size is neither
 independent channel count nor active-client count. Never reload hwsim to switch rooms.
 
-Both build scripts pin wmediumd to
-`717e5d7fcc23eecbc8e32bd897a8fd4b1e3ba640`. The inspected hwsim series includes
-native receive-context patch `0011`. wmediumd numbering differs by stack:
-RDK includes Console NG patches `0032` and `0033`; prpl's `0032` is the
-netlink-ACK repair, not Console NG. Compare content and negotiated capabilities.
+Both labs build wmediumd from this repository: upstream
+`717e5d7fcc23eecbc8e32bd897a8fd4b1e3ba640` and one patch series for both
+stacks (`wmediumd/patches/`, the RDK and prpl series merged). The hwsim series
+includes native receive-context patch `0011`. Compare content and negotiated
+capabilities, not patch numbers from before the merge.
 
 Use each build's pinned manifest and patch hashes to identify native components.
 Phase 1–2 acceptance rebuilt the affected providers (§12.4), not every appliance
@@ -766,12 +766,15 @@ verification during phase 1.
 
 ### 12.2 Source map for future changes
 
+The medium's parts are in this repository, which the RDK lab checks out as
+`gen/medium/` and the prpl lab as `medium/`; the rest is each lab's.
+
 | Component | RDK repository | prpl repository |
 | --- | --- | --- |
-| hwsim patches/build | `hwsim/patches/`, `hwsim/build-hwsim.sh` | `patches/hwsim/`, `scripts/build-hwsim.sh` |
-| Medium patches/build | `wmediumd/patches/`, `wmediumd/build-wmediumd.sh` | `patches/wmediumd/`, `scripts/build-wmediumd.sh` |
-| Geometry, compilation, actuation | `configurator/wmdcfg/` | `wmediumd/configurator/wmdcfg/` |
-| Console/protocol diagnostics | `observer/` | `wmediumd/observer/` |
+| hwsim patches/build | `hwsim/patches/`, `hwsim/build-hwsim.sh` (here) | the same |
+| Medium patches/build | `wmediumd/patches/`, `wmediumd/build-wmediumd.sh` (here) | the same |
+| Geometry, compilation, actuation | `configurator/wmdcfg/` (here) | the same |
+| Console/protocol diagnostics | `observer/` (here) | the same |
 | Native HAL/reporting changes | `recipes-ccsp/hal/`, `recipes-ccsp/ccsp/`, `recipes-ccsp/unified-wifi-mesh/` | `patches/prplmesh/`, `scripts/container/`, `manifests/` |
 | External optimizer | `gen/optimizer/optimizer/` | `optimizer/optimizer/` |
 | Room orchestration | `gen/demo/room_demo/` | `demo/room_demo/` |
@@ -887,9 +890,9 @@ RDK:
 
 ```sh
 cd /home/easymesh/git/meta-cmf-bananapi-vcpe
-bash wmediumd/install-survey-bridge.sh /run/meta-cmf-wmediumd/metrics/control.sock easymesh-lab.service
+bash gen/medium/wmediumd/install-survey-bridge.sh /run/meta-cmf-wmediumd/metrics/control.sock easymesh-lab.service
 systemctl start wmdcfg-survey-bridge.service
-cd configurator
+cd gen/medium/configurator
 python3 -m wmdcfg.rf_survey --socket /run/meta-cmf-wmediumd/metrics/control.sock --seconds 10 --output /tmp/rdk-survey.json
 ```
 
@@ -897,9 +900,9 @@ prpl:
 
 ```sh
 cd /opt/prplmesh-lab
-bash wmediumd/install-survey-bridge.sh /run/prpl-wmediumd/metrics.sock prplmesh-lab.service
+bash medium/wmediumd/install-survey-bridge.sh /run/prpl-wmediumd/metrics.sock prplmesh-lab.service
 systemctl start wmdcfg-survey-bridge.service
-cd wmediumd/configurator
+cd medium/configurator
 python3 -m wmdcfg.rf_survey --socket /run/prpl-wmediumd/metrics.sock --seconds 10 --output /tmp/prpl-survey.json
 ```
 
@@ -1056,10 +1059,10 @@ Cleanup removes temporary routes/address/TCP rule and restores medium,
 matrices, associations and services. Retain JSON and verify readiness.
 Failed/inconclusive trials exit nonzero.
 
-RDK **0026** / prpl **0027** prevent later work from postponing earlier
-scheduler deadlines, preserving FIFO and multicast/hidden-receiver exclusion.
-Reproduce with `bash wmediumd/tests/test-scheduler-deadline.sh /patched/source/wmediumd`
-(omit `gen/` on prpl). Recorded tracing still finds nonzero ingress delay;
+Patch **0026** (RDK's 0026 and prpl's 0027 before the merge) prevents later
+work from postponing earlier scheduler deadlines, preserving FIFO and
+multicast/hidden-receiver exclusion. Reproduce with
+`bash wmediumd/tests/test-scheduler-deadline.sh /patched/source/wmediumd` here. Recorded tracing still finds nonzero ingress delay;
 the following clean-binary results exclude tracing overhead:
 
 | Timer + feedback fixed | Global / isolated / hidden median Mbit/s | Isolated / global | Hidden / global | Maximum repeat spread | Verdict |
@@ -1172,9 +1175,10 @@ reach the native threshold, record no overload rather than relaxing policy.
 | `received-same-band-roam` / 30 s | Ten clients; profiled station gateway → Ext-1 at 16 s checkpoint → gateway after return; stay 5 GHz, fresh received scans and independent native ownership checks |
 | `received-discovery-recovery` / 36 s | Ext-1 fronthaul absent at 12 s checkpoint, restored at 24 s; absent target ineligible, missing serving sample not fabricated, fresh rediscovery and eventual ownership/traffic recovery |
 
-Run `pytest` for `demo/tests`, `optimizer/tests` and
-`wmediumd/configurator/tests` with
-`PYTHONPATH=demo:optimizer:wmediumd/configurator` from the shared root.
+Run `pytest` for the lab's `demo/tests` and `optimizer/tests` and this
+repository's `configurator/tests`, with the lab's demo and optimizer and the
+medium's configurator on `PYTHONPATH` (prpl, from its root:
+`PYTHONPATH=demo:optimizer:medium/configurator`).
 Run `node tests/viewer-rf-inspector-test.js` for inspector contracts.
 
 #### September 15 reliability and priority qualification
