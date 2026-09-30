@@ -7,7 +7,8 @@
     "layout-b",
     "opensync-pods",
     "static-10",
-    "walls"
+    "walls",
+    "wired-extender"
   ],
   "space": {
     "width_m": 20,
@@ -211,6 +212,15 @@
         4,
         12
       ]
+    },
+    {
+      "role": "extender_5",
+      "kind": "fronthaul_ap",
+      "position": [
+        0,
+        0
+      ],
+      "backhaul": "wired"
     }
   ]
 }

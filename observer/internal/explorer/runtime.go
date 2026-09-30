@@ -17,11 +17,11 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/gen/wmediumd/observer/internal/artifacts"
-	"github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/gen/wmediumd/observer/internal/identity"
-	"github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/gen/wmediumd/observer/internal/model"
-	"github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/gen/wmediumd/observer/internal/state"
-	"github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/gen/wmediumd/observer/internal/wmdproto"
+	"github.com/boardfarmdevs/easymesh-medium/observer/internal/artifacts"
+	"github.com/boardfarmdevs/easymesh-medium/observer/internal/identity"
+	"github.com/boardfarmdevs/easymesh-medium/observer/internal/model"
+	"github.com/boardfarmdevs/easymesh-medium/observer/internal/state"
+	"github.com/boardfarmdevs/easymesh-medium/observer/internal/wmdproto"
 )
 
 type Config struct {

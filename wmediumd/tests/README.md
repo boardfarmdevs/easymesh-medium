@@ -3,21 +3,21 @@
 The transport tests compile full functions extracted from the supplied patched
 `wmediumd.c`, using the installed libnl rather than replacing its send/receive
 parser. Prerequisites: Python 3, a C compiler, `pkg-config`, and libnl development
-headers/libraries. Build the pinned source with `gen/wmediumd/build-wmediumd.sh`.
+headers/libraries. Build the pinned source with `wmediumd/build-wmediumd.sh`.
 
 From the repository root, choosing an unused evidence directory:
 
 ```sh
 record=$(mktemp -d)
-source=gen/wmediumd/src/wmediumd/wmediumd.c
-python3 gen/wmediumd/tests/test-netlink-ack.py \
+source=wmediumd/build/wmediumd.c
+python3 wmediumd/tests/test-netlink-ack.py \
   --source "$source" --output "$record/ack.json"
-python3 gen/wmediumd/tests/test-netlink-receive.py \
+python3 wmediumd/tests/test-netlink-receive.py \
   --source "$source" --output "$record/receive.json"
 cc -std=gnu11 -Wall -Wextra -Werror \
-  gen/wmediumd/tests/test-netlink-kernel-ack.c -o "$record/kernel-ack"
+  wmediumd/tests/test-netlink-kernel-ack.c -o "$record/kernel-ack"
 "$record/kernel-ack"
-gen/wmediumd/src/wmediumd/wmediumd -T
+wmediumd/build/wmediumd -T
 ```
 
 - ACK test: 19 checks, including unchanged commands/payloads, automatic sequence

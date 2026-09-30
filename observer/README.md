@@ -5,10 +5,10 @@ directed RF matrix, selected RF/traffic/load inspector, source/service status
 and embedded manual. The existing binary name, systemd unit and port remain
 `wmediumd-console`, `wmediumd-console.service` and guest port 8890.
 
-- [Operator manual](../../../doc/easymesh/guide/wmediumd-console-ng.md)
-- [Implementation and acceptance contract](../../../doc/easymesh/concepts/wmediumd-console-design.md)
-- [RF property field guide](../../../doc/easymesh/reference/radio/console-rf-properties.md)
-- [Protocol reference](../../../doc/easymesh/reference/radio/console.md)
+- [Operator manual](../docs/console/guide.md)
+- [Implementation and acceptance contract](../docs/console/design.md)
+- [RF property field guide](../docs/reference/console-rf-properties.md)
+- [Protocol reference](../docs/reference/console.md)
 
 ## Build
 
@@ -17,11 +17,11 @@ runtime dependencies. Vendored Three.js 0.180.0 and OrbitControls are embedded;
 the browser downloads nothing from a CDN.
 
 ```sh
-bash gen/wmediumd/observer/build.sh
+bash observer/build.sh
 ```
 
 To regenerate the pinned browser bundle, additionally install Node 20.19+
-and npm, then run `bash gen/wmediumd/observer/build.sh --vendor`.
+and npm, then run `bash observer/build.sh --vendor`.
 `package-lock.json` pins Three.js and esbuild. This build also regenerates
 the embedded manual from its Markdown source. It runs no tests.
 
@@ -30,7 +30,7 @@ the embedded manual from its Markdown source. It runs no tests.
 Run **inside the lab VM**, from its updated repository checkout:
 
 ```sh
-bash gen/wmediumd/observer/install.sh --start
+bash observer/install.sh --start
 systemctl status wmediumd-console.service
 ```
 
@@ -42,8 +42,8 @@ ready; NG uses its new, read-only `GET /api/demo/observer` endpoint.
 Older wmediumd binaries still provide their existing telemetry. NG's selected
 subtype/header/BSS-IE windows, startup pair baseline and control-service accounting
 require patch `0032-wmediumd-console-ng-detail.patch`. Build it with
-`bash gen/wmediumd/build-wmediumd.sh` or use the updated supplied
-`gen/wmediumd/wmediumd.patched`. Replacing a running daemon does not activate it:
+`bash wmediumd/build-wmediumd.sh` or use the updated supplied
+`wmediumd/build/wmediumd`. Replacing a running daemon does not activate it:
 schedule a normal lab/medium restart, which disrupts radio traffic. There is
 no BPI image, kernel module or full VM rebuild requirement.
 
@@ -57,7 +57,7 @@ Fresh VM builds install everything automatically. Existing VMs need the
 checkout, inside the VM, run:
 
 ```sh
-sudo python3 gen/wmediumd/observer/activate.py --restart-medium
+sudo python3 observer/activate.py --restart-medium
 ```
 
 This maintenance operation interrupts RF, preserves the current `-F`/`-Q`
@@ -79,7 +79,7 @@ or silently bypass recovery ownership checks.
 Check integration readiness without generating traffic or changing RF:
 
 ```sh
-python3 gen/wmediumd/observer/check-ready.py --require-room --require-survey
+python3 observer/check-ready.py --require-room --require-survey
 ```
 
 The bounded check requires the NG extension, compiled RF model description,
@@ -152,12 +152,12 @@ No subscriber means no detailed frame classification or retained payload.
 No runtime acceptance is implied by compilation. Focused checks:
 
 ```sh
-(cd gen/wmediumd/observer && go test ./... && go test -race ./...)
-node --test gen/wmediumd/observer/web/ng/model.test.mjs
+(cd observer && go test ./... && go test -race ./...)
+node --test observer/web/ng/model.test.mjs
 NODE_PATH=/path/to/browser-tools/node_modules \
 CHROMIUM_PATH=/path/to/chromium \
   node gen/tests/wmediumd-console-ng-browser-test.js
-gen/wmediumd/wmediumd.patched -T
+wmediumd/build/wmediumd -T
 ```
 
 The browser fixture requires `playwright-core` and Chromium; use the top-level

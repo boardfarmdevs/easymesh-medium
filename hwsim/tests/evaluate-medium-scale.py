@@ -28,8 +28,12 @@ def run(*args: str, check: bool = True, **kwargs) -> subprocess.CompletedProcess
     return subprocess.run(args, check=check, text=True, **kwargs)
 
 
+# the medium binary this run starts (--wmediumd); cleanup stops only processes of that name
+MEDIUM_NAME = "wmediumd"
+
+
 def cleanup() -> None:
-    run("pkill", "-x", "wmediumd.patched", check=False,
+    run("pkill", "-x", MEDIUM_NAME, check=False,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     run("ip", "netns", "del", "scale-peer", check=False,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -306,6 +310,8 @@ def main() -> int:
     parser.add_argument("--backend", action="append", choices=("userspace", "kernel"))
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    global MEDIUM_NAME
+    MEDIUM_NAME = args.wmediumd.name
     if os.geteuid() != 0:
         parser.error("run as root inside an isolated VM")
     profiles = args.profile or list(PROFILE_CLIENTS)

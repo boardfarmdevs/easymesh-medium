@@ -5,7 +5,8 @@
     "backhaul",
     "native-parent-selection",
     "opensync-pods",
-    "quick-demo"
+    "quick-demo",
+    "wired-extender"
   ],
   "space": {
     "width_m": 64,
@@ -197,6 +198,15 @@
         36,
         24
       ]
+    },
+    {
+      "role": "extender_5",
+      "kind": "fronthaul_ap",
+      "position": [
+        60,
+        18
+      ],
+      "backhaul": "wired"
     }
   ]
 }

@@ -2,17 +2,17 @@
 # Validate protocol-positive association ownership and HAL precedence.
 set -euo pipefail
 
-repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
-daemon=${WMEDIUMD:-$repo/gen/wmediumd/src/wmediumd/wmediumd}
-wmediumd_patch=$repo/gen/wmediumd/patches/0016-wmediumd-expose-authoritative-association-ownership.patch
-vif_patch=$repo/gen/wmediumd/patches/0017-wmediumd-resolve-association-vifs.patch
+repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.. && pwd)
+daemon=${WMEDIUMD:-$repo/wmediumd/build/wmediumd}
+wmediumd_patch=$repo/wmediumd/patches/0016-wmediumd-expose-authoritative-association-ownership.patch
+vif_patch=$repo/wmediumd/patches/0017-wmediumd-resolve-association-vifs.patch
 hal_patch=$repo/recipes-ccsp/hal/rdk-wifi-hal/0033-hwsim-filter-stale-peers-by-medium-ownership.patch
 bbappend=$repo/recipes-ccsp/hal/rdk-wifi-hal.bbappend
 tmp=$(mktemp -d)
 trap 'rm -rf -- "$tmp"' EXIT
 
 [ -x "$daemon" ] || {
-    echo "missing patched daemon: $daemon (run gen/wmediumd/build-wmediumd.sh)" >&2
+    echo "missing patched daemon: $daemon (run wmediumd/build-wmediumd.sh)" >&2
     exit 1
 }
 

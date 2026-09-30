@@ -1,0 +1,66 @@
+# The medium's checks, without a lab: the patched wmediumd builds and passes its
+# self-test, the configurator's tests pass and every room tree regenerates its
+# goldens identically, the console's Go tests pass and it builds.
+name: checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wmediumd:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libnl-3-dev libnl-genl-3-dev libconfig-dev pkg-config
+      - name: Build (upstream at the pin, the patch series)
+        run: wmediumd/build-wmediumd.sh
+      - name: Self-test
+        run: wmediumd/build/wmediumd -T
+      - name: The offline build never fetches
+        run: bash wmediumd/tests/test-offline-build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wmediumd
+          path: |
+            wmediumd/build/wmediumd
+            wmediumd/build/wmediumd.provenance.env
+
+  configurator:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q pytest
+      - name: Tests (the RDK stack, and tests/prplmesh under the prplMesh stack)
+        working-directory: configurator
+        run: python -m pytest -q tests
+      - name: The room trees regenerate their goldens identically
+        working-directory: configurator
+        run: |
+          sh worlds/build-goldens.sh --check
+          python worlds-wired/build-goldens.py --check
+          python worlds-pods/build-goldens.py --check
+
+  observer:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: observer/go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Tests
+        working-directory: observer
+        run: go test ./...
+      - name: Build the console
+        run: bash observer/build.sh

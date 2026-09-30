@@ -65,7 +65,7 @@ For local use, serve the `worlds/` directory over HTTP so the viewer can fetch
 the golden JSON files:
 
 ```sh
-cd gen/wmediumd/configurator/worlds
+cd configurator/worlds
 python3 -m http.server 8000
 ```
 
@@ -98,7 +98,7 @@ waits are additional wall-clock time, not part of the 60-second script. No
 pause proves that roaming succeeded. Raw `.wmd` exports remain RF sequences
 and do not implement these viewer checkpoints.
 
-See the [per-room inspection guide](../../../../doc/easymesh/reference/rooms/catalog.md)
+See the [per-room inspection guide](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/rooms/catalog.md)
 for the expected AP sequences and checks in both views.
 
 ## Install the renderer dependencies
@@ -116,7 +116,7 @@ No desktop or X server is required. The script selects Matplotlib's headless
 
 ## Render all golden worlds
 
-Run from `gen/wmediumd/configurator`:
+Run from `configurator`:
 
 ```sh
 python3 worlds/render-world-3d.py \

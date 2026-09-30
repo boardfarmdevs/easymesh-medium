@@ -15,7 +15,7 @@ Linux 7.0.
 Normal build and installation:
 
 ```sh
-gen/hwsim/build-hwsim.sh --6ghz --install
+hwsim/build-hwsim.sh --6ghz --install
 ```
 
 This preserves the default data path: the kernel option remains disabled and
@@ -24,7 +24,7 @@ the lab starts userspace wmediumd.
 An isolated VM can explicitly load the experimental kernel backend:
 
 ```sh
-HWSIM_KERNEL_MEDIUM=1 gen/hwsim/build-hwsim.sh --6ghz --load
+HWSIM_KERNEL_MEDIUM=1 hwsim/build-hwsim.sh --6ghz --load
 ```
 
 Rate-aware packet loss and receive timing are separate opt-ins. Their neutral
@@ -36,19 +36,19 @@ HWSIM_KERNEL_MEDIUM_RATE_PER=1 \
 HWSIM_KERNEL_MEDIUM_NOISE_FLOOR=-91 \
 HWSIM_KERNEL_MEDIUM_DELAY_US=2000 \
 HWSIM_KERNEL_MEDIUM_JITTER_US=500 \
-  gen/hwsim/build-hwsim.sh --6ghz --load
+  hwsim/build-hwsim.sh --6ghz --load
 ```
 
 Never use `--load` while a BPI or WLAN-client container owns an hwsim PHY. For
 the complete design, controls, results, and limitations, see
-[the kernel-medium reference](../../doc/easymesh/reference/radio/kernel-medium.md).
+[the kernel-medium reference](../docs/reference/kernel-medium.md).
 
 The destructive two-radio QEMU evaluator is:
 
 ```sh
-sudo gen/hwsim/tests/evaluate-medium-backends.py \
-  --module gen/hwsim/build/mac80211_hwsim.ko \
-  --wmediumd gen/wmediumd/wmediumd.patched \
+sudo hwsim/tests/evaluate-medium-backends.py \
+  --module hwsim/build/mac80211_hwsim.ko \
+  --wmediumd wmediumd/build/wmediumd \
   --duration 10 --rate 20M --output /tmp/medium-eval.json
 ```
 
@@ -57,9 +57,9 @@ Run it only in an isolated VM with the lab stopped.
 The 25/55/105-radio fan-out evaluator is also destructive:
 
 ```sh
-sudo gen/hwsim/tests/evaluate-medium-scale.py \
-  --module gen/hwsim/build/mac80211_hwsim.ko \
-  --wmediumd gen/wmediumd/wmediumd.patched \
+sudo hwsim/tests/evaluate-medium-scale.py \
+  --module hwsim/build/mac80211_hwsim.ko \
+  --wmediumd wmediumd/build/wmediumd \
   --output /tmp/medium-scale.json
 ```
 

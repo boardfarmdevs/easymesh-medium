@@ -114,6 +114,8 @@ def _bind(
                 result[role]["band_radios"] = item["band_radios"]
             if item.get("adapter"):
                 result[role]["adapter"] = item["adapter"]
+                if item.get("backhaul_station"):
+                    result[role]["backhaul_station"] = item["backhaul_station"]
             if item.get("backhaul") == "wired":
                 result[role]["backhaul"] = "wired"
                 if item.get("wired_guard"):

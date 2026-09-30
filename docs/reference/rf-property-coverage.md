@@ -1,12 +1,12 @@
 # RF property demonstration coverage
 
-[Radio reference](README.md) · [Room catalog](../rooms/catalog.md) ·
+[Radio reference](README.md) · [Room catalog](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/rooms/catalog.md) ·
 [Field guide](console-rf-properties.md)
 
 This is the maintained RDK property-to-room contract, not a declaration that
 every room or daemon mode is live-qualified. The complete property inventory
-is `PROPERTIES` in [rf_observations.py](../../../../gen/optimizer/optimizer/rf_observations.py).
-[rf_coverage.py](../../../../gen/optimizer/optimizer/rf_coverage.py) adds named
+is `PROPERTIES` in [rf_observations.py](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/gen/optimizer/optimizer/rf_observations.py).
+[rf_coverage.py](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/gen/optimizer/optimizer/rf_coverage.py) adds named
 rooms, machine-readable check categories and expectations to both generated
 catalogs and the room catalog API. Coverage tests require exact property-set
 equality, signed existing rooms and this document. A catalog entry neither
@@ -38,7 +38,7 @@ provider replacement, counter resets and implausible deltas invalidate the
 affected windows. Existing native path validation rejects unknown parents,
 cycles and conflicting topology; room geometry never fills a missing hop.
 
-The new optional [counter-guard policy](../../../../gen/optimizer/configs/load-counter-guard-policy.yaml)
+The new optional [counter-guard policy](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/gen/optimizer/configs/load-counter-guard-policy.yaml)
 requires `load_aware_enabled` and `load_counter_guard_enabled`. For an otherwise
 overloaded strong serving link it checks three native AP counter rates:
 retries ≤100/s, TX failures ≤10/s and RX drops ≤10/s by default. These are
@@ -65,7 +65,7 @@ or claims that a quieter target fixes reverse-link impairment.
 | Weak serving link | Existing signal rescue and its guards; high counters do not suppress rescue |
 
 Selecting a room alone does not enable this policy. The checked-in
-[native-counter-guard-room-profile manifest](../../../../gen/demo/manifests/native-counter-guard-room-profile.json)
+[native-counter-guard-room-profile manifest](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/gen/demo/manifests/native-counter-guard-room-profile.json)
 selects `rf-asymmetric-ack`, its real client binding and the opt-in policy.
 Stop the room service before operating it; never start a second actuator:
 
@@ -133,10 +133,10 @@ These must also retain named observation checks, including disabled modes.
 | Multicast fan-out, management/control/data, EAPOL, selected-window lease and ring overwrites | `received-discovery-recovery`, `rf-asymmetric-ack`: observe discovery/echo traffic within selected-window budget; missing history remains missing | Patch 0032 and Console detail tests; no payload capture or assumption that every modeled ACK is captured |
 | Beacon station count, utilization, available admission capacity | `rf-packet-size-counters`, `home-a-flash-crowd`: fresh received IE and exact context; capacity stays diagnostic in 32 µs/s units | Console BSS Load parsing tests; AP Metrics is not beacon proof; no ESP/free-bandwidth inference |
 
-Source anchors are the [world compiler](../../../../gen/wmediumd/configurator/wmdcfg/world.py),
-[native load provider](../../../../gen/optimizer/optimizer/load_observer.py),
-[load policy](../../../../gen/optimizer/optimizer/load_policy.py),
-[medium patches](../../../../gen/wmediumd/patches/) and
+Source anchors are the [world compiler](../../configurator/wmdcfg/world.py),
+[native load provider](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/gen/optimizer/optimizer/load_observer.py),
+[load policy](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/gen/optimizer/optimizer/load_policy.py),
+[medium patches](../../wmediumd/patches) and
 [field guide](console-rf-properties.md). Independent TX power, noise and CCA
 controls, adjacent-channel spectra, receiver collision/capture, MIMO,
 OFDMA/MLO and calibrated HT/VHT/HE/EHT capacity remain unsupported. Named
@@ -182,14 +182,14 @@ injected into the AP need not increment kernel RX drops. Held reverse-loss
 mode remains unsupported/unqualified; this experiment adds no native
 counter-mapping patch.
 
-The bounded [native counter acceptance](../../../../gen/tests/native-retry-counter-acceptance.py)
+The bounded [native counter acceptance](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/gen/tests/native-retry-counter-acceptance.py)
 adds stronger supported *pulsed* downlink/ACK impairment on the currently
 associated Default client, independent of room geometry. It compares kernel
 and native deltas, confirms ownership before/after each trial, restores exact
 frequency overrides and restarts the unchanged room service:
 
 ```sh
-PYTHONPATH=gen/optimizer:gen/wmediumd/configurator python3 gen/tests/native-retry-counter-acceptance.py \
+PYTHONPATH=gen/optimizer:configurator python3 gen/tests/native-retry-counter-acceptance.py \
   --stack rdk --yes-change-lab --seconds 8 \
   --shadow-counter-policy gen/optimizer/configs/load-counter-guard-policy.yaml \
   --output /tmp/native-counter-shadow-new
@@ -269,7 +269,7 @@ not an all-green regression claim.
 ## Room catalog qualification and open failures
 
 Current bounded RDK fixes and preserved failures are listed in
-[room acceptance](../testing/room-acceptance.md#candidate-admission-and-isolated-beacons).
+[room acceptance](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/testing/room-acceptance.md#candidate-admission-and-isolated-beacons).
 All three geometry rooms now pass together with enabled HAL 0044, including
 isolated backhaul beacons, traffic, Default restoration and unchanged native
 identities. Counter-manifest and guarded clear also pass; the latter uses
@@ -692,7 +692,7 @@ existing static section also discovers the new pytest tests. The rooms
 section includes the same live check alongside its broader catalog tests;
 use `rf` alone for this work, not a full catalog/soak.
 
-The standalone [live runner](../../../../gen/tests/rf-property-rooms-smoke.py)
+The standalone [live runner](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/gen/tests/rf-property-rooms-smoke.py)
 uses the normal lease/revision protocol, refuses a held lease or suite room
 guard, saves timestamped samples and traffic phase results, and restores the
 paused Default in `finally`. It never starts another optimizer, retunes radios

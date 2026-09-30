@@ -25,8 +25,8 @@ scenario writer, steering optimizer or source of EasyMesh measurements.
 ## Implementation status
 
 **Console NG is the default presentation and collector.** Start with the
-[NG manual](../../guide/wmediumd-console-ng.md) and
-[implementation/acceptance specification](../../concepts/wmediumd-console-design.md).
+[NG manual](../console/guide.md) and
+[implementation/acceptance specification](../console/design.md).
 The protocol/counting contracts below retain v1 compatibility. The old UI and
 typed controls are retired: `/classic/` redirects to NG, legacy mode/control
 flags are ignored, and every HTTP mutation is rejected. NG adds `/api/v2/`
@@ -47,8 +47,8 @@ The implemented observation path is:
 - the existing `-R` endpoint remains the small, read-only HAL measurement
   interface and is not changed into a general telemetry endpoint.
 
-The code is in `gen/wmediumd/observer/`; its focused operator and API manual is
-`gen/wmediumd/observer/README.md`. Persistent cross-component correlation beyond the interfaces described here is
+The code is in `observer/`; its focused operator and API manual is
+`observer/README.md`. Persistent cross-component correlation beyond the interfaces described here is
 is available through NG's explicitly configured, cached room/survey adapters;
 the classic collector remains independent.
 
@@ -187,7 +187,7 @@ trusted host/LAN address only when another workstation must view it. Normal
 
 Typed controls are a diagnostic convenience, not the scenario runner. Enable
 them only for a bounded session as described in
-`gen/wmediumd/observer/README.md`. A request must carry the instance ID,
+`observer/README.md`. A request must carry the instance ID,
 generation, same-origin header, JSON content type and per-process CSRF token.
 Pair/frequency batches are atomic. Undo restores the exact captured prior value
 or prior override absence, and is invalid after another generation or daemon
@@ -201,7 +201,7 @@ The accepted profile requires 25 resolved identities, 600 directed pairs,
 healthy packet telemetry, immutable read-only HTTP behavior, and no change to
 wmediumd state when the Console starts, stops, or fails. Exact binary hashes
 belong in the deployment evidence described by
-[current state](../../current-state.md).
+[current state](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/current-state.md).
 
 ## wmediumd telemetry additions
 
@@ -414,7 +414,7 @@ The room/configurator remains the RF writer. New readiness consumers use
 ## Historical v1 UI
 
 The following describes the retired presentation. Use the
-[NG operator manual](../../guide/wmediumd-console-ng.md) for the deployed UI.
+[NG operator manual](../console/guide.md) for the deployed UI.
 
 ### Live overview
 
@@ -489,7 +489,7 @@ an overload condition even if the UI itself remains responsive.
 ## Package layout
 
 ```text
-gen/wmediumd/observer/
+observer/
 |-- cmd/wmediumd-observer/main.go
 |-- internal/wmdproto/       binary socket client and golden fixtures
 |-- internal/identity/       bounded generated identity overlay

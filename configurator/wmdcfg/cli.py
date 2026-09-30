@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
-from . import __version__
+from . import __version__, stacks
 from .actuator import ActuatorError, ControlClient
 from .kernel_actuator import KernelMediumClient
 from .compiler import compile_scenario, validate_scenario
@@ -38,9 +39,21 @@ def _write(value: object, output: str | None) -> None:
         sys.stdout.write(text)
 
 
+def _env(*names: str) -> str | None:
+    return next((os.environ[name] for name in names if os.environ.get(name)), None)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="wmdcfg")
     parser.add_argument("--version", action="version", version=__version__)
+    parser.add_argument(
+        "--stack", choices=sorted(stacks.STACKS),
+        help="the lab (wmdcfg.stacks); default WMDCFG_STACK, else the lab running here",
+    )
+    # Defaults from the environment: WMDCFG_*; prplmesh-lab's older PRPL_* names still count.
+    backend = _env("WMDCFG_MEDIUM_BACKEND", "PRPL_MEDIUM_BACKEND") or "userspace"
+    kernel_root = _env("WMDCFG_KERNEL_MEDIUM_ROOT", "PRPL_KERNEL_MEDIUM_ROOT") or "/sys/kernel/debug/ieee80211"
+    control_socket = _env("WMDCFG_CONTROL_SOCKET", "PRPL_WMEDIUMD_CONTROL_SOCKET")
     commands = parser.add_subparsers(dest="command", required=True)
 
     rf_cmd = commands.add_parser("rf-capabilities", help="show the RF fidelity and validity contract")
@@ -59,22 +72,16 @@ def main(argv: list[str] | None = None) -> int:
     compile_cmd.add_argument("-o", "--output")
 
     status_cmd = commands.add_parser("status", help="query the live control actuator")
-    status_cmd.add_argument("--socket", default="/run/wmediumd-control.sock")
-    status_cmd.add_argument(
-        "--backend", choices=["userspace", "kernel"], default="userspace"
-    )
-    status_cmd.add_argument(
-        "--kernel-root", default="/sys/kernel/debug/ieee80211"
-    )
+    status_cmd.add_argument("--socket", default=control_socket, help="default: the stack's control socket")
+    status_cmd.add_argument("--backend", choices=["userspace", "kernel"], default=backend)
+    status_cmd.add_argument("--kernel-root", default=kernel_root)
     status_cmd.add_argument("--noise-floor-dbm", type=int, default=-91)
 
     run_cmd = commands.add_parser("run", help="run and restore a compiled event plan")
     run_cmd.add_argument("plan")
-    run_cmd.add_argument("--socket", default="/run/wmediumd-control.sock")
-    run_cmd.add_argument(
-        "--backend", choices=["userspace", "kernel"], default="userspace"
-    )
-    run_cmd.add_argument("--kernel-root", default="/sys/kernel/debug/ieee80211")
+    run_cmd.add_argument("--socket", default=control_socket, help="default: the stack's control socket")
+    run_cmd.add_argument("--backend", choices=["userspace", "kernel"], default=backend)
+    run_cmd.add_argument("--kernel-root", default=kernel_root)
     run_cmd.add_argument("--noise-floor-dbm", type=int, default=-91)
     run_cmd.add_argument(
         "--output-root", default="/tmp/wmdcfg-runs", help="run artifact directory"
@@ -97,6 +104,8 @@ def main(argv: list[str] | None = None) -> int:
     world_export_cmd.add_argument("-o", "--output", required=True)
 
     args = parser.parse_args(argv)
+    if getattr(args, "socket", "") is None:
+        args.socket = stacks.get(args.stack).control_socket
     try:
         if args.command == "rf-capabilities":
             _write(capability_manifest(args.backend), None)
@@ -136,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
             print(run_dir)
             return 0
         if args.command == "inventory":
-            _write(discover(), args.output)
+            _write(discover(stack=args.stack), args.output)
             return 0
         if args.command == "world-compile":
             plan = compile_world(load_json(args.layout), load_json(args.scenario))
@@ -165,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
         inventory = (
-            json.loads(Path(args.inventory).read_text()) if args.inventory else discover()
+            json.loads(Path(args.inventory).read_text()) if args.inventory else discover(stack=args.stack)
         )
         plan = compile_scenario(scenario, source, inventory, _bindings(args.bind))
         _write(plan, args.output)

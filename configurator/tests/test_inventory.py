@@ -175,6 +175,12 @@ def test_discover_maps_an_adapter_pod_by_its_ap_bands_only():
     assert pod["tx_mac"] == "42:00:00:00:6d:00"
     native = next(item for item in inventory["radios"] if item["container"] == "bpibroadband")
     assert "adapter" not in native and set(native["band_radios"]) == {"2.4", "5", "6"}
+    # its backhaul station: the one on the radio that serves no AP
+    station = pod["backhaul_station"]
+    assert (station["interface"], station["phy"], station["station_mac"]) == (
+        "bhaul-sta-50", "phy110", "02:00:00:00:6e:00")
+    assert station["tx_mac"] == "42:00:00:00:6e:00" and station["frequency_mhz"] == 5220
+    assert station["parent"] is None  # not connected in this fixture
 
 
 def test_a_wired_extender_is_marked_and_counted_in_the_plans_expected_lab():

@@ -6,7 +6,8 @@
     "large-room",
     "open-plan",
     "opensync-pods",
-    "static-10"
+    "static-10",
+    "wired-extender"
   ],
   "space": {
     "width_m": 40,
@@ -161,6 +162,15 @@
         20,
         36
       ]
+    },
+    {
+      "role": "extender_5",
+      "kind": "fronthaul_ap",
+      "position": [
+        0,
+        20
+      ],
+      "backhaul": "wired"
     }
   ]
 }

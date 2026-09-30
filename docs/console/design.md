@@ -1,8 +1,8 @@
 # wmediumd Console: interactive medium explorer
 
 **Status: Console NG implementation supplied; runtime qualification pending.**
-The [operator manual](../guide/wmediumd-console-ng.md) describes the shipped UI.
-`gen/wmediumd/observer/internal/explorer`, `web/ng` and daemon patches 0032–0033 implement
+The [operator manual](guide.md) describes the shipped UI.
+`observer/internal/explorer`, `web/ng` and daemon patches 0032–0033 implement
 the read-only explorer, demand-driven collection, selected subtype/header
 windows and service accounting. The room supplies a side-effect-free observer
 endpoint. No BPI or hwsim ABI changes are required. Compilation is not a measured
@@ -10,7 +10,7 @@ performance claim; the acceptance campaign below remains operator-run.
 
 NG is the only shipped UI/collector; classic URLs redirect and legacy control
 flags cannot enable writes. Fresh VM builds gate on NG and matching room/survey
-sources. The embedded [RF property field guide](../reference/radio/console-rf-properties.md)
+sources. The embedded [RF property field guide](../reference/console-rf-properties.md)
 documents producers, observation paths and limitations, separately from goals.
 
 This document retains the design rationale and acceptance targets, not promises
@@ -104,7 +104,7 @@ extension.
 
 ### Survey and BSS Load presentation
 
-Preserve the existing [RF measurement contract](../reference/radio/virtual-rf-assessment.md).
+Preserve the existing [RF measurement contract](../reference/virtual-rf-assessment.md).
 Present three separately sourced values:
 
 1. **Modeled channel activity:** `100 × Δbusy / Δactive`, with scope and window.
@@ -140,16 +140,16 @@ surfaces, not new parallel specifications.
 
 | Source | What was checked / where changes belong |
 | --- | --- |
-| [Go protocol client](../../../gen/wmediumd/observer/internal/wmdproto/client.go) | Full snapshot collection, paging, capability decoding and association lookups |
-| [Go models](../../../gen/wmediumd/observer/internal/model/model.go) | Exact counters and current snapshot schema |
-| [Collector](../../../gen/wmediumd/observer/cmd/wmediumd-observer/main.go), [store](../../../gen/wmediumd/observer/internal/state/store.go) | Two-second default collection, shared snapshots and replaceable subscriber updates |
-| [HTTP API](../../../gen/wmediumd/observer/internal/httpapi/server.go), [browser](../../../gen/wmediumd/observer/web/app.js) | Full-snapshot broadcasts, full DOM redraws and 800-row presentation caps |
-| [Identity generator](../../../gen/wmediumd/observer/generate-identity-inventory.sh), [matrix generator](../../../gen/wmediumd/gen-config.sh) | Human names, managed radios, spare exclusion and baseline pairs |
-| [wmediumd patches](../../../gen/wmediumd/patches/) | 0014 telemetry; 0016/0017/0024 ownership; 0018 paging; 0020–0023 surveys/airtime/ACKs; 0027 receive contexts; 0028 bounded control I/O; 0029/0030 admission |
-| [hwsim patches](../../../gen/hwsim/patches/) | 0009 survey cache, 0010 aggregate feedback, 0011 receive-context reporting |
-| [Survey bridge](../../../gen/wmediumd/configurator/wmdcfg/survey_bridge.py), [RF contract](../../../gen/wmediumd/configurator/wmdcfg/rf_contract.py) | Reuse source/validity semantics and distinguish implemented, enabled and qualified |
-| [Room pool](../../../gen/demo/room_demo/pool.py), [interactions](../../../gen/demo/room_demo/interactions.py), [client Wi-Fi](../../../gen/demo/room_demo/client_wifi.py) | Whole pool, applied RF, presence and supplicant disconnect/reconnect |
-| [Room server](../../../gen/demo/room_demo/server.py), [room renderer](../../../gen/wmediumd/configurator/worlds/viewer/index.html) | Read-only context feeds and existing Three.js interaction conventions |
+| [Go protocol client](../../observer/internal/wmdproto/client.go) | Full snapshot collection, paging, capability decoding and association lookups |
+| [Go models](../../observer/internal/model/model.go) | Exact counters and current snapshot schema |
+| [Collector](../../observer/cmd/wmediumd-observer/main.go), [store](../../observer/internal/state/store.go) | Two-second default collection, shared snapshots and replaceable subscriber updates |
+| [HTTP API](../../observer/internal/httpapi/server.go), [browser](../../observer/web/app.js) | Full-snapshot broadcasts, full DOM redraws and 800-row presentation caps |
+| [Identity generator](../../observer/generate-identity-inventory.sh), [matrix generator](../../wmediumd/gen-config.sh) | Human names, managed radios, spare exclusion and baseline pairs |
+| [wmediumd patches](../../wmediumd/patches) | 0014 telemetry; 0016/0017/0024 ownership; 0018 paging; 0020–0023 surveys/airtime/ACKs; 0027 receive contexts; 0028 bounded control I/O; 0029/0030 admission |
+| [hwsim patches](../../hwsim/patches) | 0009 survey cache, 0010 aggregate feedback, 0011 receive-context reporting |
+| [Survey bridge](../../configurator/wmdcfg/survey_bridge.py), [RF contract](../../configurator/wmdcfg/rf_contract.py) | Reuse source/validity semantics and distinguish implemented, enabled and qualified |
+| [Room pool](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/gen/demo/room_demo/pool.py), [interactions](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/gen/demo/room_demo/interactions.py), [client Wi-Fi](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/gen/demo/room_demo/client_wifi.py) | Whole pool, applied RF, presence and supplicant disconnect/reconnect |
+| [Room server](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/gen/demo/room_demo/server.py), [room renderer](../../configurator/worlds/viewer/index.html) | Read-only context feeds and existing Three.js interaction conventions |
 
 The [Linux hwsim documentation](https://wireless.docs.kernel.org/en/latest/en/users/drivers/mac80211_hwsim.html)
 confirms that hwsim supplies simulated radios to mac80211 and supports normal
@@ -220,7 +220,7 @@ never move a room role or alter RF.
 - Moving markers represent **activity over the displayed sampling window**.
   They are rate-limited visual tokens, not one animation per packet and not
   accurate packet flight time. A paused view freezes presentation only.
-- Reuse [the shared signal meter](../../../gen/wmediumd/configurator/worlds/viewer/signal-meter.js):
+- Reuse [the shared signal meter](../../configurator/worlds/viewer/signal-meter.js):
   red/yellow/green segments with grey unlit segments. Label SNR in dB and
   signal in dBm; the palette's fixed reference is not measured noise.
 - Reserve red/orange device styling for the controller/extenders, retain
@@ -411,7 +411,7 @@ the running process uses that setting.
 | Contention/admission | Global or visibility profile, per-transmitter/frequency queue behavior, optional AC priority; no calibrated EDCA claim |
 | Transport/capture | Normal netlink, alternate transport if detected, daemon capture enabled/disabled; unsupported vhost/time-control observation labeled explicitly |
 
-Consult [wmediumd internals](../reference/radio/wmediumd-internals.md) for these
+Consult [wmediumd internals](../reference/wmediumd-internals.md) for these
 startup contracts. Show unsupported/unqualified modes in the capability list
 without implying that the normal lab can switch into them live. Exact-frequency
 isolation does not simulate overlapping channel spectra.
@@ -613,7 +613,7 @@ supports shared geometry for repeated device/context markers.
 orbit/pan/zoom; support perspective and orthographic cameras with identical
 selection behavior.
 
-Suggested modules under `gen/wmediumd/observer/web/`:
+Suggested modules under `observer/web/`:
 
 | Module | Responsibility |
 | --- | --- |
@@ -754,5 +754,5 @@ protocol so an experiment cannot silently contaminate an active room.
 
 Maintain this document as the implementation input. As phases ship, replace
 proposed contracts with their actual behavior here and link the compact
-[Console reference](../reference/radio/console.md) to the resulting operator
+[Console reference](../reference/console.md) to the resulting operator
 guide; avoid creating competing “new” and “final” design documents.

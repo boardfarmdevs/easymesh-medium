@@ -1,0 +1,33 @@
+# Keep one associated client on its serving AP while continuously varying the
+# bidirectional RF path. The wrapper discovers and binds that serving AP.
+scenario client_rcpi_monitor {
+    language 1
+    tick 1s
+    require radio_pair_snr
+    require atomic_generations
+    require readback
+    protect backhaul
+    restore captured
+
+    role client : station
+    role ap : fronthaul_ap
+
+    # prplMesh associated-link reporting is intentionally slower than the Web
+    # refresh. Keep each plateau long enough for at least one Agent report;
+    # short alternating ramps can alias to the same value every cycle.
+    phase baseline for 20s {
+        link client <-> ap snr = 45dB
+        mark "stable high signal"
+    }
+
+    phase fall for 10s { link client <-> ap snr 45dB -> 25dB linear }
+    phase low_hold for 40s {
+        hold
+        mark "low plateau spans an associated-link reporting interval"
+    }
+    phase rise for 10s { link client <-> ap snr 25dB -> 45dB linear }
+    phase high_hold for 40s {
+        hold
+        mark "recovered plateau spans an associated-link reporting interval"
+    }
+}

@@ -1,6 +1,6 @@
 # Virtual RF assessment and implementation roadmap
 
-[Radio reference](README.md) · [Neighbor-room design](../proposals/neighbor-rooms/design.md)
+[Radio reference](README.md) · [Neighbor-room design](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/proposals/neighbor-rooms/design.md)
 
 **Status: Phases 0–2 and the bounded Phase 3 profile are qualified; Phase 4 is partially implemented.**
 The [supported profile](#124-implemented-phases-12-survey-and-native-bss-load)
@@ -11,9 +11,9 @@ separate implementation, measured behavior and remaining qualification failures.
 Bounded diagnostics do not replace clean-source release acceptance.
 
 See [Console NG properties](console-rf-properties.md),
-[integration priorities](../proposals/easymesh-rf-assessment-and-development-plan.md#current-integration-review),
-[band steering](../optimizer/band-steering.md) and required
-[cfg80211 cleanup](../../../../gen/hwsim/cfg80211/README.md) for their separate contracts.
+[integration priorities](../proposals/rf-assessment-and-development-plan.md#current-integration-review),
+[band steering](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/optimizer/band-steering.md) and required
+[cfg80211 cleanup](../../hwsim/cfg80211/README.md) for their separate contracts.
 
 ## Navigation
 
@@ -82,7 +82,7 @@ Calibrated PHY service, hidden nodes and demand/capacity remain future work.
 ### 2.1 Current source architecture
 
 These are build defaults, not an inventory of a running VM. VM names, checkout
-paths and ports are operator-selected; follow the [build guide](../../build/README.md).
+paths and ports are operator-selected; follow the [build guide](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/build/README.md).
 
 | Item | RDK | prpl |
 | --- | --- | --- |
@@ -192,7 +192,7 @@ does not imply autonomous optimization.
 | Neighbor BSSID/channel/load | Native scan substrate | Native scan substrate | Per-path reception/presence qualification; not a managed steering target by discovery alone |
 | Native channel/power action | Platform-specific control path | Platform-specific control path | General room orchestration/feedback not qualified; no silent retune or RF-power double application |
 
-Evidence: sections 12.4–12.6 and [band steering](../optimizer/band-steering.md).
+Evidence: sections 12.4–12.6 and [band steering](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/optimizer/band-steering.md).
 The new inspector is a projection of existing immutable observations, not another
 collector. Its native view excludes the frequency-wide modeled activity card;
 its decision view preserves historical target exclusions and timestamps.
@@ -254,7 +254,7 @@ The HAL channel-stat and hostapd-survey callbacks consume the common provider.
 OneWifi patch 0029 evaluates per-radio utilization crossings with independent
 one-second sampling; interval zero disables periodic reports, not sampling.
 Native patch 0194 handles bounded AP queries, preserves MID/BSSID correlation
-and exposes asynchronous controller submission. See [qualification](../testing/room-acceptance.md#rdk-threshold-and-query-qualification).
+and exposes asynchronous controller submission. See [qualification](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/testing/room-acceptance.md#rdk-threshold-and-query-qualification).
 Shared-wiphy contexts retain separate logical radios and units.
 
 ### 4.3 prpl native monitor now actually consumes survey data
@@ -605,7 +605,7 @@ physical radios are unchanged. An earlier cold branch attempt failed on
 incomplete candidate responses; this is not cold-start or full-suite acceptance.
 
 Native builds and extracted-source regressions pass; see
-[bounded results](../testing/room-acceptance.md#candidate-admission-and-isolated-beacons).
+[bounded results](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/testing/room-acceptance.md#candidate-admission-and-isolated-beacons).
 Keep initial readiness, outage beaconing and return-convergence gates.
 prpl's branch and 5/6 GHz BTM checks pass. Missing station ubus registration
 explains `Not found`: checked root dispatch preserves native BTM without retries.
@@ -614,7 +614,7 @@ is maintained in [RF coverage](rf-property-coverage.md#room-catalog-qualificatio
 Browser inspection adds no native queries or RF writes; closing Console NG
 cannot stop collection.
 See the [access contract](console-rf-properties.md#shared-rf-observations) and
-[ordered integration plan](../proposals/easymesh-rf-assessment-and-development-plan.md#ordered-low-risk-delivery).
+[ordered integration plan](../proposals/rf-assessment-and-development-plan.md#ordered-low-risk-delivery).
 
 ## 10. Phased delivery
 
@@ -768,10 +768,10 @@ verification during phase 1.
 
 | Component | RDK repository | prpl repository |
 | --- | --- | --- |
-| hwsim patches/build | `gen/hwsim/patches/`, `gen/hwsim/build-hwsim.sh` | `patches/hwsim/`, `scripts/build-hwsim.sh` |
-| Medium patches/build | `gen/wmediumd/patches/`, `gen/wmediumd/build-wmediumd.sh` | `patches/wmediumd/`, `scripts/build-wmediumd.sh` |
-| Geometry, compilation, actuation | `gen/wmediumd/configurator/wmdcfg/` | `wmediumd/configurator/wmdcfg/` |
-| Console/protocol diagnostics | `gen/wmediumd/observer/` | `wmediumd/observer/` |
+| hwsim patches/build | `hwsim/patches/`, `hwsim/build-hwsim.sh` | `patches/hwsim/`, `scripts/build-hwsim.sh` |
+| Medium patches/build | `wmediumd/patches/`, `wmediumd/build-wmediumd.sh` | `patches/wmediumd/`, `scripts/build-wmediumd.sh` |
+| Geometry, compilation, actuation | `configurator/wmdcfg/` | `wmediumd/configurator/wmdcfg/` |
+| Console/protocol diagnostics | `observer/` | `wmediumd/observer/` |
 | Native HAL/reporting changes | `recipes-ccsp/hal/`, `recipes-ccsp/ccsp/`, `recipes-ccsp/unified-wifi-mesh/` | `patches/prplmesh/`, `scripts/container/`, `manifests/` |
 | External optimizer | `gen/optimizer/optimizer/` | `optimizer/optimizer/` |
 | Room orchestration | `gen/demo/room_demo/` | `demo/room_demo/` |
@@ -785,7 +785,7 @@ For E05 inspect `mac80211_hwsim_get_survey`, scan record writers and the
 optional kernel-medium counter updates.
 
 Keep this page as the capability/gap assessment. The
-[neighbor-room proposal](../proposals/neighbor-rooms/design.md) owns foreign-AP
+[neighbor-room proposal](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/proposals/neighbor-rooms/design.md) owns foreign-AP
 scenarios and discovery/contention fidelity levels; it does not replace the
 lower-layer measurement work here. Treat old proposal observations as
 historical unless rechecked against the pinned implementation.
@@ -887,9 +887,9 @@ RDK:
 
 ```sh
 cd /home/easymesh/git/meta-cmf-bananapi-vcpe
-bash gen/wmediumd/install-survey-bridge.sh /run/meta-cmf-wmediumd/metrics/control.sock easymesh-lab.service
+bash wmediumd/install-survey-bridge.sh /run/meta-cmf-wmediumd/metrics/control.sock easymesh-lab.service
 systemctl start wmdcfg-survey-bridge.service
-cd gen/wmediumd/configurator
+cd configurator
 python3 -m wmdcfg.rf_survey --socket /run/meta-cmf-wmediumd/metrics/control.sock --seconds 10 --output /tmp/rdk-survey.json
 ```
 
@@ -1032,7 +1032,7 @@ Builds, self-tests, sanitizers, load-card and daemon integration tests pass.
 Earlier observer A/B overhead passes <5%
 (`/home/rev/work/rf-correctness-0911/`), not calibrated capacity.
 
-See [room qualification](../testing/room-acceptance.md#current-qualification)
+See [room qualification](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/testing/room-acceptance.md#current-qualification)
 for gates, timings and host limitations. prpl now accepts fresh native
 RCPI 0–220, including zero, while still rejecting reserved/missing values
 and unchanged timestamps. Native reporting intervals are unchanged.
@@ -1058,7 +1058,7 @@ Failed/inconclusive trials exit nonzero.
 
 RDK **0026** / prpl **0027** prevent later work from postponing earlier
 scheduler deadlines, preserving FIFO and multicast/hidden-receiver exclusion.
-Reproduce with `bash gen/wmediumd/tests/test-scheduler-deadline.sh /patched/source/wmediumd`
+Reproduce with `bash wmediumd/tests/test-scheduler-deadline.sh /patched/source/wmediumd`
 (omit `gen/` on prpl). Recorded tracing still finds nonzero ingress delay;
 the following clean-binary results exclude tracing overhead:
 
@@ -1081,7 +1081,7 @@ preserve module options and rollback binary. On RDK, restart
 oneshot otherwise retains obsolete state while radios are newly named wlanN.
 Never reload a live room's radio pool.
 
-See [current thermal findings](../testing/room-acceptance.md#host-headroom-and-restoration)
+See [current thermal findings](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/testing/room-acceptance.md#host-headroom-and-restoration)
 before changing host placement or resources. Unsupported counters are not zero.
 
 ### 12.6 Opt-in native-load policy
@@ -1095,25 +1095,25 @@ Packet activity is not offered demand; hop count is not backhaul capacity.
 The receiver uses bridge metadata only for provenance/epoch, never as a load
 oracle. RDK captures Ethernet; prpl subscribes to its native broker, including
 colocated AP reports with conservative native timestamps.
-See [coverage qualification](../testing/room-acceptance.md#native-load-coverage) and the package README.
+See [coverage qualification](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/testing/room-acceptance.md#native-load-coverage) and the package README.
 
 Channels and client `freq_list` are prerequisites, not policy side effects.
 RDK uses single-radio retunes without restarting agents. Its staggered reports
 require five-second skew/freshness and a ten-second hold; prpl uses one-second
 skew/five-second hold. Neither changes native cadence or default room gates.
-See [UDP/BTM qualification and restoration](../testing/room-acceptance.md#opt-in-load-policy-qualification)
+See [UDP/BTM qualification and restoration](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/testing/room-acceptance.md#opt-in-load-policy-qualification)
 for measured outcomes and retained failures. Missing telemetry never means idle.
 RDK association publication and ready-command dispatch are event-driven;
-[extender-loss qualification](../testing/room-acceptance.md#extender-loss-repair-and-attribution)
+[extender-loss qualification](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/testing/room-acceptance.md#extender-loss-repair-and-attribution)
 passes without changing security timers.
 
 prpl HAL **0015** preserves candidate socket identity across interruptions;
 it does not replace idealized candidates with reception-backed measurements.
-See [repair qualification](../testing/room-acceptance.md#prpl-snapshot-coherence-and-candidate-diagnosis)
-and [native RCPI → room presentation profiling](../testing/room-acceptance.md#room-webgl-presentation),
+See [repair qualification](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/testing/room-acceptance.md#prpl-snapshot-coherence-and-candidate-diagnosis)
+and [native RCPI → room presentation profiling](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/testing/room-acceptance.md#room-webgl-presentation),
 which excludes RF generation and physical scanout.
 The pinned prpl ubus dependency also receives a
-[reentrant-dispatch backport](../testing/room-acceptance.md#prpl-libubus-reentrancy);
+[reentrant-dispatch backport](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/testing/room-acceptance.md#prpl-libubus-reentrancy);
 this changes message coordination, not RF or steering policy.
 
 Modern PHY/DCF, receiver-local collisions, independent interference power,
@@ -1203,7 +1203,7 @@ Keep failed attempts; targeted checks are not full-catalog or soak qualification
   renewal recovered all **30 BSS channels in 12.46 s**, agents unchanged;
   this maintenance timing is not post-steer latency.
 - **rev140:** the reversible non-turbo profile avoids observed throttling.
-  See [physical-host cooling](../observability/monitoring.md#thermally-constrained-physical-hosts).
+  See [physical-host cooling](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/observability/monitoring.md#thermally-constrained-physical-hosts).
   Fan operation is confirmed; airflow remains unverified. Reduced clock ceilings
   must be disclosed in performance comparisons.
 
@@ -1240,7 +1240,7 @@ Use `LAB=easymesh-lab` / `STACK=rdk` or `LAB=prplmesh-lab` / `STACK=prplmesh`.
 During maintenance,
 stop the room service, then run RDK's `wmediumd/wmediumd-up.sh up` or prpl's
 `scripts/radio-lab.sh restart-medium` with `WMEDIUMD_PRIORITY_QUEUES=1`;
-restart the room afterward. [Lifecycle persistence](../../../../gen/wmediumd/control-priority.md)
+restart the room afterward. [Lifecycle persistence](../../wmediumd/control-priority.md)
 restores classification after container restarts without polling. Native
 AP startup remains the platform wrapper's responsibility.
 The live RF manifest advertises admission only when enabled.
@@ -1258,7 +1258,7 @@ guide; remove the priority drop-in and recover with
 
 These endpoint records measure delivered traffic, not physical capacity.
 Restart, cancellation, load/BTM and browser measurements are in the
-[bounded follow-up](../testing/room-acceptance.md#demand-and-lifecycle-results).
+[bounded follow-up](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/testing/room-acceptance.md#demand-and-lifecycle-results).
 
 Verification starts after submission. The mandatory 20-second observation
 window is **not measured convergence or metrics delay**. First sampled fresh
@@ -1270,7 +1270,7 @@ thresholds remain unchanged.
 #### September 15 reassessment and next order
 
 Earlier lifecycle, byte-rate and RF14 threshold/query results remain in
-[bounded acceptance](../testing/room-acceptance.md#rdk-threshold-and-query-qualification).
+[bounded acceptance](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/testing/room-acceptance.md#rdk-threshold-and-query-qualification).
 They are not performance guarantees or a full-catalog qualification.
 
 Patch **0193** protects `dm_sta_t` topology encoding against concurrent

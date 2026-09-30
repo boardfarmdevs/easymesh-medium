@@ -399,8 +399,8 @@ class ControlClient:
 
 def apply_frequency_frames(client, generation: int, updates: list[dict]) -> tuple[list[dict], int]:
     """Apply frequency-qualified updates from ``generation`` on, one generation per
-    control frame. A set that fits one frame (every native room) is one atomic
-    generation; a larger one (rooms with OpenSync pods) spans consecutive ones.
+    control frame. A set that fits one frame is one atomic generation; a larger
+    one (rooms with more mesh nodes: the pods, a wired extender) spans consecutive ones.
     Returns the applied rows and the last generation."""
     applied: list[dict] = []
     for start in range(0, len(updates), MAX_FREQUENCY_UPDATES_PER_FRAME):

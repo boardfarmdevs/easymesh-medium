@@ -2,6 +2,7 @@
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
+MEDIUM=$(cd "$HERE/.." && pwd)  # easymesh-medium
 STACK=${1:?usage: install-control-priority.sh prplmesh|rdk}
 [ "$#" -eq 1 ] || exit 2
 case "$STACK" in
@@ -23,7 +24,7 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 $HERE/configurator/wmdcfg/control_priority.py --stack $STACK --watch
+ExecStart=/usr/bin/python3 $MEDIUM/configurator/wmdcfg/control_priority.py --stack $STACK --watch
 Restart=always
 RestartSec=5
 NoNewPrivileges=true

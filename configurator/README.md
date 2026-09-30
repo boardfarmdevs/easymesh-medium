@@ -1,10 +1,10 @@
 # wmediumd configurator
 
 For opt-in IEEE 1905 bridge classification across direct LXC restarts, see
-[control-priority persistence](../control-priority.md).
+[control-priority persistence](../wmediumd/control-priority.md).
 
 This directory contains the scenario-language implementation described in
-[the wmediumd configurator reference](../../../doc/easymesh/reference/radio/configurator.md).
+[the wmediumd configurator reference](../docs/reference/configurator.md).
 
 Python 3.8 or newer is supported so the offline compiler and tests can also run
 on the rev140 build host; live inventory and execution still run inside the lab
@@ -14,7 +14,7 @@ VM that owns the LXD/hwsim topology.
 live `status` negotiates the actual medium capabilities. A capability is not
 a fresh native measurement. For modeled survey/BSS Load setup, supported
 legacy20 profile, disruptive acceptance and results, see the
-[RF operation guide](../../../doc/easymesh/reference/radio/virtual-rf-assessment.md#124-implemented-phases-12-survey-and-native-bss-load).
+[RF operation guide](../docs/reference/virtual-rf-assessment.md#124-implemented-phases-12-survey-and-native-bss-load).
 
 With the lab and survey bridge running, inspect fresh native contexts as root
 inside the outer VM, from this directory:
@@ -43,7 +43,7 @@ target-BSSID measurements before it can make a band-steering decision.
 Run directly from the source tree:
 
 ```sh
-cd gen/wmediumd/configurator
+cd configurator
 python3 -m unittest discover -s tests -v
 python3 -m wmdcfg.cli inventory -o /tmp/inventory.json
 python3 -m wmdcfg.cli compile scenarios/two-ap-crossover.wmd \
@@ -114,5 +114,5 @@ sudo python3 -m wmdcfg.cli run /tmp/two-ap-crossover.plan.json --backend kernel
 
 The adapter retains SNR units, generation checks, readback, and restoration.
 The kernel backend implements fewer RF effects; consult
-[the capability boundary](../../../doc/easymesh/reference/radio/kernel-medium.md)
+[the capability boundary](../docs/reference/kernel-medium.md)
 before using it for optimizer conclusions.

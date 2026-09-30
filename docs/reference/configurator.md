@@ -23,7 +23,7 @@ Keeping stimulus and decision independent lets the same RF scenario test a
 passive control, commanded steering, a controller optimizer or future
 agent-initiated steering.
 
-Implementation: `gen/wmediumd/configurator/`, Python 3.8+, no external parser
+Implementation: `configurator/`, Python 3.8+, no external parser
 dependency.
 
 ## Geometry front end and golden sequences
@@ -70,7 +70,7 @@ association.
 Regenerate or verify all golden world timelines with:
 
 ```sh
-cd gen/wmediumd/configurator
+cd configurator
 worlds/build-goldens.sh --check
 # Intentional source change only:
 worlds/build-goldens.sh --write
@@ -180,7 +180,7 @@ observed and recorded but does not rewrite the matrix.
 Run inside the runtime that owns LXD/hwsim:
 
 ```sh
-cd /home/easymesh/git/meta-cmf-bananapi-vcpe/gen/wmediumd/configurator
+cd /home/easymesh/git/meta-cmf-bananapi-vcpe/configurator
 
 python3 -m unittest discover -s tests -v
 python3 -m wmdcfg.cli inventory -o /tmp/inventory.json
@@ -299,7 +299,7 @@ Before using a configurator build, require all of the following:
 - every run restores all touched values, leaves no unexpected override and
   preserves the complete current topology.
 
-The runnable scenarios under [experiments](../../experiments/README.md) produce
+The runnable scenarios under [experiments](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/experiments/README.md) produce
 the evidence needed to evaluate these gates.
 
 ## Limits

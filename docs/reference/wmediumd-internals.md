@@ -124,7 +124,7 @@ runtime virtual-interface learning.
 
 ### 1. The lab generator discovers active radios
 
-`gen/wmediumd/gen-config.sh` queries LXD for running lab containers named:
+`wmediumd/gen-config.sh` queries LXD for running lab containers named:
 
 ```text
 mesh nodes     bpibroadband, bpiap, bpiap-NNN
@@ -451,7 +451,7 @@ registration and retains per-frame frequency transport.
 Use the Python client rather than encoding binary socket frames manually:
 
 ```sh
-cd gen/wmediumd/configurator
+cd configurator
 
 python3 -m wmdcfg.cli inventory -o /tmp/inventory.json
 python3 -m wmdcfg.cli status
@@ -479,8 +479,8 @@ tests do. They still use the same generation, readback and restore contract.
 
 | Path or artifact | Required? | Owner and lifetime |
 | --- | --- | --- |
-| `gen/wmediumd/wmediumd.patched` | Yes, unless rebuilt | Proven patched daemon binary committed with the lab |
-| `gen/wmediumd/patches/*.patch` | Required to rebuild | Fourteen-patch delta over pinned upstream |
+| `wmediumd/build/wmediumd` | Yes, unless rebuilt | Proven patched daemon binary committed with the lab |
+| `wmediumd/patches/*.patch` | Required to rebuild | Fourteen-patch delta over pinned upstream |
 | `/run/meta-cmf-wmediumd/wmediumd.cfg` | Yes at every start | Generated static radio inventory and initial model |
 | `/run/wmediumd-control.sock` | Yes for dynamic scenarios | Runtime socket; disappears with daemon |
 | `/run/meta-cmf-wmediumd/metrics/control.sock` | Yes for HAL candidate metrics | Multi-client minimal read-only protocol (`-R`) |
@@ -504,7 +504,7 @@ modify the file.
 
 The lab pins upstream commit
 `717e5d7fcc23eecbc8e32bd897a8fd4b1e3ba640` (the source reports v0.3.1) and
-applies fourteen patches in `gen/wmediumd/patches/`:
+applies fourteen patches in `wmediumd/patches/`:
 
 | Patch | Operational effect |
 | --- | --- |
@@ -534,7 +534,7 @@ ownership/filter invariants, frequency-filtered multicast, independent
 scheduling, Linux 7 rate mapping, bounded telemetry and the related regression
 cases.
 
-Use `sha256sum gen/wmediumd/wmediumd.patched` to identify the checkout's
+Use `sha256sum wmediumd/build/wmediumd` to identify the checkout's
 binary. `/run/meta-cmf-wmediumd/wmediumd-binary.sha256` records the running
 PID, binary hash and selected path. The room identity audit verifies this
 against `/proc/PID/exe`, command/config and process start time; a filename
@@ -564,22 +564,22 @@ result artifacts.
 
 ```sh
 # Process, current log tail and socket
-gen/wmediumd/wmediumd-up.sh status
+wmediumd/wmediumd-up.sh status
 sudo test -S /run/wmediumd-control.sock
 
 # Control protocol and configured station count
-cd gen/wmediumd/configurator
+cd configurator
 python3 -m wmdcfg.cli status
 
 # Static radio identities and matrix
 sudo sed -n '1,240p' /run/meta-cmf-wmediumd/wmediumd.cfg
 
 # Sender identity regression
-gen/wmediumd/check-wmediumd-ids.sh \
+wmediumd/check-wmediumd-ids.sh \
   /run/meta-cmf-wmediumd/wmediumd.log
 
 # Patched-binary regression suite
-sudo gen/wmediumd/wmediumd.patched -T
+sudo wmediumd/build/wmediumd -T
 ```
 
 | Symptom | Likely meaning |
@@ -601,18 +601,18 @@ increase in those diagnostics is a regression.
 
 ## Source and design references
 
-- `gen/wmediumd/build-wmediumd.sh` pins, verifies, patches and builds upstream.
-- `gen/wmediumd/gen-config.sh` defines active-radio discovery and the baseline.
-- `gen/wmediumd/wmediumd-up.sh` owns the daemon lifecycle and runtime paths.
-- `gen/wmediumd/configurator/wmdcfg/actuator.py` implements the socket client.
+- `wmediumd/build-wmediumd.sh` pins, verifies, patches and builds upstream.
+- `wmediumd/gen-config.sh` defines active-radio discovery and the baseline.
+- `wmediumd/wmediumd-up.sh` owns the daemon lifecycle and runtime paths.
+- `configurator/wmdcfg/actuator.py` implements the socket client.
 - [wmediumd configurator](configurator.md) defines the supported scenario language
   and restoration contract.
-- [extender outage](../../experiments/README.md) tests RF isolation
+- [extender outage](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/experiments/README.md) tests RF isolation
   and recovery without stopping a container.
-- [client carousel](../../experiments/README.md) exercises repeated
+- [client carousel](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/experiments/README.md) exercises repeated
   client movement visible in the live topology.
-- [client scale](../../experiments/README.md) covers larger online cohorts within
-  the fixed 100-client pool; [performance diagnostics](../testing/performance.md)
+- [client scale](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/experiments/README.md) covers larger online cohorts within
+  the fixed 100-client pool; [performance diagnostics](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/testing/performance.md)
   covers measured wmediumd cost and overload gates.
-- [patch set](../platform/patch-set.md) places the wmediumd and kernel patches in the
+- [patch set](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/platform/patch-set.md) places the wmediumd and kernel patches in the
   complete component ownership model.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import json
 from pathlib import Path
 
 from wmdcfg.kernel_actuator import KernelMediumClient
@@ -69,6 +70,28 @@ class KernelMediumActuatorTests(unittest.TestCase):
                     "42:00:00:00:00:00", "42:00:00:00:01:00", 2437
                 ),
                 (7, 41, False),
+            )
+
+    def test_live_interface_alias_resolves_to_permanent_radio(self):
+        alias_path = Path(self.temp.name) / "aliases.json"
+        alias_path.write_text(json.dumps({
+            "aliases": {
+                "02:00:00:10:01:00": "42:00:00:00:00:00",
+                "02:00:00:00:01:01": "42:00:00:00:01:00",
+            }
+        }))
+        client = _TestClient(
+            str(Path(self.temp.name) / "debug"),
+            parameters_root=str(Path(self.temp.name) / "parameters"),
+            lock_path=str(Path(self.temp.name) / "alias.lock"),
+            alias_path=str(alias_path),
+        )
+        with client:
+            self.assertEqual(
+                client.get_frequency_link(
+                    "02:00:00:10:01:00", "02:00:00:00:01:01", 5180
+                ),
+                (7, 30, True),
             )
 
 

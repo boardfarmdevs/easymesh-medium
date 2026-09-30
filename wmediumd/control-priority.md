@@ -21,8 +21,8 @@ sudo systemctl restart wmdcfg-control-priority.service
 From the RDK repository root:
 
 ```sh
-sudo python3 gen/wmediumd/configurator/wmdcfg/control_priority.py --stack rdk --enable
-sudo bash gen/wmediumd/install-control-priority.sh rdk
+sudo python3 configurator/wmdcfg/control_priority.py --stack rdk --enable
+sudo bash wmediumd/install-control-priority.sh rdk
 sudo systemctl restart wmdcfg-control-priority.service
 ```
 
@@ -75,7 +75,7 @@ sudo python3 wmediumd/configurator/wmdcfg/control_priority.py --stack prplmesh -
 sudo systemctl disable --now wmdcfg-control-priority.service
 ```
 
-For RDK, use `gen/wmediumd/configurator/wmdcfg/control_priority.py --stack rdk
+For RDK, use `configurator/wmdcfg/control_priority.py --stack rdk
 --disable` with the same service command. Remove the existing priority-queues
 drop-in and restart the medium with `WMEDIUMD_PRIORITY_QUEUES=0` through normal
 lab recovery, as before. Otherwise a later opted-in startup deliberately enables

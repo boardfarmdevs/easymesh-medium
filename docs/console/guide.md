@@ -6,7 +6,7 @@ properties inspector. Open the existing VM-specific **wmediumd console URL**;
 the port does not change. The **Manual** link opens this guide inside the
 console, without internet access.
 
-**RF properties** opens the [simulation and observation field guide](../reference/radio/console-rf-properties.md):
+**RF properties** opens the [simulation and observation field guide](../reference/console-rf-properties.md):
 every supported RF property, its producer, where to observe it, optional modes
 and fidelity limits. The observer itself does not simulate or change RF.
 
@@ -148,7 +148,7 @@ values as decimal strings; subscription frequency arguments remain JSON numbers.
 ## Installation and troubleshooting
 
 The source/build/install instructions are in
-[the observer README](../../../gen/wmediumd/observer/README.md).
+[the observer README](../../observer/README.md).
 No BPI image or full VM rebuild is required for this observer update. The NG
 telemetry extension requires replacing and restarting wmediumd in a maintenance
 window; the upgraded UI also works with older daemons and labels absent details.

@@ -1,99 +1,61 @@
 #!/bin/bash
-# build-wmediumd.sh -- build the channels-aware (multichannel) wmediumd.
+# Build the medium's wmediumd: upstream wmediumd at the pinned commit
+# (upstream.env) with this repository's patch series (patches/, applied in
+# order), from a clean checkout every time.
 #
-# Base: upstream wmediumd (github.com/bcopeland/wmediumd), the v0.3.1 line, which
-# already carries per-frame HWSIM_ATTR_FREQ on frames received from hwsim. On
-# top of it we apply a patch series: per-frequency interference and scheduling, learned VIF
-# ownership, removal of hot-path file I/O, Linux 7 HT/VHT rate flags,
-# frequency-filtered multicast, a larger netlink receive buffer, the atomic
-# scenario-control socket, configured default-SNR handling, and evidence-based
-# multicast eligibility for newly registered radios, and classification of
-# normal mac80211_hwsim receive-state rejections, and frequency-qualified SNR
-# overrides for simultaneous 2.4/5/6 GHz scenario control, plus an independently
-# permissioned read-only metrics endpoint for hwsim radio-provider queries, and
-# a separate bounded host-only telemetry endpoint for wmediumd Console, and
-# indexed hot-path scenario/telemetry lookups, and protocol-positive station
-# association ownership for rejecting stale hwsim AP peer rows, and learned-VIF
-# resolution for association queries made with live NL80211 endpoint MACs, and
-# bounded paged pair/frequency dumps for 100-client observer snapshots, and
-# TX-status frequency return for channel-context-safe monitor ACKs, and
-# frequency overrides indexed per radio pair beyond one control frame.
+#   wmediumd/build-wmediumd.sh [--offline] [--source DIR] [--output DIR]
 #
-#   ./build-wmediumd.sh          # clone (or reuse ./src), patch, build -> ./src/wmediumd/wmediumd
-#   ./build-wmediumd.sh --refresh-prebuilt
-#                                # also replace tracked ./wmediumd.patched
+#   --source DIR   the upstream checkout to reuse or create (default wmediumd/src)
+#   --output DIR   where wmediumd and wmediumd.provenance.env go (default wmediumd/build)
+#   --offline      never fetch: the source checkout must already hold the pinned commit
 #
-# A prebuilt binary is committed as ./wmediumd.patched for a no-build fast path.
-# Console NG telemetry additions are compiled but await operator qualification.
+# The binary is never committed. wmediumd.provenance.env records the upstream
+# commit, the patch series' digest and this repository's commit, so a lab can
+# tell which medium it runs. Self-test after a build: sudo <output>/wmediumd -T
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
-SRC=$HERE/src
-REPO=${WMEDIUMD_REPO:-https://github.com/bcopeland/wmediumd}
-# Upstream reports version 0.3.1 but does not publish a v0.3.1 Git tag. Pin the
-# exact verified commit instead of depending on the moving default branch or a
-# tag that cannot be checked out.
-REF=${WMEDIUMD_REF:-717e5d7fcc23eecbc8e32bd897a8fd4b1e3ba640}
-REFRESH_PREBUILT=0
-case "${1:-}" in
-    '') ;;
-    --refresh-prebuilt) REFRESH_PREBUILT=1 ;;
-    -h|--help)
-        sed -n '1,30p' "$0"
-        exit 0
-        ;;
-    *) echo "usage: $0 [--refresh-prebuilt]" >&2; exit 2 ;;
-esac
+. "$HERE/upstream.env"
+SOURCE=$HERE/src
+OUTPUT=$HERE/build
+OFFLINE=0
+while [ $# -gt 0 ]; do
+    case $1 in
+        --offline) OFFLINE=1 ;;
+        --source) SOURCE=${2:?--source DIR}; shift ;;
+        --output) OUTPUT=${2:?--output DIR}; shift ;;
+        -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+        *) echo "usage: $0 [--offline] [--source DIR] [--output DIR]" >&2; exit 2 ;;
+    esac
+    shift
+done
 
-if [ ! -d "$SRC/.git" ]; then
-    echo ">> cloning $REPO @ $REF"
-    git clone "$REPO" "$SRC"
-    git -C "$SRC" checkout --detach "$REF"
-elif [ "$(git -C "$SRC" rev-parse HEAD)" != "$REF" ]; then
-    echo "source checkout is not at pinned commit $REF: $SRC" >&2
-    echo "remove it or set WMEDIUMD_REF explicitly after reviewing the patch" >&2
-    exit 1
+if [ ! -d "$SOURCE/.git" ]; then
+    [ "$OFFLINE" = 0 ] || { echo "offline build needs an existing source checkout: $SOURCE" >&2; exit 1; }
+    mkdir -p "$(dirname "$SOURCE")"
+    git clone -q "$WMEDIUMD_REPO" "$SOURCE"
 fi
+if ! git -C "$SOURCE" cat-file -e "$WMEDIUMD_COMMIT^{commit}" 2>/dev/null; then
+    [ "$OFFLINE" = 0 ] || { echo "the source checkout lacks $WMEDIUMD_COMMIT: $SOURCE" >&2; exit 1; }
+    git -C "$SOURCE" fetch -q origin
+fi
+git -C "$SOURCE" checkout -q --detach "$WMEDIUMD_COMMIT"
+git -C "$SOURCE" reset -q --hard "$WMEDIUMD_COMMIT"
+git -C "$SOURCE" clean -q -fdx
 
-echo ">> applying multichannel patch series"
-STAMP=$SRC/.wmediumd-patch-series
-SERIES_SHA=$(sha256sum "$HERE"/patches/*.patch | sha256sum | awk '{print $1}')
-if [ -f "$STAMP" ]; then
-    read -r STAMP_SERIES STAMP_DIFF < "$STAMP"
-    CURRENT_DIFF=$(git -C "$SRC" diff --binary | sha256sum | awk '{print $1}')
-    [ "$STAMP_SERIES" = "$SERIES_SHA" ] && [ "$STAMP_DIFF" = "$CURRENT_DIFF" ] || {
-        echo "wmediumd patch series or prepared source changed since the last build" >&2
-        echo "move $SRC aside and rerun to create a clean pinned checkout" >&2
-        exit 1
-    }
-    echo "   (verified previously applied series $SERIES_SHA)"
-else
-    if ! git -C "$SRC" diff --quiet || ! git -C "$SRC" diff --cached --quiet; then
-        echo "untracked patch state in $SRC; refusing to guess whether it is complete" >&2
-        echo "move $SRC aside and rerun to create a clean pinned checkout" >&2
-        exit 1
-    fi
-    for p in "$HERE"/patches/*.patch; do
-        git -C "$SRC" apply --check "$p" || {
-            echo "patch does not apply cleanly: $p" >&2
-            exit 1
-        }
-        git -C "$SRC" apply "$p"
-    done
-    DIFF_SHA=$(git -C "$SRC" diff --binary | sha256sum | awk '{print $1}')
-    printf '%s %s\n' "$SERIES_SHA" "$DIFF_SHA" > "$STAMP"
-fi
+for patch in "$HERE"/patches/*.patch; do
+    git -C "$SOURCE" apply --check "$patch" || { echo "does not apply: $patch" >&2; exit 1; }
+    git -C "$SOURCE" apply "$patch"
+done
 
-echo ">> building"
-make -C "$SRC" -j"$(nproc)"
-echo ">> built $SRC/wmediumd/wmediumd"
-echo "   (self-test: sudo $SRC/wmediumd/wmediumd -T )"
-if [ "$REFRESH_PREBUILT" = 1 ]; then
-    "$SRC/wmediumd/wmediumd" -T
-    PREBUILT_TMP=$HERE/.wmediumd.patched.$$
-    trap 'rm -f -- "$PREBUILT_TMP"' EXIT
-    install -m 0755 "$SRC/wmediumd/wmediumd" "$PREBUILT_TMP"
-    mv -f "$PREBUILT_TMP" "$HERE/wmediumd.patched"
-    trap - EXIT
-    printf '>> refreshed %s sha256=%s\n' "$HERE/wmediumd.patched" \
-        "$(sha256sum "$HERE/wmediumd.patched" | awk '{print $1}')"
-fi
+make -C "$SOURCE" -j"$(nproc)" >/dev/null
+install -D -m 0755 "$SOURCE/wmediumd/wmediumd" "$OUTPUT/wmediumd"
+series=$(cd "$HERE" && sha256sum patches/*.patch | sha256sum | awk '{print $1}')
+medium=$(git -C "$HERE" rev-parse HEAD 2>/dev/null || echo unknown)
+git -C "$HERE" diff --quiet HEAD -- . 2>/dev/null || medium="$medium+dirty"
+printf '%s\n' \
+    "WMEDIUMD_COMMIT=$WMEDIUMD_COMMIT" \
+    "WMEDIUMD_PATCHSET_SHA256=$series" \
+    "EASYMESH_MEDIUM_COMMIT=$medium" \
+    "WMEDIUMD_SHA256=$(sha256sum "$OUTPUT/wmediumd" | awk '{print $1}')" \
+    > "$OUTPUT/wmediumd.provenance.env"
+echo "built $OUTPUT/wmediumd (upstream ${WMEDIUMD_COMMIT:0:7}, $(ls "$HERE"/patches/*.patch | wc -l) patches, series ${series:0:12})"

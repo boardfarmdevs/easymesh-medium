@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/gen/wmediumd/observer/internal/model"
+	"github.com/boardfarmdevs/easymesh-medium/observer/internal/model"
 )
 
 func TestOperatorGeneratorUsesHWSIMTransmitterIdentityAndLXCIntent(t *testing.T) {

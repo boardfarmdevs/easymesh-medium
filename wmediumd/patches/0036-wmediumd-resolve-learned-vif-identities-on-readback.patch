@@ -1,0 +1,54 @@
+From: prplMesh virtual-radio lab
+Subject: [PATCH] wmediumd: resolve learned VIF identities on readback
+
+The prplMesh NL80211 HAL asks for an unassociated-STA metric by the real STA
+interface MAC carried in the EasyMesh query. The configured wmediumd station
+identity is the permanent hwsim radio MAC. Reuse wmediumd's existing,
+frame-learned VIF ownership map for control readback so the read-only endpoint
+can resolve the real STA/BSSID without embedding lab ordinal conventions in
+the HAL.
+
+Mutation remains generation protected and identity resolution succeeds only
+after a radio has actually transmitted with that VIF address.
+
+Origin: prplmesh-lab patches/wmediumd/0015 (92a60f1); rebased onto the
+single series of easymesh-medium as its last patch.
+
+--- a/wmediumd/control.c
++++ b/wmediumd/control.c
+@@ -398,10 +398,14 @@
+ static int station_index(struct wmediumd *ctx, const uint8_t *address)
+ {
+ 	int i;
++	struct station *station;
+ 
+ 	for (i = 0; i < ctx->num_stas; i++)
+ 		if (memcmp(ctx->sta_array[i]->addr, address, 6) == 0)
+ 			return i;
++	station = get_station_by_used_addr(ctx, (uint8_t *)address);
++	if (station)
++		return station->index;
+ 	return -1;
+ }
+ 
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -349,7 +349,7 @@
+ 	return false;
+ }
+ 
+-static struct station *get_station_by_used_addr(struct wmediumd *ctx, u8 *addr)
++struct station *get_station_by_used_addr(struct wmediumd *ctx, u8 *addr)
+ {
+ 	struct station *station;
+ 
+--- a/wmediumd/wmediumd.h
++++ b/wmediumd/wmediumd.h
+@@ -378,6 +378,7 @@
+ int read_per_file(struct wmediumd *ctx, const char *file_name);
+ int w_logf(struct wmediumd *ctx, u8 level, const char *format, ...);
+ int w_flogf(struct wmediumd *ctx, u8 level, FILE *stream, const char *format, ...);
++struct station *get_station_by_used_addr(struct wmediumd *ctx, u8 *addr);
+ int index_to_rate(size_t index, u32 freq);
+ void wmd_telemetry_record_tx(struct wmediumd *ctx, struct frame *frame,
+ 			     struct station *destination, int access_category,

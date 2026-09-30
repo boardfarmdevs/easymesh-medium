@@ -1,3 +1,3 @@
-module github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/gen/wmediumd/observer
+module github.com/boardfarmdevs/easymesh-medium/observer
 
 go 1.22

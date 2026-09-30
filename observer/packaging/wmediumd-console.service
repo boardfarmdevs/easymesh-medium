@@ -29,7 +29,7 @@ ProtectHome=true
 # The shared lxd group gates the wmediumd sockets, but the service itself must
 # never receive LXD API access. Hide known LXD/Incus daemon sockets inside its
 # mount namespace. Console NG never uses the writable scenario socket.
-InaccessiblePaths=-/var/snap/lxd/common/lxd/unix.socket -/var/lib/lxd/unix.socket -/run/lxd.socket -/var/lib/incus/unix.socket -/run/wmediumd-control.sock
+InaccessiblePaths=-/var/snap/lxd/common/lxd/unix.socket -/var/lib/lxd/unix.socket -/run/lxd.socket -/var/lib/incus/unix.socket -/run/wmediumd-control.sock -/run/prpl-wmediumd/control.sock
 ProtectKernelLogs=true
 ProtectKernelModules=true
 ProtectKernelTunables=true

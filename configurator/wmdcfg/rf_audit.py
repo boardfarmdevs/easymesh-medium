@@ -21,13 +21,13 @@ STACKS = {
         "containers": ["bpibroadband", "bpiap", "bpiap-001", "bpiap-002", "bpiap-003"],
         "socket": "/run/meta-cmf-wmediumd/metrics/control.sock",
         "manifest": "/run/meta-cmf-wmediumd/wmediumd-binary.sha256",
-        "patches": ("gen/hwsim/patches", "gen/wmediumd/patches"),
+        "patches": (),
     },
     "prplmesh": {
         "containers": ["prpl-controller"] + [f"prpl-agent-{index:02d}" for index in range(1, 5)],
         "socket": "/run/prpl-wmediumd/metrics.sock",
         "manifest": "/run/prpl-wmediumd/wmediumd-binary.sha256",
-        "patches": ("patches/hwsim", "patches/wmediumd", "patches/prplmesh"),
+        "patches": ("patches/prplmesh",),
     },
 }
 
@@ -56,6 +56,11 @@ def read_text(path: Path) -> str | None:
         return path.read_text().strip()
     except (OSError, UnicodeError):
         return None
+
+
+# easymesh-medium, the repository this module is part of, and its patch series
+MEDIUM_ROOT = Path(__file__).resolve().parents[2]
+MEDIUM_PATCHES = ("hwsim/patches", "wmediumd/patches")
 
 
 def git_command(root: Path, *arguments: str) -> dict:
@@ -263,16 +268,25 @@ def audit(stack: str, repo: Path, socket_path: str, interval: float) -> dict:
             or before["module"]["loaded_srcversion"] != after["module"]["loaded_srcversion"]
             or before["rf_contract"]["wire"]["instance_id"] != after["rf_contract"]["wire"]["instance_id"]):
         errors.append("RF provider restarted or changed during audit")
-    patches = {}
-    for directory in settings["patches"]:
-        patches[directory] = {
-            str(path.relative_to(repo)): digest(path) for path in sorted((repo / directory).glob("*.patch"))
-        }
-        if not patches[directory]:
-            errors.append(f"Missing patch provenance: {directory}")
+    def patch_digests(root: Path, directories) -> dict:
+        found = {}
+        for directory in directories:
+            found[directory] = {
+                str(path.relative_to(root)): digest(path) for path in sorted((root / directory).glob("*.patch"))
+            }
+            if not found[directory]:
+                errors.append(f"Missing patch provenance: {directory}")
+        return found
+    # the lab's own patches (the stack's) and the medium's (this repository's)
+    patches = patch_digests(repo, settings["patches"])
+    medium_root = MEDIUM_ROOT
+    medium_patches = patch_digests(medium_root, MEDIUM_PATCHES)
     git_revision = git_command(repo, "rev-parse", "HEAD")
     if git_revision["returncode"] != 0:
         errors.append("Repository revision unavailable")
+    medium_revision = git_command(medium_root, "rev-parse", "HEAD")
+    if medium_revision["returncode"] != 0:
+        errors.append("Medium revision unavailable")
     observations = [
         row["observation"] for container in containers
         for sample in container["samples"] for row in sample
@@ -287,6 +301,11 @@ def audit(stack: str, repo: Path, socket_path: str, interval: float) -> dict:
             "patches": patches,
             "audit_sha256": digest(Path(__file__)),
             "contract_sha256": digest(Path(__file__).with_name("rf_contract.py")),
+        },
+        "medium": {
+            "path": str(medium_root), "revision": medium_revision["stdout"].strip(),
+            "status": git_command(medium_root, "status", "--short"),
+            "patches": medium_patches,
         },
         "before": before, "after": after, "containers": containers,
         "summary": {

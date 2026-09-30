@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
+repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.. && pwd)
 tmp=$(mktemp -d)
 trap 'rm -rf -- "$tmp"' EXIT
 
@@ -54,7 +54,7 @@ esac
 FAKE_LXC
 chmod 0755 "$tmp/bin/lxc"
 
-if PATH="$tmp/bin:$PATH" "$repo/gen/wmediumd/gen-config.sh" 40 \
+if PATH="$tmp/bin:$PATH" "$repo/wmediumd/gen-config.sh" 40 \
         >"$tmp/incomplete.cfg" 2>"$tmp/incomplete.err"; then
     echo "FAIL: incomplete managed radio inventory was accepted" >&2
     exit 1
@@ -63,7 +63,7 @@ grep -q 'managed containers are missing active hwsim radios' "$tmp/incomplete.er
 grep -q 'wlan-client' "$tmp/incomplete.err"
 
 PATH="$tmp/bin:$PATH" WMEDIUMD_ALLOW_INCOMPLETE_RADIOS=1 \
-    "$repo/gen/wmediumd/gen-config.sh" 40 >"$tmp/subset.cfg"
+    "$repo/wmediumd/gen-config.sh" 40 >"$tmp/subset.cfg"
 grep -q '42:00:00:00:01:00' "$tmp/subset.cfg"
 if grep -q '42:00:00:00:02:00' "$tmp/subset.cfg"; then
     echo "FAIL: inactive client appeared in intentional subset" >&2
@@ -71,13 +71,13 @@ if grep -q '42:00:00:00:02:00' "$tmp/subset.cfg"; then
 fi
 
 PATH="$tmp/bin:$PATH" FAKE_CLIENT_ACTIVE=1 \
-    "$repo/gen/wmediumd/gen-config.sh" 40 >"$tmp/complete.cfg"
+    "$repo/wmediumd/gen-config.sh" 40 >"$tmp/complete.cfg"
 grep -q '42:00:00:00:01:00' "$tmp/complete.cfg"
 grep -q '42:00:00:00:02:00' "$tmp/complete.cfg"
 
 # guests: every radio at the default SNR, plus the links they pin
 PATH="$tmp/bin:$PATH" FAKE_CLIENT_ACTIVE=1 FAKE_GUESTS=1 FAKE_LINKS='wlan1=em-gtp/wlan0:45' \
-    "$repo/gen/wmediumd/gen-config.sh" 8 >"$tmp/guests.cfg"
+    "$repo/wmediumd/gen-config.sh" 8 >"$tmp/guests.cfg"
 for id in 42:00:00:00:03:00 42:00:00:00:04:00 42:00:00:00:05:00; do
     grep -q "$id" "$tmp/guests.cfg"
 done
@@ -89,26 +89,26 @@ if grep -q '(3, 2, ' "$tmp/guests.cfg"; then
     exit 1
 fi
 if PATH="$tmp/bin:$PATH" FAKE_CLIENT_ACTIVE=1 FAKE_GUESTS=1 FAKE_LINKS='wlan1=em-gtp:45' \
-        "$repo/gen/wmediumd/gen-config.sh" 8 >/dev/null 2>"$tmp/bad.err"; then
+        "$repo/wmediumd/gen-config.sh" 8 >/dev/null 2>"$tmp/bad.err"; then
     echo "FAIL: a malformed guest link was accepted" >&2
     exit 1
 fi
 # a pod's Wi-Fi backhaul pinned to a lab mesh node: its one radio (index 0)
 PATH="$tmp/bin:$PATH" FAKE_CLIENT_ACTIVE=1 FAKE_GUESTS=1 FAKE_LINKS='wlan1=bpibroadband/wifi1:40' \
-    "$repo/gen/wmediumd/gen-config.sh" 8 >"$tmp/mesh-peer.cfg"
+    "$repo/wmediumd/gen-config.sh" 8 >"$tmp/mesh-peer.cfg"
 grep -q '(4, 0, 40)' "$tmp/mesh-peer.cfg"
 grep -q '(0, 4, 40)' "$tmp/mesh-peer.cfg"
 # an extender with a wired backhaul: no RF to the other mesh nodes (indices: bpiap 0, bpibroadband 1)
 PATH="$tmp/bin:$PATH" FAKE_CLIENT_ACTIVE=1 FAKE_EXTENDER=1 \
-    "$repo/gen/wmediumd/gen-config.sh" 40 >"$tmp/wireless-extender.cfg"
+    "$repo/wmediumd/gen-config.sh" 40 >"$tmp/wireless-extender.cfg"
 grep -q '(0, 1, 50)' "$tmp/wireless-extender.cfg"
 PATH="$tmp/bin:$PATH" FAKE_CLIENT_ACTIVE=1 FAKE_EXTENDER=1 FAKE_BPIAP_BACKHAUL=wired \
-    "$repo/gen/wmediumd/gen-config.sh" 40 >"$tmp/wired-extender.cfg"
+    "$repo/wmediumd/gen-config.sh" 40 >"$tmp/wired-extender.cfg"
 grep -q '(0, 1, -20)' "$tmp/wired-extender.cfg"
 grep -q '(1, 0, -20)' "$tmp/wired-extender.cfg"
 # a radio that is not up yet: the link is skipped, the rest of the medium stands
 PATH="$tmp/bin:$PATH" FAKE_CLIENT_ACTIVE=1 FAKE_GUESTS=1 FAKE_LINKS='wlan9=em-gtp/wlan0:45' \
-    "$repo/gen/wmediumd/gen-config.sh" 8 >"$tmp/pending.cfg" 2>"$tmp/pending.err"
+    "$repo/wmediumd/gen-config.sh" 8 >"$tmp/pending.cfg" 2>"$tmp/pending.err"
 grep -q 'skipped' "$tmp/pending.err"
 grep -q '42:00:00:00:05:00' "$tmp/pending.cfg"
 

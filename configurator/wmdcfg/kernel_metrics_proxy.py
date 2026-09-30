@@ -157,7 +157,7 @@ def handle_frame(frame: bytes, client_factory=KernelMediumClient) -> bytes:
         return _response(opcode, status_code, 0)
 
 
-def serve(path: Path) -> None:
+def serve(path: Path, aliases: Path | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         path.unlink()
@@ -187,7 +187,10 @@ def serve(path: Path) -> None:
                     frame = connection.recv(MAX_FRAME)
                     if not frame:
                         break
-                    connection.sendall(handle_frame(frame))
+                    factory = lambda **values: KernelMediumClient(
+                        alias_path=str(aliases) if aliases else None, **values
+                    )
+                    connection.sendall(handle_frame(frame, factory))
     finally:
         server.close()
         try:
@@ -204,8 +207,12 @@ def main(argv: list[str] | None = None) -> int:
         "--socket", type=Path,
         default=Path("/run/meta-cmf-wmediumd/metrics/control.sock"),
     )
+    parser.add_argument(
+        "--aliases", type=Path,
+        help="JSON mapping from live VIF/BSSID MACs to permanent hwsim radios",
+    )
     args = parser.parse_args(argv)
-    serve(args.socket)
+    serve(args.socket, args.aliases)
     return 0
 
 

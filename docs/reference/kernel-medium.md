@@ -18,7 +18,7 @@ counters with a calibrated physical wireless cell.
 
 ## Selection and qualification
 
-Use [hwsim build instructions](../../../../gen/hwsim/README.md) for the module
+Use [hwsim build instructions](../../hwsim/README.md) for the module
 and [configurator](configurator.md) for the backend contract. Stop the room and
 native lab safely before changing the radio backend; never unload a module
 while a running container owns its radios.

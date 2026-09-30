@@ -12,11 +12,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/gen/wmediumd/observer/internal/artifacts"
-	"github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/gen/wmediumd/observer/internal/explorer"
-	"github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/gen/wmediumd/observer/internal/httpapi"
-	"github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/gen/wmediumd/observer/internal/state"
-	consoleweb "github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/gen/wmediumd/observer/web"
+	"github.com/boardfarmdevs/easymesh-medium/observer/internal/artifacts"
+	"github.com/boardfarmdevs/easymesh-medium/observer/internal/explorer"
+	"github.com/boardfarmdevs/easymesh-medium/observer/internal/httpapi"
+	"github.com/boardfarmdevs/easymesh-medium/observer/internal/state"
+	consoleweb "github.com/boardfarmdevs/easymesh-medium/observer/web"
 )
 
 func main() {

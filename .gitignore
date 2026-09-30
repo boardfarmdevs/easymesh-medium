@@ -1,0 +1,7 @@
+# build outputs and the upstream checkout
+/wmediumd/src/
+/wmediumd/build/
+__pycache__/
+.pytest_cache/
+/observer/wmediumd-console
+/hwsim/build/

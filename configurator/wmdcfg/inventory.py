@@ -9,18 +9,17 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
+from . import stacks
 from .model import ScenarioError
 
 
-MESH_NAME = re.compile(r"^(bpibroadband|bpiap(?:-\d{3})?)$")
-CLIENT_NAME = re.compile(r"^wlan-client(?:-\d{3})?$")
-# OpenSync pods handed to the controller by the EMOSA adapter (emosa-lab
-# deploy/rdk-lab). They are mesh nodes like the lab's own, but carry only the
-# bands on which they serve an AP; their backhaul station is not a room radio.
-ADAPTER_NAME = re.compile(r"^pod-\d+$")
+# The lab's container names come from its stack (wmdcfg.stacks). An adapter-managed
+# pod (an OpenSync pod through EMOSA) carries only the bands on which it serves an
+# AP; its backhaul station is recorded apart: in the geometry rooms its links to the
+# native APs' 5 GHz radios follow the room.
 
 
-def _run(*args: str, attempts: int = 2, timeout_seconds: float = 4.0) -> str:
+def _run(*args: str, attempts: int = 2, timeout_seconds: float = 5.0) -> str:
     """Run a read-only inventory probe with bounded LXC transport recovery."""
     if attempts < 1:
         raise ValueError("attempts must be positive")
@@ -108,7 +107,37 @@ def _permanent_radios(container: str) -> dict[str, str]:
     return result
 
 
-def discover(client_names: set[str] | None = None) -> dict[str, Any]:
+def _backhaul_station(
+    name: str, interfaces: list[dict[str, Any]], permanent_by_phy: dict[str, str]
+) -> dict[str, Any] | None:
+    """A pod's backhaul station, or None: its station on the radio that serves no AP
+    (OpenSync keeps a bhaul-sta-* on every radio; the fronthaul radio's is idle)."""
+    serving = {item.get("phy") for item in interfaces if item.get("type") == "AP" and item.get("ssid")}
+    stations = [
+        item for item in interfaces
+        if item.get("type") == "managed" and item.get("phy") in permanent_by_phy
+        and item.get("phy") not in serving
+    ]
+    if len(stations) != 1:
+        return None
+    station = stations[0]
+    link = _exec(name, f"iw dev {station['name']} link 2>/dev/null || true")
+    parent = re.search(r"Connected to ([0-9a-f:]{17})", link, re.I)
+    frequency = re.search(r"^\s*freq:\s*(\d+)", link, re.M)
+    permanent = permanent_by_phy[station["phy"]]
+    return {
+        "interface": station["name"],
+        "phy": station["phy"],
+        "permanent_mac": permanent,
+        "tx_mac": _tx_mac(permanent),
+        "station_mac": station.get("mac"),
+        "parent": parent.group(1).lower() if parent else None,
+        "frequency_mhz": int(frequency.group(1)) if frequency else station.get("frequency_mhz"),
+    }
+
+
+def discover(client_names: set[str] | None = None, stack: str | None = None) -> dict[str, Any]:
+    lab = stacks.get(stack)
     # A scaled lab intentionally retains stopped containers across cold-start
     # reconstruction and extender-outage tests.  ``lxc exec`` cannot inspect a
     # stopped instance, so inventory must describe the active RF world rather
@@ -120,10 +149,10 @@ def discover(client_names: set[str] | None = None) -> dict[str, Any]:
             for name, _, state in [line.partition(",")]
             if state.strip().upper() == "RUNNING"
             and (
-                MESH_NAME.fullmatch(name)
-                or ADAPTER_NAME.fullmatch(name)
+                lab.mesh.fullmatch(name)
+                or (lab.adapter is not None and lab.adapter.fullmatch(name))
                 or (
-                    CLIENT_NAME.fullmatch(name)
+                    lab.client.fullmatch(name)
                     and (client_names is None or name in client_names)
                 )
             )
@@ -131,14 +160,14 @@ def discover(client_names: set[str] | None = None) -> dict[str, Any]:
         key=lambda name: [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", name)],
     )
     if not names:
-        raise ScenarioError("no active EasyMesh or WLAN client containers found")
+        raise ScenarioError(f"no active {lab.label} or WLAN client containers found")
 
     def inspect(name: str) -> dict[str, Any]:
         permanent_by_phy = _permanent_radios(name)
         if not permanent_by_phy:
             raise ScenarioError(f"{name}: no hwsim radio found")
         interfaces = _parse_iw(_exec(name, "iw dev 2>/dev/null"))
-        if CLIENT_NAME.fullmatch(name):
+        if lab.client.fullmatch(name):
             permanent = next(iter(permanent_by_phy.values()))
             wlan = next(
                 (item for item in interfaces if item.get("name") == "wlan0"),
@@ -177,7 +206,7 @@ def discover(client_names: set[str] | None = None) -> dict[str, Any]:
         # RDK's hwsim HAL deliberately presents all three logical radios as
         # VIFs of one passed-through hwsim PHY. Preserve that single stable
         # station identity while recording the one live frequency per band.
-        adapter = bool(ADAPTER_NAME.fullmatch(name))
+        adapter = bool(lab.adapter is not None and lab.adapter.fullmatch(name))
         band_radios: dict[str, dict[str, Any]] = {}
         for phy, permanent in permanent_by_phy.items():
             phy_interfaces = [
@@ -206,11 +235,13 @@ def discover(client_names: set[str] | None = None) -> dict[str, Any]:
                         if _band(item.get("frequency_mhz")) == band
                     ],
                 }
+        backhaul_station = None
         if adapter:
             # An adapter-managed pod: only the bands it serves as an AP.
             if not band_radios:
                 raise ScenarioError(f"{name}: no operating AP radio")
             default = band_radios[sorted(band_radios)[0]]
+            backhaul_station = _backhaul_station(name, interfaces, permanent_by_phy)
         elif set(band_radios) != {"2.4", "5", "6"}:
             raise ScenarioError(
                 f"{name}: expected tri-band radio inventory, found {sorted(band_radios)}"
@@ -229,6 +260,7 @@ def discover(client_names: set[str] | None = None) -> dict[str, Any]:
             "container": name,
             "kind": "mesh",
             **({"adapter": "emosa"} if adapter else {}),
+            **({"backhaul_station": backhaul_station} if backhaul_station else {}),
             **({"backhaul": "wired"} if wired else {}),
             **({"wired_guard": "hal"} if guarded else {}),
             "permanent_mac": default["permanent_mac"],
@@ -245,6 +277,7 @@ def discover(client_names: set[str] | None = None) -> dict[str, Any]:
         radios = list(executor.map(inspect, names))
     return {
         "schema": "wmdcfg.inventory.v1",
+        **({"backend": lab.inventory_backend} if lab.inventory_backend else {}),
         "captured_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "radios": radios,
     }

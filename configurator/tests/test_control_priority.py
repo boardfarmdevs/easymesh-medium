@@ -409,7 +409,7 @@ class WebsocketTests(unittest.TestCase):
 
 class InstallerTests(unittest.TestCase):
     def test_shell_installs_one_restarting_service_without_enabling_nodes(self):
-        installer = Path(__file__).resolve().parents[2] / "install-control-priority.sh"
+        installer = Path(__file__).resolve().parents[2] / "wmediumd" / "install-control-priority.sh"
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for tool in ("id", "python3", "nsenter", "nft", "systemctl"):
@@ -437,20 +437,12 @@ class InstallerTests(unittest.TestCase):
                              ["daemon-reload", "enable wmdcfg-control-priority.service"] * 2)
 
     def test_startup_zero_clears_all_intent_and_opt_in_starts_installed_watcher(self):
-        shared_root = Path(__file__).resolve().parents[3]
-        prpl = shared_root / "scripts/radio-lab.sh"
-        if prpl.exists():
-            source = prpl.read_text()
-            body = "configure_control_priority()\n" + source.split(
-                "configure_control_priority()\n", 1)[1].split("\nstart_agent()", 1)[0]
-            body += "\nconfigure_control_priority --node prpl-agent-04\n"
-            stack = "prplmesh"
-        else:
-            source = (shared_root / "wmediumd/wmediumd-up.sh").read_text()
-            body = '    if [ -n "$PRIORITY_FLAG" ]; then\n' + source.split(
-                '    if [ -n "$PRIORITY_FLAG" ]; then\n', 1)[1].split(
-                    "    stop_running_wmediumd", 1)[0]
-            stack = "rdk"
+        # the medium's launcher (a lab's own launcher is tested in that lab)
+        source = (Path(__file__).resolve().parents[2] / "wmediumd/wmediumd-up.sh").read_text()
+        body = '    if [ -n "$PRIORITY_FLAG" ]; then\n' + source.split(
+            '    if [ -n "$PRIORITY_FLAG" ]; then\n', 1)[1].split(
+                "    stop_running_wmediumd", 1)[0]
+        stack = "rdk"
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             intent = root / f"{stack}.json"
@@ -471,7 +463,7 @@ sudo() { "$@"; }
                 calls = root / "calls"
                 calls.write_text("")
                 result = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
-                                        env={**os.environ, "ROOT": directory, "HERE": directory,
+                                        env={**os.environ, "ROOT": directory, "HERE": directory, "MEDIUM": directory,
                                              "MEDIUM_BACKEND": "userspace", "INTENT": str(intent),
                                              "CALLS": str(calls), "WMEDIUMD_PRIORITY_QUEUES": mode,
                                              "PRIORITY_FLAG": "-Q" if mode == "1" else ""}, timeout=5)

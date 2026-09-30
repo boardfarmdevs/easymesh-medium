@@ -12,7 +12,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/gen/wmediumd/observer/internal/model"
+	"github.com/boardfarmdevs/easymesh-medium/observer/internal/model"
 )
 
 func TestIntegerPrecision(tester *testing.T) {

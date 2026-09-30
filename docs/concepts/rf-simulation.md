@@ -110,9 +110,9 @@ No single surface is sufficient for an optimizer claim.
 
 ## Detailed documentation
 
-- [wmediumd internals](../reference/radio/wmediumd-internals.md)
-- [wmediumd configurator](../reference/radio/configurator.md)
-- [wmediumd Console](../reference/radio/console.md)
-- [Experiment catalog](../experiments/README.md)
-- [Optimizer](optimizer.md)
-- [Metrics](../reference/observability/metrics.md)
+- [wmediumd internals](../reference/wmediumd-internals.md)
+- [wmediumd configurator](../reference/configurator.md)
+- [wmediumd Console](../reference/console.md)
+- [Experiment catalog](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/experiments/README.md)
+- [Optimizer](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/concepts/optimizer.md)
+- [Metrics](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/observability/metrics.md)

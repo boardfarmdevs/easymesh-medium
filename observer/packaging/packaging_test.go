@@ -56,14 +56,14 @@ func TestInstallerConsumesPrebuiltBinaryWithoutDiscovery(t *testing.T) {
 }
 
 func TestMediumStartupPublishesIdentityInventory(t *testing.T) {
-	startup, err := os.ReadFile("../../wmediumd-up.sh")
+	startup, err := os.ReadFile("../../wmediumd/wmediumd-up.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(startup)
 	for _, want := range []string{
 		"IDENTITY=${WMEDIUMD_IDENTITY_INVENTORY:-$RUNTIME/identity-inventory.json}",
-		"IDENTITY_GENERATOR=${WMEDIUMD_IDENTITY_GENERATOR:-$HERE/observer/generate-identity-inventory.sh}",
+		"IDENTITY_GENERATOR=${WMEDIUMD_IDENTITY_GENERATOR:-$MEDIUM/observer/generate-identity-inventory.sh}",
 		`"$IDENTITY_GENERATOR" --output "$IDENTITY"`,
 	} {
 		if !strings.Contains(text, want) {

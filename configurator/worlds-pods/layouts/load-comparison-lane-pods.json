@@ -5,7 +5,8 @@
     "clients-10",
     "guarded-comparison",
     "native-load",
-    "opensync-pods"
+    "opensync-pods",
+    "wired-extender"
   ],
   "space": {
     "width_m": 50,
@@ -160,6 +161,15 @@
         45,
         4
       ]
+    },
+    {
+      "role": "extender_5",
+      "kind": "fronthaul_ap",
+      "position": [
+        50,
+        12
+      ],
+      "backhaul": "wired"
     }
   ]
 }

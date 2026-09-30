@@ -7,7 +7,7 @@ native world (../worlds) plus extender_5, a tri-band fronthaul_ap with backhaul
 
 Same world IDs, layouts NAME-wired, mobility as the native world; and the rooms
 about the wired extender itself (WIRED_ROOMS), whose scripts are in the shared
-mobility tree. The pod rooms with the wired extender (../worlds-pods-wired) take
+mobility tree. The rooms with the OpenSync pods (../worlds-pods) take
 its position and checks from here.
 """
 import copy

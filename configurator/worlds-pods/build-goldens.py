@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""Build or check the pod-variant rooms: every native Golden World with two
-OpenSync pods (EMOSA adapter) added as APs.
+"""Build or check the rooms with the two OpenSync pods (EMOSA adapter): the lab's
+standard rooms (../worlds-wired: the four Wi-Fi extenders and extender_5 on a wired
+backhaul) with the pods added as APs.
 
     python3 worlds-pods/build-goldens.py [--check|--write]
 
-Each native golden (../worlds/golden/ID.world.json) names its layout and
-mobility. The pod variant uses the same mobility, the native layout plus the
-pods at pod-positions.json, as layout NAME-pods, and keeps the world ID, so a
-test that addresses a room by ID runs the pod variant when pointed at this root.
+Each native golden (../worlds/golden/ID.world.json) names its layout and mobility,
+and the rooms about the wired extender (worlds-wired WIRED_ROOMS) name theirs. The
+pod variant uses the same mobility, the layout plus the pods at pod-positions.json
+and extender_5 where it stands in the standard rooms, as layout NAME-pods, and keeps
+the world ID: the same rooms as ../worlds-wired, under the same IDs.
 """
 import copy
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -52,18 +55,31 @@ def pods_off_band_paths(world: dict) -> list[str]:
     return problems
 
 
+def _wired():
+    """The standard rooms' wired extender: positions, layout and band-steering check."""
+    spec = importlib.util.spec_from_file_location("wired_goldens", HERE.parent / "worlds-wired" / "build-goldens.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def build() -> dict[str, str]:
     positions = load_json(HERE / "pod-positions.json")["layouts"]
+    wired = _wired()
+    wired_positions = wired.positions()
+    rooms = [(load_json(path)["layout"], load_json(path)["mobility"], path.name)
+             for path in sorted((NATIVE / "golden").glob("*.world.json"))]
+    rooms += [(name, mobility, f"{output}.world.json") for name, mobility, output in wired.WIRED_ROOMS]
     files = {}
-    for path in sorted((NATIVE / "golden").glob("*.world.json")):
-        native = load_json(path)
-        layout = pod_layout(load_json(NATIVE / "layouts" / f"{native['layout']}.json"), positions[native["layout"]])
+    for name, mobility, output in rooms:
+        layout = wired.wired_layout(pod_layout(load_json(NATIVE / "layouts" / f"{name}.json"), positions[name]),
+                                    wired_positions[name], "-pods")
         files[f"layouts/{layout['name']}.json"] = json.dumps(layout, indent=2) + "\n"
-        world = compile_world(layout, load_json(NATIVE / "mobility" / f"{native['mobility']}.json"))
-        problems = pods_off_band_paths(world)
+        world = compile_world(layout, load_json(NATIVE / "mobility" / f"{mobility}.json"))
+        problems = pods_off_band_paths(world) + wired.wired_off_band_paths(world)
         if problems:
-            raise SystemExit("pods on a band-steered path:\n  " + "\n  ".join(problems[:5]))
-        files[f"golden/{path.name}"] = json.dumps(world, separators=(",", ":"), sort_keys=True) + "\n"
+            raise SystemExit("APs on a band-steered path:\n  " + "\n  ".join(problems[:5]))
+        files[f"golden/{output}"] = json.dumps(world, separators=(",", ":"), sort_keys=True) + "\n"
     return files
 
 

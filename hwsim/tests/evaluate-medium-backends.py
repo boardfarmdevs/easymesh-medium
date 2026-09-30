@@ -82,10 +82,14 @@ def cpu_delta(before: dict[str, int], after: dict[str, int]) -> dict[str, float]
     }
 
 
+# the medium binary this run starts (--wmediumd); cleanup stops only processes of that name
+MEDIUM_NAME = "wmediumd"
+
+
 def cleanup() -> None:
     run("pkill", "-x", "iperf3", check=False, stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL)
-    run("pkill", "-x", "wmediumd.patched", check=False,
+    run("pkill", "-x", MEDIUM_NAME, check=False,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     run("ip", "netns", "del", "kmsta", check=False,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -383,7 +387,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--wmediumd", type=Path,
-        default=ROOT / "wmediumd" / "wmediumd.patched",
+        default=ROOT / "wmediumd" / "build" / "wmediumd",
     )
     parser.add_argument("--duration", type=int, default=10)
     parser.add_argument("--rate", default="20M")
@@ -394,6 +398,8 @@ def main() -> int:
     )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    global MEDIUM_NAME
+    MEDIUM_NAME = args.wmediumd.name
     if os.geteuid() != 0:
         parser.error("run as root inside an isolated VM")
     if not args.module.is_file() or not args.wmediumd.is_file():

@@ -7,12 +7,13 @@
 #   ./wmediumd-up.sh down     # stop it (kernel reverts to its built-in medium)
 #   ./wmediumd-up.sh status
 #
-# Requires: the pool loaded with a guard-removed module (gen/hwsim/build-hwsim.sh)
+# Requires: the pool loaded with a guard-removed module (hwsim/build-hwsim.sh)
 # if channels>1 -- stock mac80211_hwsim returns -EOPNOTSUPP to REGISTER at
 # channels>1. WMEDIUMD env overrides the binary (default: committed prebuilt).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
-WMD=${WMEDIUMD:-$HERE/wmediumd.patched}
+MEDIUM=$(cd "$HERE/.." && pwd)  # easymesh-medium: configurator/ and observer/ are here
+WMD=${WMEDIUMD:-$HERE/build/wmediumd}
 [ -x "$WMD" ] || WMD=$HERE/src/wmediumd/wmediumd
 CONTROL=${WMEDIUMD_CONTROL:-/run/wmediumd-control.sock}
 CONTROL_GROUP=${WMEDIUMD_CONTROL_GROUP:-lxd}
@@ -23,7 +24,7 @@ OBSERVER_DIR=${WMEDIUMD_OBSERVER_DIR:-$RUNTIME/observer}
 OBSERVER=${WMEDIUMD_OBSERVER_SOCKET:-$OBSERVER_DIR/telemetry.sock}
 IDENTITY=${WMEDIUMD_IDENTITY_INVENTORY:-$RUNTIME/identity-inventory.json}
 DAEMON_MANIFEST=${WMEDIUMD_DAEMON_MANIFEST:-$RUNTIME/wmediumd-binary.sha256}
-IDENTITY_GENERATOR=${WMEDIUMD_IDENTITY_GENERATOR:-$HERE/observer/generate-identity-inventory.sh}
+IDENTITY_GENERATOR=${WMEDIUMD_IDENTITY_GENERATOR:-$MEDIUM/observer/generate-identity-inventory.sh}
 CFG=${CFG:-$RUNTIME/wmediumd.cfg}
 PIDF=${WMEDIUMD_PIDFILE:-$RUNTIME/wmediumd.pid}
 LOG=${WMEDIUMD_LOG:-$RUNTIME/wmediumd.log}
@@ -74,11 +75,11 @@ find_running_wmediumd() {
     local pattern="$1" pids
     pids=$(sudo pgrep -f "$pattern" 2>/dev/null || true)
     # Releases before the control API was added were started as
-    #   /home/<user>/.../gen/wmediumd/wmediumd.patched -c <config>
+    #   /home/<user>/.../wmediumd/build/wmediumd -c <config>
     # and therefore cannot be found through CONTROL.  Include only that
     # lab-specific executable shape so an unrelated packaged wmediumd remains
     # outside our lifecycle management.
-    pids="$pids $(sudo pgrep -f '^/home/[^[:space:]]+/.*/gen/wmediumd/wmediumd\.patched[[:space:]]+-c[[:space:]]+' 2>/dev/null || true)"
+    pids="$pids $(sudo pgrep -f '^/home/[^[:space:]]+/.*/wmediumd/wmediumd\.patched[[:space:]]+-c[[:space:]]+' 2>/dev/null || true)"
     if [ -S "$CONTROL" ] && command -v fuser >/dev/null 2>&1; then
         pids="$pids $(sudo fuser "$CONTROL" 2>/dev/null || true)"
     fi
@@ -119,12 +120,12 @@ case "${1:-up}" in
     echo ">> preflight radio inventory"
     "$HERE/gen-config.sh" "${SNR:-40}" >/dev/null
     if [ -n "$PRIORITY_FLAG" ]; then
-        sudo python3 "$HERE/configurator/wmdcfg/control_priority.py" --stack rdk --enable
+        sudo python3 "$MEDIUM/configurator/wmdcfg/control_priority.py" --stack rdk --enable
         if [ -f /etc/systemd/system/wmdcfg-control-priority.service ]; then
             sudo systemctl start wmdcfg-control-priority.service
         fi
     elif [ -f /var/lib/wmdcfg-control-priority/rdk.json ]; then
-        sudo python3 "$HERE/configurator/wmdcfg/control_priority.py" --stack rdk --disable
+        sudo python3 "$MEDIUM/configurator/wmdcfg/control_priority.py" --stack rdk --disable
     fi
     stop_running_wmediumd
     # Pool vifs are created administratively UP even while unused.  They are not

@@ -1,6 +1,6 @@
 {
   "schema": "easymesh.wired-extender-positions.v1",
-  "description": "Where the lab's extender on a wired backhaul (extender_5: bpiap-004, gen/wired-extender.sh) stands in each native layout: an edge or corner the native APs and the OpenSync pods (worlds-pods-wired) leave free; in the courtyard west of its isolation wall, behind the partition, so that backhaul-isolation-recovery still isolates extender_4 and backhaul-parent-handover still hands over to extender_2. build-goldens.py checks that it comes no closer than 3 dB to the best native AP of a band-steered client, on any band.",
+  "description": "Where the lab's extender on a wired backhaul (extender_5: bpiap-004 in the RDK lab, prpl-agent-05 in the prplMesh lab) stands in each native layout: an edge or corner the native APs and the OpenSync pods (worlds-pods) leave free; in the courtyard west of its isolation wall, behind the partition, so that backhaul-isolation-recovery still isolates extender_4 and backhaul-parent-handover still hands over to extender_2. build-goldens.py checks that it comes no closer than 3 dB to the best native AP of a band-steered client, on any band.",
   "layouts": {
     "home-five-agent": {"extender_5": [20, 7]},
     "home-five-agent-shifted": {"extender_5": [0, 0]},

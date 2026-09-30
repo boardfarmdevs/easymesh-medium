@@ -11,7 +11,7 @@ def inline(value):
     value = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", value)
     def link(match):
         target = match[2]
-        pages = {"wmediumd-console-ng.md": "/ng/manual.html",
+        pages = {"guide.md": "/ng/manual.html", "wmediumd-console-ng.md": "/ng/manual.html",
                  "console-rf-properties.md": "/ng/rf-properties.html"}
         destination = pages.get(target.split("#")[0].rsplit("/", 1)[-1])
         if destination and "#" in target:
@@ -63,18 +63,26 @@ def render(source):
 
 
 if __name__ == "__main__":
+    # Regenerates the console's manual pages from docs/, and with OPTIMIZER_DIR
+    # also the RF catalog (web/ng and the room viewer), whose property list comes
+    # from a lab's optimizer (meta-cmf-bananapi-vcpe gen/optimizer):
+    #   python3 observer/build-manual.py [OPTIMIZER_DIR]
+    # Without it the committed catalog is kept.
     here = Path(__file__).resolve().parent
-    sys.path[:0] = [str(here.parents[1] / "optimizer"), str(here.parent / "configurator")]
-    from optimizer.rf_observations import property_catalog
-    from wmdcfg.protocol_registry import protocol_registry
-    catalog = json.dumps({**property_catalog(), "protocol": protocol_registry()}, indent=2) + "\n"
-    (here / "web/ng/rf-catalog.json").write_text(catalog)
-    (here.parent / "configurator/worlds/viewer/rf-catalog.json").write_text(catalog)
+    if len(sys.argv) > 2:
+        raise SystemExit("usage: build-manual.py [OPTIMIZER_DIR]")
+    if len(sys.argv) == 2:
+        sys.path[:0] = [str(Path(sys.argv[1]).resolve()), str(here.parent / "configurator")]
+        from optimizer.rf_observations import property_catalog
+        from wmdcfg.protocol_registry import protocol_registry
+        catalog = json.dumps({**property_catalog(), "protocol": protocol_registry()}, indent=2) + "\n"
+        (here / "web/ng/rf-catalog.json").write_text(catalog)
+        (here.parent / "configurator/worlds/viewer/rf-catalog.json").write_text(catalog)
     for document, filename in [
-        ("guide/wmediumd-console-ng.md", "manual.html"),
-        ("reference/radio/console-rf-properties.md", "rf-properties.html"),
+        ("console/guide.md", "manual.html"),
+        ("reference/console-rf-properties.md", "rf-properties.html"),
     ]:
-        source = (here.parents[2] / "doc/easymesh" / document).read_text()
+        source = (here.parent / "docs" / document).read_text()
         contents = render(source)
         sections = re.findall(r'<h2 id="([^"]+)">([^<]+)</h2>', contents)
         index = '<details><summary>On this page</summary><ul>' + "".join(

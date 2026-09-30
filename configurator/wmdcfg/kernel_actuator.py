@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import json
 import re
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -72,12 +73,14 @@ class KernelMediumClient:
         noise_floor_dbm: int = -91,
         lock_path: str = "/run/hwsim-kernel-medium.lock",
         parameters_root: str = "/sys/module/mac80211_hwsim/parameters",
+        alias_path: str | None = None,
         locking: bool = True,
     ):
         self.root = Path(root)
         self.noise_floor_dbm = noise_floor_dbm
         self.lock_path = Path(lock_path)
         self.parameters_root = Path(parameters_root)
+        self.alias_path = Path(alias_path) if alias_path else None
         self.locking = locking
         self._connected = False
         self.instance_id: str | None = None
@@ -136,6 +139,24 @@ class KernelMediumClient:
         except OSError as error:
             raise ActuatorError("cannot identify the loaded hwsim module") from error
         return hashlib.sha256(f"{boot}:{source}".encode()).hexdigest()[:32]
+
+    def _resolve_identity(self, value: str) -> str:
+        identity = value.lower()
+        if self.alias_path is None:
+            return identity
+        try:
+            document = json.loads(self.alias_path.read_text())
+            aliases = document.get("aliases", {})
+        except (OSError, ValueError) as error:
+            raise ActuatorError(
+                f"cannot read kernel-medium identity aliases from {self.alias_path}"
+            ) from error
+        if not isinstance(aliases, dict):
+            raise ActuatorError("kernel-medium identity aliases must be an object")
+        resolved = str(aliases.get(identity, identity)).lower()
+        if not re.fullmatch(r"[0-9a-f:]{17}", resolved):
+            raise ActuatorError(f"invalid kernel-medium identity alias for {value}")
+        return resolved
 
     def _radios(self) -> dict[str, _Radio]:
         result: dict[str, _Radio] = {}
@@ -272,6 +293,8 @@ class KernelMediumClient:
         self, source: str, destination: str, frequency_mhz: int
     ) -> tuple[int, int, bool]:
         radios = self._radios()
+        source = self._resolve_identity(source)
+        destination = self._resolve_identity(destination)
         if source not in radios or destination not in radios:
             raise ActuatorError(f"kernel-medium identity absent: {source} -> {destination}")
         band = _band(int(frequency_mhz))
@@ -309,8 +332,8 @@ class KernelMediumClient:
             normalized = []
             for item in updates:
                 update = {
-                    "source": item["source"].lower(),
-                    "destination": item["destination"].lower(),
+                    "source": self._resolve_identity(item["source"]),
+                    "destination": self._resolve_identity(item["destination"]),
                     "frequency_mhz": int(item["frequency_mhz"]),
                     "value": int(item.get("value", 0)),
                     "override": bool(item.get("override", True)),
@@ -331,20 +354,29 @@ class KernelMediumClient:
     def apply(self, generation: int, updates: list[dict]) -> list[dict]:
         normalized = [
             {
-                "source": item["source"].lower(),
-                "destination": item["destination"].lower(),
+                "source": self._resolve_identity(item["source"]),
+                "destination": self._resolve_identity(item["destination"]),
                 "value": int(item["value"]),
             }
             for item in updates
         ]
-        frequency_updates = [
-            {
-                **item,
-                "frequency_mhz": frequency,
-                "override": True,
-            }
-            for item in normalized
-            for frequency in BAND_FREQUENCY.values()
-        ]
-        self.apply_frequency(generation, frequency_updates)
+        if not normalized:
+            raise ActuatorError("an atomic generation requires at least one update")
+        with self._writer_lock():
+            radios = self._radios()
+            desired = self._active_overrides(radios)
+            for item in normalized:
+                source = item["source"]
+                destination = item["destination"]
+                if source not in radios or destination not in radios:
+                    raise ActuatorError(
+                        f"kernel-medium identity absent: {source} -> {destination}"
+                    )
+                for band in BAND_FREQUENCY:
+                    key = (source, destination, band)
+                    if item["value"] == self._default_snr(radios[destination]):
+                        desired.pop(key, None)
+                    else:
+                        desired[key] = (self._signal(item["value"]), 0)
+            self._commit(generation, desired)
         return normalized

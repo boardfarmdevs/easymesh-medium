@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/gen/wmediumd/observer/internal/model"
+	"github.com/boardfarmdevs/easymesh-medium/observer/internal/model"
 )
 
 // Inspector caches hashes by path and file identity. Artifact failures enrich

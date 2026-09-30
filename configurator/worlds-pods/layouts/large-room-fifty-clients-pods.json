@@ -5,7 +5,8 @@
     "50-clients",
     "large-room",
     "opensync-pods",
-    "unified-capacity"
+    "unified-capacity",
+    "wired-extender"
   ],
   "space": {
     "width_m": 40,
@@ -480,6 +481,15 @@
         20,
         36
       ]
+    },
+    {
+      "role": "extender_5",
+      "kind": "fronthaul_ap",
+      "position": [
+        0,
+        20
+      ],
+      "backhaul": "wired"
     }
   ]
 }

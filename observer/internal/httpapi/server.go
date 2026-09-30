@@ -19,9 +19,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/gen/wmediumd/observer/internal/model"
-	"github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/gen/wmediumd/observer/internal/state"
-	"github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/gen/wmediumd/observer/internal/wmdproto"
+	"github.com/boardfarmdevs/easymesh-medium/observer/internal/model"
+	"github.com/boardfarmdevs/easymesh-medium/observer/internal/state"
+	"github.com/boardfarmdevs/easymesh-medium/observer/internal/wmdproto"
 )
 
 const websocketGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"

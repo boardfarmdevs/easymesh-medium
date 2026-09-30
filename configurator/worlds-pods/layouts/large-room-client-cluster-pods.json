@@ -6,7 +6,8 @@
     "five-agent",
     "large-room",
     "open-plan",
-    "opensync-pods"
+    "opensync-pods",
+    "wired-extender"
   ],
   "space": {
     "width_m": 40,
@@ -177,6 +178,15 @@
         20,
         36
       ]
+    },
+    {
+      "role": "extender_5",
+      "kind": "fronthaul_ap",
+      "position": [
+        0,
+        20
+      ],
+      "backhaul": "wired"
     }
   ]
 }

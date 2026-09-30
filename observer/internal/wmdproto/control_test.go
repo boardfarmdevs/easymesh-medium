@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/gen/wmediumd/observer/internal/model"
+	"github.com/boardfarmdevs/easymesh-medium/observer/internal/model"
 )
 
 func TestTypedPairSetAndOneStepUndo(t *testing.T) {

@@ -1,6 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
+MEDIUM=$(cd "$HERE/.." && pwd)  # easymesh-medium
 SOCKET=${1:?read-only wmediumd socket required}
 LAB_SERVICE=${2:?lab service name required}
 [ "$(id -u)" -eq 0 ] || { echo "run inside the lab VM as root" >&2; exit 1; }
@@ -14,7 +15,7 @@ PartOf=$LAB_SERVICE
 
 [Service]
 Type=simple
-Environment=PYTHONPATH=$HERE/configurator
+Environment=PYTHONPATH=$MEDIUM/configurator
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/bin/python3 -m wmdcfg.survey_bridge --socket $SOCKET --enable --status-file /run/wmdcfg-survey.json
 Restart=on-failure

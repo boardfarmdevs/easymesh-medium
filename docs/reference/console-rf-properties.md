@@ -299,11 +299,11 @@ not as a claim that every planned feature is active.
 
 ## Implementation sources
 
-- [Medium patch series](../../../../gen/wmediumd/patches/) implements channel,
+- [Medium patch series](../../wmediumd/patches) implements channel,
   signal, ACK, airtime, visibility, priority and read-only observer behavior.
-- [World compiler](../../../../gen/wmediumd/configurator/wmdcfg/world.py)
-  generates room RF inputs; [survey bridge](../../../../gen/wmediumd/configurator/wmdcfg/survey_bridge.py)
+- [World compiler](../../configurator/wmdcfg/world.py)
+  generates room RF inputs; [survey bridge](../../configurator/wmdcfg/survey_bridge.py)
   publishes the driver-facing modeled observations.
-- [Room integration](../../../../gen/demo/room_demo/interactions.py) exposes
-  read-only intent and exclusion; [Console manual](../../guide/wmediumd-console-ng.md)
+- [Room integration](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/gen/demo/room_demo/interactions.py) exposes
+  read-only intent and exclusion; [Console manual](../console/guide.md)
   describes collection limits, freshness and navigation.
