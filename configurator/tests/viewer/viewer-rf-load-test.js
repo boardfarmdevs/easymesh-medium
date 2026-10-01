@@ -1,0 +1,12 @@
+'use strict';
+const assert = require('node:assert/strict');
+const {rows} = require('../../worlds/viewer/rf-load.js');
+const sample = {frequency_mhz: 5180, state: 'valid', value: 0, age_ms: 100, window_ms: 100};
+const report = {state: 'valid', channels: [sample]};
+assert.equal(rows(report)[1].samples[0].value, 0);
+assert.equal(rows(report, 950)[1].samples[0].value, null);
+assert.equal(rows({...report, state: 'synthetic'})[1].samples[0].value, null);
+assert.equal(rows({...report, channels: [{...sample, value: null}]})[1].samples[0].value, null);
+assert.equal(rows({state: 'unavailable'}).length, 3);
+assert.equal(rows({...report, channels: [{...sample, frequency_mhz: 5975}]})[2].samples.length, 1);
+console.log('PASS: load validity, zero, freshness, fixed layout and band isolation');

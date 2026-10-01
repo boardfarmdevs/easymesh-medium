@@ -31,7 +31,7 @@ What the pods change and what they do not:
   the native APs' 5 GHz radios follow the room instead, and before such a room
   applies, the room moves each pod to the native AP with its strongest 5 GHz
   backhaul link there (always an extender), through the controller's
-  Backhaul Steering (`room_demo.backhaul.PodBackhaul`; EMOSA carries it out).
+  Backhaul Steering (easymesh-optimizer's `room_service.backhaul.PodBackhaul`; EMOSA carries it out).
 - A band-steered client's scripted band changes assume the native APs. A pod
   near its path would hold it on 2.4 GHz (the pod is the stronger 2.4 GHz AP,
   and no 5 GHz AP is then a safe band upgrade), so `build-goldens.py` refuses a
@@ -42,9 +42,9 @@ What the pods change and what they do not:
   AP interface per pod, and no backhaul station; the compiled plan describes
   them in `expected_lab.adapter_devices`, and every health check adds them.
 - The pod variant is selected by manifest only:
-  `gen/demo/manifests/private-client-room-walk-pods.json` (`worlds_root`
+  `gen/rooms/manifests/private-client-room-walk-pods.json` (`worlds_root`
   points here). Run the room service with
-  `EASYMESH_ROOM_MANIFEST=gen/demo/manifests/private-client-room-walk-pods.json`
+  `EASYMESH_ROOM_MANIFEST=gen/rooms/manifests/private-client-room-walk-pods.json`
   (emosa-lab `lab.sh rooms pods`, which needs the wired extender) and the
   suite with `EASYMESH_ROOM_WORLDS_ROOT=configurator/worlds-pods`
   (the suite takes the tree from the room when unset). Without them the room

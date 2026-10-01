@@ -148,8 +148,8 @@ surfaces, not new parallel specifications.
 | [wmediumd patches](../../wmediumd/patches) | 0014 telemetry; 0016/0017/0024 ownership; 0018 paging; 0020–0023 surveys/airtime/ACKs; 0027 receive contexts; 0028 bounded control I/O; 0029/0030 admission |
 | [hwsim patches](../../hwsim/patches) | 0009 survey cache, 0010 aggregate feedback, 0011 receive-context reporting |
 | [Survey bridge](../../configurator/wmdcfg/survey_bridge.py), [RF contract](../../configurator/wmdcfg/rf_contract.py) | Reuse source/validity semantics and distinguish implemented, enabled and qualified |
-| [Room pool](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/gen/demo/room_demo/pool.py), [interactions](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/gen/demo/room_demo/interactions.py), [client Wi-Fi](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/gen/demo/room_demo/client_wifi.py) | Whole pool, applied RF, presence and supplicant disconnect/reconnect |
-| [Room server](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/gen/demo/room_demo/server.py), [room renderer](../../configurator/worlds/viewer/index.html) | Read-only context feeds and existing Three.js interaction conventions |
+| [Room pool](https://github.com/boardfarmdevs/easymesh-optimizer/blob/main/room_service/pool.py), [interactions](https://github.com/boardfarmdevs/easymesh-optimizer/blob/main/room_service/interactions.py), [client Wi-Fi](https://github.com/boardfarmdevs/easymesh-optimizer/blob/main/room_service/client_wifi.py) | Whole pool, applied RF, presence and supplicant disconnect/reconnect |
+| [Room server](https://github.com/boardfarmdevs/easymesh-optimizer/blob/main/room_service/server.py), [room renderer](../../configurator/worlds/viewer/index.html) | Read-only context feeds and existing Three.js interaction conventions |
 
 The [Linux hwsim documentation](https://wireless.docs.kernel.org/en/latest/en/users/drivers/mac80211_hwsim.html)
 confirms that hwsim supplies simulated radios to mac80211 and supports normal

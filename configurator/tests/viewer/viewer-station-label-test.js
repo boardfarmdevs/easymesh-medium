@@ -1,0 +1,14 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const source = fs.readFileSync(path.resolve(__dirname, '../../worlds/viewer/index.html'), 'utf8');
+const observed = {display_name: 'iot-10', sta_mac: '02:00:00:20:0a:00', cohort: 'iot'};
+const context = {observedMeshNode: () => null, observedClient: () => observed, shortRole: role => role};
+vm.createContext(context);
+vm.runInContext(source.match(/  function displayRole\([\s\S]*?\n  \}/)[0], context);
+assert.equal(context.displayRole('sta_mobile_10'), 'iot-10');
+assert.ok(source.includes('setSpriteLabel(n.tag, displayRole(role), observed.cohort'));
+assert.ok(source.includes("'<div class=\"hero-name\">' + esc(displayRole(hero.role))"));
+console.log('PASS: decimal prplMesh station identity is shared by canvas, properties and traffic probe');

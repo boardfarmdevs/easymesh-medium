@@ -3,7 +3,9 @@
 <!-- labs block: the same in every repository of the EasyMesh labs, but for the Site line -->
 **Site:** none of its own; the labs' is <https://boardfarmdevs.github.io/easymesh-labs/>.
 The [EasyMesh labs](https://boardfarmdevs.github.io/easymesh-labs/) serve three
-goals: EasyMesh optimizer development in a rich virtual lab, on both stacks
+goals: EasyMesh optimizer development
+([easymesh-optimizer](https://github.com/boardfarmdevs/easymesh-optimizer)) in a rich
+virtual lab, on both stacks
 ([RDK EasyMesh](https://boardfarmdevs.github.io/meta-cmf-bananapi-vcpe/),
 [prplMesh](https://boardfarmdevs.github.io/prplmesh-lab/)); unchanged OpenSync
 pods as EasyMesh agents under a local controller, without the OpenSync cloud
@@ -52,13 +54,17 @@ wmediumd/build/wmediumd -T            # the daemon's self-test
 (cd configurator && python3 -m pytest -q tests)
 (cd configurator && sh worlds/build-goldens.sh --check &&
     python3 worlds-wired/build-goldens.py --check && python3 worlds-pods/build-goldens.py --check)
+for t in configurator/tests/viewer/*-test.js; do node "$t"; done   # the room viewer
 (cd observer && go test ./...) && bash observer/build.sh
 hwsim/build-hwsim.sh --6ghz           # the kernel module, for the running kernel (see hwsim/README.md)
 ```
 
 wmediumd needs `libnl-3`, `libnl-genl-3` and `libconfig` headers; the
-configurator only Python 3 (and pytest for its tests); the console Go.
-[CI](.github/workflows/checks.yml) runs all of it except the kernel module.
+configurator only Python 3 (and pytest for its tests); the viewer's tests Node,
+and Playwright for the `*browser-test.js` ones and
+[observer/tests](observer/tests), which the labs' suites run; the console Go.
+[CI](.github/workflows/checks.yml) runs all of it except the kernel module and the
+browser tests.
 No built binary is ever committed: a lab builds the daemon and the console
 from its pinned commit, and the provenance file says which.
 

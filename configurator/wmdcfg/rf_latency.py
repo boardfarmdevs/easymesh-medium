@@ -73,7 +73,7 @@ def main(argv=None):
     rdk = args.stack == "rdk"
     ap = "bpibroadband" if rdk else "prpl-controller"
     interface = "wifi1" if rdk else "wlan2"
-    room = "easymesh-room-demo" if rdk else "prplmesh-room-demo"
+    room = "easymesh-room-service" if rdk else "prplmesh-room-service"
     socket = "/run/meta-cmf-wmediumd/metrics/control.sock" if rdk else "/run/prpl-wmediumd/metrics.sock"
     args.output.mkdir(parents=True, exist_ok=False)
     command("systemctl", "is-active", "--quiet", "wmdcfg-survey-bridge")

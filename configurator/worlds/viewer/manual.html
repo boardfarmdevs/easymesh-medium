@@ -371,13 +371,13 @@
 </section>
 <section id="operations" aria-labelledby="operations-title">
   <h2 id="operations-title">15. Operator setup and shutdown</h2>
-  <p>Run these commands inside the RDK appliance, from its checked-out repository. The 0908 appliance is <code>rdkeasymesh-20-0908</code> on rev140, using canonical branch <code>codex/0908-clean</code>. Other hosts retain their separately deployed release. The commands below require shell access; the public website does not run them.</p>
+  <p>Run these commands inside the RDK appliance, from its checked-out repository. Each lab's current VM and host are on its current-state page. The commands below require shell access; the public website does not run them.</p>
   <pre><code>cd /home/easymesh/git/meta-cmf-bananapi-vcpe
 gen/tests/health-audit.sh
-gen/demo/room-demo check
-gen/demo/room-demo interactive --mode recommend --listen 0.0.0.0:8891</code></pre>
+gen/rooms/room-service check
+gen/rooms/room-service interactive --mode recommend --listen 0.0.0.0:8891</code></pre>
   <p>For an explicitly authorized automatic-steering session:</p>
-  <pre><code>gen/demo/room-demo interactive \
+  <pre><code>gen/rooms/room-service interactive \
   --mode act --yes-act --steering-rate-limit 300 \
   --listen 0.0.0.0:8891</code></pre>
   <p>The rev140 0907 proxy maps outer port <code>48891</code> to appliance port <code>8891</code>. Do not create a second room process on the same medium. A process PID or a reachable page alone is not a complete medium-health check.</p>
@@ -385,17 +385,17 @@ gen/demo/room-demo interactive --mode recommend --listen 0.0.0.0:8891</code></pr
   <h3>Normal stop</h3>
   <p>Use <kbd>Ctrl</kbd> + <kbd>C</kbd> in the owning room terminal, or stop the actual owning service if the operator launched one. SIGINT/SIGTERM drain accepted work and restore the captured RF matrix. Check the final outcome and <code>restored=true</code>; a worker failure can have <code>outcome=failed</code> even if RF restoration succeeded.</p>
   <h3>After an unclean interruption</h3>
-  <pre><code>gen/demo/room-demo recover</code></pre>
-  <p>This uses the checksummed journal at <code>/run/easymesh-room-demo/recovery.json</code>. Recovery refuses an unexpected medium instance or unexplained generation. Resolve that condition before starting another writer. Do not run another configurator, independent RF-bias helper, or room scenario concurrently.</p>
+  <pre><code>gen/rooms/room-service recover</code></pre>
+  <p>This uses the checksummed journal at <code>/run/easymesh-room-service/recovery.json</code>. Recovery refuses an unexpected medium instance or unexplained generation. Resolve that condition before starting another writer. Do not run another configurator, independent RF-bias helper, or room scenario concurrently.</p>
   <h3>Replay a completed run</h3>
-  <pre><code>gen/demo/room-demo replay \
-  /tmp/easymesh-room-demo-runs/RUN_ID \
+  <pre><code>gen/rooms/room-service replay \
+  /tmp/easymesh-room-service-runs/RUN_ID \
   --listen 0.0.0.0:8891</code></pre>
   <p>Open <code>/viewer/</code> on that replay server and ensure port 8891 is free first. Explicit <code>?mode=replay</code> bookmarks still work. Replay serves saved evidence and is not an interactive live session.</p>
 </section>
 <section id="evidence" aria-labelledby="evidence-title">
   <h2 id="evidence-title">16. Evidence and API reference</h2>
-  <p>Run evidence is stored under <code>/tmp/easymesh-room-demo-runs/RUN_ID/</code>. Copy important runs to durable storage before clearing temporary files or rebuilding the appliance.</p>
+  <p>Run evidence is stored under <code>/tmp/easymesh-room-service-runs/RUN_ID/</code>. Copy important runs to durable storage before clearing temporary files or rebuilding the appliance.</p>
   <ul>
     <li><code>world.json</code>, <code>layout.json</code>, and <code>runtime-world.json</code>: scenario inputs and viewer geometry.</li>
     <li><code>inventory.json</code>, <code>bindings.json</code>, and <code>demo-manifest.json</code>: identities and run configuration.</li>

@@ -80,7 +80,7 @@ def main(argv=None):
         parser.error("requires root inside the lab VM and --yes-change-survey")
     rdk = args.stack == "rdk"
     lab = "easymesh-lab" if rdk else "prplmesh-lab"
-    room = "easymesh-room-demo" if rdk else "prplmesh-room-demo"
+    room = "easymesh-room-service" if rdk else "prplmesh-room-service"
     ap = "bpibroadband" if rdk else "prpl-controller"
     client_node = "wlan-client" if rdk else "prpl-client-01"
     interface = "wifi1" if rdk else "wlan2"

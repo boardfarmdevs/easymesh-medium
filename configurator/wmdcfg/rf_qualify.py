@@ -194,7 +194,7 @@ def main(argv=None):
     rdk = args.stack == "rdk"
     client = "wlan-client" if rdk else "prpl-client-01"
     ap = "bpibroadband" if rdk else "prpl-controller"
-    room = "easymesh-room-demo" if rdk else "prplmesh-room-demo"
+    room = "easymesh-room-service" if rdk else "prplmesh-room-service"
     bridge = "wmdcfg-survey-bridge"
     args.output.mkdir(parents=True, exist_ok=False)
     room_active = subprocess.run(["systemctl", "is-active", "--quiet", room]).returncode == 0

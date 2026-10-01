@@ -304,6 +304,6 @@ not as a claim that every planned feature is active.
 - [World compiler](../../configurator/wmdcfg/world.py)
   generates room RF inputs; [survey bridge](../../configurator/wmdcfg/survey_bridge.py)
   publishes the driver-facing modeled observations.
-- [Room integration](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/gen/demo/room_demo/interactions.py) exposes
+- [Room integration](https://github.com/boardfarmdevs/easymesh-optimizer/blob/main/room_service/interactions.py) exposes
   read-only intent and exclusion; [Console manual](../console/guide.md)
   describes collection limits, freshness and navigation.

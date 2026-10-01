@@ -20,7 +20,7 @@ native AP on any band, because those clients' scripted band changes assume the
 native APs.
 
 Selected by manifest only:
-`gen/demo/manifests/private-client-room-walk-wired.json`. Run the room service
+`gen/rooms/manifests/private-client-room-walk-wired.json`. Run the room service
 with that manifest (`EASYMESH_ROOM_MANIFEST`) and the suite with
 `EASYMESH_ROOM_WORLDS_ROOT=configurator/worlds-wired` (the suite
 takes the tree from the room when unset). `gen/wired-extender.sh up` writes the

@@ -1,6 +1,6 @@
 # The medium's checks, without a lab: the patched wmediumd builds and passes its
 # self-test, the configurator's tests pass and every room tree regenerates its
-# goldens identically, the console's Go tests pass and it builds; the labs block and
+# goldens identically, the room viewer's tests pass, the console's Go tests pass and it builds; the labs block and
 # the documentation's links hold.
 name: checks
 on:
@@ -55,6 +55,23 @@ jobs:
           sh worlds/build-goldens.sh --check
           python worlds-wired/build-goldens.py --check
           python worlds-pods/build-goldens.py --check
+
+  viewer:
+    # the room viewer's tests that need no browser (configurator/tests/viewer); the browser
+    # ones, and observer/tests, run in the labs' suites, which have Playwright
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Tests
+        run: |
+          for test in configurator/tests/viewer/*-test.js; do
+            case $test in *browser-test.js|*sidebar-layout-test.js) continue ;; esac
+            echo "== $test"
+            node "$test"
+          done
 
   observer:
     runs-on: ubuntu-24.04

@@ -6,7 +6,7 @@
 The [supported profile](#124-implemented-phases-12-survey-and-native-bss-load)
 is legacy-rate, 20 MHz; optional visibility is not calibrated capacity or full DCF.
 Current development branch: `main` in both repositories. The
-[property-to-room coverage and live gates](rf-property-coverage.md#native-load-action-qualification)
+[property-to-room coverage and live gates](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/testing/rf-qualification.md#native-load-action-qualification)
 separate implementation, measured behavior and remaining qualification failures.
 Bounded diagnostics do not replace clean-source release acceptance.
 
@@ -610,7 +610,7 @@ Keep initial readiness, outage beaconing and return-convergence gates.
 prpl's branch and 5/6 GHz BTM checks pass. Missing station ubus registration
 explains `Not found`: checked root dispatch preserves native BTM without retries.
 The earlier controller OOM is historical; current prpl resource and room status
-is maintained in [RF coverage](rf-property-coverage.md#room-catalog-qualification-and-open-failures).
+is maintained in [RF coverage](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/testing/rf-qualification.md#room-catalog-qualification-and-open-failures).
 Browser inspection adds no native queries or RF writes; closing Console NG
 cannot stop collection.
 See the [access contract](console-rf-properties.md#shared-rf-observations) and
@@ -776,8 +776,8 @@ The medium's parts are in this repository, which the RDK lab checks out as
 | Geometry, compilation, actuation | `configurator/wmdcfg/` (here) | the same |
 | Console/protocol diagnostics | `observer/` (here) | the same |
 | Native HAL/reporting changes | `recipes-ccsp/hal/`, `recipes-ccsp/ccsp/`, `recipes-ccsp/unified-wifi-mesh/` | `patches/prplmesh/`, `scripts/container/`, `manifests/` |
-| External optimizer | `gen/optimizer/optimizer/` | `optimizer/optimizer/` |
-| Room orchestration | `gen/demo/room_demo/` | `demo/room_demo/` |
+| External optimizer | `gen/optimizer/optimizer/` | `optimizer/optimizer/` (both easymesh-optimizer's) |
+| Room orchestration | `gen/optimizer/room_service/` | `optimizer/room_service/` (both easymesh-optimizer's) |
 | Documentation validation | `gen/tests/test_documentation.py` | `tests/test_documentation.py` |
 
 For E07 inspect the assembled patched source, especially
@@ -1147,8 +1147,8 @@ or a band upgrade; ordinary profiles retain their prior path.
 
 Keep the ordinary twenty-active-client startup room, fixed hundred-client pool
 and existing mesh nodes. For native load inspection/balancing, use the additional
-`demo/manifests/native-load-room-profile.json` with the existing
-`room-demo interactive --manifest ...` launcher and its usual backend-specific
+`rooms/manifests/native-load-room-profile.json` with the existing
+`room-service interactive --manifest ...` launcher and its usual backend-specific
 arguments. In RDK the repository-relative prefix is `gen/`; in prplMesh these
 paths start at the repository root. Choose `recommend` for observation or the
 existing explicitly confirmed `act` mode for steering. Do not start a second
@@ -1288,7 +1288,7 @@ Keep native 1905 counters, driver counters and delivered UDP distinct.
 prpl patch 0022 repairs omitted TX-failure/RX-drop mappings.
 
 Current consumer behavior is in [section 9.4](#94-current-consumer-access-gaps).
-[Bounded qualification](rf-property-coverage.md#bounded-qualification-follow-up)
+[Bounded qualification](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/testing/rf-qualification.md#bounded-qualification-follow-up)
 records pressure/rescue, terminal candidate responses, browser expiry and
 preflight separately from full-suite acceptance.
 

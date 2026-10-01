@@ -178,7 +178,7 @@ def main(argv=None):
         "prpl-controller", "prpl-agent-01", "prpl-agent-02", "prpl-agent-03", "prpl-agent-04"]
     client_nodes = ["wlan-client", "wlan-client-001"] if rdk else ["prpl-client-01", "prpl-client-03"]
     targets = ["10.0.0.1" if rdk else "192.168.77.1", "10.254.91.2"]
-    room = "easymesh-room-demo" if rdk else "prplmesh-room-demo"
+    room = "easymesh-room-service" if rdk else "prplmesh-room-service"
     bridge = "wmdcfg-survey-bridge"
     command("systemctl", "is-active", "--quiet", room, bridge)
     command("iperf3", "--version")
