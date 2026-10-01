@@ -1,0 +1,715 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>How the RF medium works</title>
+<meta name="description" content="How easymesh-medium turns virtual Wi-Fi radios, a referee process and a floor plan into the radio conditions both EasyMesh optimizer labs run on.">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&display=swap">
+<link rel="stylesheet" href="style.css">
+<script src="toc.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#why">Skip to the article</a>
+
+<!-- shared diagram parts -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" class="arrow"/>
+    </marker>
+    <marker id="ah-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" class="fill-accent"/>
+    </marker>
+    <marker id="ah-radio" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" class="fill-radio"/>
+    </marker>
+  </defs>
+</svg>
+
+<div class="page">
+<header class="hero">
+  <p class="eyebrow">easymesh-medium</p>
+  <h1>How the labs' radio medium works</h1>
+  <p class="lead">Both EasyMesh optimizer labs run real Wi-Fi software, the RDK stack in one and
+  prplMesh in the other, on radios that have no antennas. Something has to decide, for every
+  frame, which radios hear it and how well. This is the story of that something: a kernel's
+  worth of virtual radios, one referee process in the middle, and a floor plan that tells the
+  referee what the air in a house is like.</p>
+  <p class="meta"><span>About a 20-minute read</span><a href="https://github.com/boardfarmdevs/easymesh-medium">The repository</a><a href="https://boardfarmdevs.github.io/easymesh-labs/">The EasyMesh labs</a></p>
+</header>
+
+<nav class="toc" aria-label="Contents">
+  <p>Contents</p>
+  <ol>
+    <li><a href="#why">Why a lab needs a medium</a></li>
+    <li><a href="#radios">Radios without antennas</a></li>
+    <li><a href="#referee">One referee for every frame</a></li>
+    <li><a href="#matrix">The link matrix</a></li>
+    <li><a href="#loss">From signal to loss</a></li>
+    <li><a href="#airtime">Airtime and channels</a></li>
+    <li><a href="#live">Changing the air while it runs</a></li>
+    <li><a href="#rooms">Rooms: a floor plan becomes numbers</a></li>
+    <li><a href="#roles">The air follows the room, not the roam</a></li>
+    <li><a href="#identity">Who is who</a></li>
+    <li><a href="#watching">Watching the medium</a></li>
+    <li><a href="#two-labs">One medium, two labs</a></li>
+    <li><a href="#limits">What it does not model</a></li>
+    <li><a href="#repository">The repository</a></li>
+  </ol>
+</nav>
+
+<article>
+
+<section id="why">
+<h2>Why a lab needs a medium</h2>
+<p>An EasyMesh optimizer decides which access point each client should be on, and when to move
+it. To develop one you need a house: a gateway, a few extenders, dozens of phones and laptops,
+and people walking from the kitchen to the bedroom while the optimizer watches. You need to run
+the same walk a hundred times and get the same air each time, and you need to run it on two
+different EasyMesh implementations to see whether a policy is good or merely lucky.</p>
+<p>Real radios give you none of that. The air in a lab is shared with the neighbours, a phone in
+a pocket is never in the same place twice, and a hundred clients cost a hundred devices. So the
+labs run everything in containers: the controller, the extenders and every client run their
+ordinary Wi-Fi software, unmodified, on virtual radios. The radios are real enough for that
+software. What they lack is a world around them. The medium is that world.</p>
+<figure class="wide" id="fig-overview">
+<div class="fig">
+<svg viewBox="0 0 760 340" role="img" aria-label="Containers with Wi-Fi software use virtual radios in the kernel; every frame goes through wmediumd, which a room plan steers and a console watches.">
+  <g>
+    <rect class="box" x="16" y="24" width="200" height="78" rx="10"/>
+    <text class="t" x="30" y="54">Gateway</text>
+    <text class="s" x="30" y="76">controller · fronthaul APs</text>
+    <rect class="box" x="16" y="128" width="200" height="78" rx="10"/>
+    <text class="t" x="30" y="158">Extender</text>
+    <text class="s" x="30" y="180">agent · backhaul station · APs</text>
+    <rect class="box" x="16" y="232" width="200" height="78" rx="10"/>
+    <text class="t" x="30" y="262">Client</text>
+    <text class="s" x="30" y="284">wpa_supplicant · DHCP · traffic</text>
+    <circle class="fill-radio" cx="216" cy="63" r="6"/>
+    <circle class="fill-radio" cx="216" cy="167" r="6"/>
+    <circle class="fill-radio" cx="216" cy="271" r="6"/>
+    <path class="ln-radio" d="M222 63 H270 M222 167 H270 M222 271 H270"/>
+  </g>
+  <rect class="box-radio" x="270" y="24" width="170" height="286" rx="12"/>
+  <text class="t" x="355" y="56" text-anchor="middle">Linux kernel</text>
+  <text class="s" x="355" y="78" text-anchor="middle">mac80211 and</text>
+  <text class="s" x="355" y="96" text-anchor="middle">mac80211_hwsim:</text>
+  <text class="s" x="355" y="114" text-anchor="middle">virtual radios, moved</text>
+  <text class="s" x="355" y="132" text-anchor="middle">into the containers</text>
+  <text class="xs" x="355" y="292" text-anchor="middle">no antennas, no air</text>
+
+  <rect class="box-accent" x="520" y="118" width="224" height="96" rx="12"/>
+  <text class="t" x="632" y="150" text-anchor="middle">wmediumd</text>
+  <text class="s" x="632" y="172" text-anchor="middle">one process for every radio:</text>
+  <text class="s" x="632" y="190" text-anchor="middle">who hears each frame, how well</text>
+  <path class="ln" d="M440 146 H516" marker-end="url(#ah)"/>
+  <text class="xs" x="478" y="138" text-anchor="middle">each frame</text>
+  <path class="ln" d="M518 186 H444" marker-end="url(#ah)"/>
+  <text class="xs" x="478" y="204" text-anchor="middle">delivery, status</text>
+
+  <rect class="box" x="520" y="24" width="224" height="58" rx="10"/>
+  <text class="t" x="632" y="48" text-anchor="middle">Room plan</text>
+  <text class="s" x="632" y="68" text-anchor="middle">signal for every radio pair, per tick</text>
+  <path class="ln-accent" d="M632 82 V114" marker-end="url(#ah-accent)"/>
+  <text class="xs lbl-accent" x="642" y="102">atomic updates</text>
+
+  <rect class="box dash" x="520" y="252" width="224" height="58" rx="10"/>
+  <text class="t" x="632" y="276" text-anchor="middle">wmediumd Console</text>
+  <text class="s" x="632" y="296" text-anchor="middle">read-only: frames, links, load</text>
+  <path class="ln dash" d="M632 214 V248" marker-end="url(#ah)"/>
+</svg>
+</div>
+<figcaption><b>The whole picture.</b> Each container runs its stack's ordinary Wi-Fi software on a
+virtual radio. The kernel hands every transmitted frame to wmediumd, which decides who receives
+it. A room plan tells wmediumd what the air is like; a console shows what it did.</figcaption>
+</figure>
+<p>The rest of this page follows a frame from the moment a container sends it, and then builds
+up the room around it.</p>
+</section>
+
+<section id="radios">
+<h2>Radios without antennas</h2>
+<p>Linux has a driver for exactly this: <code>mac80211_hwsim</code>. Each instance is a complete
+802.11 radio as far as the rest of the kernel is concerned. hostapd can run an access point on it,
+wpa_supplicant can scan and associate with it, OneWifi and prplMesh can configure it. Move one into
+a container's network namespace and that container has a Wi-Fi card.</p>
+<p>On its own, hwsim connects every radio to every other one perfectly. A frame sent by one radio
+arrives at all the others on the same channel, every time, at the same signal. That is a fine way
+to test that two programs can talk, and a useless way to test a steering decision: if every access
+point is equally good everywhere, there is nothing to decide.</p>
+<figure id="fig-perfect">
+<div class="fig">
+<svg viewBox="0 0 760 250" role="img" aria-label="Without a medium every pair of radios is perfectly connected; with the medium each pair has its own quality, some links are weak or lost and other channels never hear each other.">
+  <text class="t" x="170" y="26" text-anchor="middle">hwsim alone</text>
+  <path class="ln" d="M90 70 L250 70 M90 70 L90 200 M90 70 L250 200 M250 70 L90 200 M250 70 L250 200 M90 200 L250 200"/>
+  <g>
+    <circle class="box-radio" cx="90" cy="70" r="22"/><text class="s" x="90" y="75" text-anchor="middle">GW</text>
+    <circle class="box-radio" cx="250" cy="70" r="22"/><text class="s" x="250" y="75" text-anchor="middle">EXT</text>
+    <circle class="box-radio" cx="90" cy="200" r="22"/><text class="s" x="90" y="205" text-anchor="middle">C1</text>
+    <circle class="box-radio" cx="250" cy="200" r="22"/><text class="s" x="250" y="205" text-anchor="middle">C2</text>
+  </g>
+  <text class="xs" x="170" y="240" text-anchor="middle">every link perfect, every signal the same</text>
+
+  <text class="t" x="560" y="26" text-anchor="middle">with the medium</text>
+  <path class="ln-good" stroke-width="4" d="M480 70 L480 200"/>
+  <path class="ln-accent" d="M480 70 L640 70"/>
+  <path class="ln-accent" d="M480 70 L640 200"/>
+  <path class="ln-warn" d="M640 70 L480 200"/>
+  <path class="ln-warn" stroke-width="1.2" d="M480 200 L640 200"/>
+  <path class="ln-bad dash" d="M640 70 L640 200"/>
+  <g>
+    <circle class="box-radio" cx="480" cy="70" r="22"/><text class="s" x="480" y="75" text-anchor="middle">GW</text>
+    <circle class="box-radio" cx="640" cy="70" r="22"/><text class="s" x="640" y="75" text-anchor="middle">EXT</text>
+    <circle class="box-radio" cx="480" cy="200" r="22"/><text class="s" x="480" y="205" text-anchor="middle">C1</text>
+    <circle class="box-radio" cx="640" cy="200" r="22"/><text class="s" x="640" y="205" text-anchor="middle">C2</text>
+  </g>
+  <text class="xs lbl-good" x="470" y="140" text-anchor="end">strong, 38 dB</text>
+  <text class="xs lbl-accent" x="560" y="60" text-anchor="middle">fair, 23 dB</text>
+  <text class="xs lbl-bad" x="650" y="140">lost, 2 dB</text>
+  <text class="xs lbl-warn" x="560" y="222" text-anchor="middle">weak, 9 dB</text>
+  <text class="xs" x="560" y="240" text-anchor="middle">every pair its own quality</text>
+</svg>
+</div>
+<figcaption><b>Same four radios, two worlds.</b> Alone, hwsim delivers everything perfectly. With
+the medium, every pair has its own quality, from strong to lost.</figcaption>
+</figure>
+<p>The labs use a patched hwsim build: it carries 6 GHz channels, several channels on one radio
+at once (multichannel), the channel surveys that let a stack report
+channel utilization, and an optional in-kernel medium for experiments. The important hook is
+upstream, though: hwsim can hand every frame to a userspace process instead of delivering it
+itself. That process is the referee.</p>
+</section>
+
+<section id="referee">
+<h2>One referee for every frame</h2>
+<p>When a container transmits, mac80211 passes the frame to hwsim, and hwsim sends it over generic
+netlink to <strong>wmediumd</strong>, with the transmitting radio's identity, the frequency and
+the rates the sender's rate control would try. wmediumd is one process for every radio in the lab.
+It does not know what a controller or a client is. It knows radios, frequencies, and how well each
+radio hears each other one, and it answers one question per frame and receiver: does this arrive,
+and at what signal?</p>
+<figure class="wide" id="fig-frame">
+<div class="fig">
+<svg viewBox="0 0 820 300" role="img" aria-label="One beacon from an extender at 5180 MHz: wmediumd evaluates three receivers; one hears it at -53 dBm, one loses it at low SNR, one is on another channel.">
+  <rect class="box-radio" x="16" y="110" width="170" height="82" rx="10"/>
+  <text class="t" x="30" y="138">Extender AP</text>
+  <text class="s mono" x="30" y="160">5180 MHz</text>
+  <text class="s" x="30" y="178">sends a beacon</text>
+  <path class="ln-radio" d="M186 151 H228" marker-end="url(#ah-radio)"/>
+
+  <rect class="box-accent" x="232" y="34" width="256" height="234" rx="12"/>
+  <text class="t" x="252" y="62">wmediumd, per receiver</text>
+  <g class="s">
+    <text class="s" x="252" y="90">1  who sent it, on which frequency</text>
+    <text class="s" x="252" y="114">2  which radios are on 5180 MHz</text>
+    <text class="s" x="252" y="138">3  the directed SNR to each</text>
+    <text class="s" x="252" y="162">4  SNR, rate and length → loss</text>
+    <text class="s" x="252" y="186">5  a random draw: arrives or not</text>
+    <text class="s" x="252" y="210">6  airtime: when it arrives</text>
+    <text class="s" x="252" y="234">7  inject it, signal = SNR − 91 dBm</text>
+  </g>
+
+  <rect class="box-good" x="540" y="34" width="264" height="66" rx="10"/>
+  <text class="t" x="556" y="60">Client A · 5180 MHz</text>
+  <text class="s" x="556" y="82">SNR 38 dB → heard at −53 dBm</text>
+  <rect class="box-bad" x="540" y="118" width="264" height="66" rx="10"/>
+  <text class="t" x="556" y="144">Client B · 5180 MHz</text>
+  <text class="s" x="556" y="166">SNR 4 dB → lost this time</text>
+  <rect class="box" x="540" y="202" width="264" height="66" rx="10"/>
+  <text class="t" x="556" y="228">Client C · 2437 MHz</text>
+  <text class="s" x="556" y="250">other channel → never delivered</text>
+  <path class="ln-good" d="M488 67 H536" marker-end="url(#ah)"/>
+  <path class="ln-bad dash" d="M488 151 H536"/>
+  <path class="ln-bad" d="M505 143 l12 16 M517 143 l-12 16"/>
+  <path class="ln-faint dot" d="M488 235 H536"/>
+</svg>
+</div>
+<figcaption><b>One beacon, three answers.</b> A multicast frame is judged separately for every
+receiver on its frequency. A unicast frame has one receiver, and the sender learns the outcome:
+wmediumd reports back whether it was acknowledged and after how many tries.</figcaption>
+</figure>
+<p>The answer is not a label on a packet. A frame that wmediumd drops is never seen by the
+receiver; a frame it delivers arrives with a signal level the receiver's driver reports like any
+other. So everything above the radio behaves as it would in a house: scans find weaker access
+points or none, retries and rate fallback happen, a client at the edge loses its association, and
+the EasyMesh controller learns all of it through its normal reports.</p>
+<aside class="note"><span class="t">Why not just fake the RSSI?</span>
+<p>Patching the number a client or a controller reports would change one field and nothing else.
+The medium changes what happens: management frames, data, multicast and acknowledgements all
+succeed or fail by the same model, so rate control, scanning, roaming and the controller's metrics
+follow from the air instead of contradicting it.</p></aside>
+</section>
+
+<section id="matrix">
+<h2>The link matrix</h2>
+<p>At the centre of wmediumd is a table: for every ordered pair of radios, the signal-to-noise
+ratio of the link from one to the other. It is <em>directed</em>, because links are not always
+symmetric: a laptop with a weaker transmitter is heard less well by the access point than it hears
+the access point. And it can be <em>frequency-qualified</em>: one radio serving 2.4, 5 and 6 GHz at
+once gets a different value on each band, because the bands do not travel equally far.</p>
+<figure id="fig-matrix">
+<div class="fig">
+<svg viewBox="0 0 640 316" role="img" aria-label="A directed SNR matrix between five radios; the extender-to-client and client-to-extender entries differ.">
+  <text class="xs" x="96" y="30" text-anchor="middle">from ↓ to →</text>
+  <g class="s">
+    <text class="t" x="196" y="40" text-anchor="middle">GW</text>
+    <text class="t" x="290" y="40" text-anchor="middle">EXT1</text>
+    <text class="t" x="384" y="40" text-anchor="middle">EXT2</text>
+    <text class="t" x="478" y="40" text-anchor="middle">C1</text>
+    <text class="t" x="572" y="40" text-anchor="middle">C2</text>
+    <text class="t" x="96" y="86" text-anchor="middle">GW</text>
+    <text class="t" x="96" y="136" text-anchor="middle">EXT1</text>
+    <text class="t" x="96" y="186" text-anchor="middle">EXT2</text>
+    <text class="t" x="96" y="236" text-anchor="middle">C1</text>
+    <text class="t" x="96" y="286" text-anchor="middle">C2</text>
+  </g>
+  <g>
+    <!-- row GW -->
+    <rect class="box-soft" x="150" y="58" width="92" height="44"/>
+    <rect class="box" x="244" y="58" width="92" height="44"/><text class="mono s" x="290" y="86" text-anchor="middle">23</text>
+    <rect class="box" x="338" y="58" width="92" height="44"/><text class="mono s" x="384" y="86" text-anchor="middle">23</text>
+    <rect class="box-good" x="432" y="58" width="92" height="44"/><text class="mono s" x="478" y="86" text-anchor="middle">37</text>
+    <rect class="box-warn" x="526" y="58" width="92" height="44"/><text class="mono s" x="572" y="86" text-anchor="middle">24</text>
+    <!-- row EXT1 -->
+    <rect class="box" x="150" y="108" width="92" height="44"/><text class="mono s" x="196" y="136" text-anchor="middle">23</text>
+    <rect class="box-soft" x="244" y="108" width="92" height="44"/>
+    <rect class="box-warn" x="338" y="108" width="92" height="44"/><text class="mono s" x="384" y="136" text-anchor="middle">19</text>
+    <rect class="box" x="432" y="108" width="92" height="44"/><text class="mono s" x="478" y="136" text-anchor="middle">25</text>
+    <rect class="box-good" x="526" y="108" width="92" height="44"/><text class="mono s" x="572" y="136" text-anchor="middle">50</text>
+    <!-- row EXT2 -->
+    <rect class="box" x="150" y="158" width="92" height="44"/><text class="mono s" x="196" y="186" text-anchor="middle">23</text>
+    <rect class="box-warn" x="244" y="158" width="92" height="44"/><text class="mono s" x="290" y="186" text-anchor="middle">19</text>
+    <rect class="box-soft" x="338" y="158" width="92" height="44"/>
+    <rect class="box-accent" x="432" y="158" width="92" height="44"/><text class="mono s" x="478" y="186" text-anchor="middle">30</text>
+    <rect class="box-warn" x="526" y="158" width="92" height="44"/><text class="mono s" x="572" y="186" text-anchor="middle">19</text>
+    <!-- row C1 -->
+    <rect class="box-good" x="150" y="208" width="92" height="44"/><text class="mono s" x="196" y="236" text-anchor="middle">37</text>
+    <rect class="box" x="244" y="208" width="92" height="44"/><text class="mono s" x="290" y="236" text-anchor="middle">25</text>
+    <rect class="box-accent" x="338" y="208" width="92" height="44"/><text class="mono s" x="384" y="236" text-anchor="middle">24</text>
+    <rect class="box-soft" x="432" y="208" width="92" height="44"/>
+    <rect class="box-warn" x="526" y="208" width="92" height="44"/><text class="mono s" x="572" y="236" text-anchor="middle">22</text>
+    <!-- row C2 -->
+    <rect class="box-warn" x="150" y="258" width="92" height="44"/><text class="mono s" x="196" y="286" text-anchor="middle">24</text>
+    <rect class="box-good" x="244" y="258" width="92" height="44"/><text class="mono s" x="290" y="286" text-anchor="middle">50</text>
+    <rect class="box-warn" x="338" y="258" width="92" height="44"/><text class="mono s" x="384" y="286" text-anchor="middle">19</text>
+    <rect class="box-warn" x="432" y="258" width="92" height="44"/><text class="mono s" x="478" y="286" text-anchor="middle">22</text>
+    <rect class="box-soft" x="526" y="258" width="92" height="44"/>
+  </g>
+</svg>
+</div>
+<figcaption><b>The 5 GHz matrix of a small house, in dB (illustrative).</b> Read a row as "how
+well everyone hears this radio". In the highlighted pair, EXT2 reaches C1 at 30 dB, but C1, a
+weaker transmitter, reaches EXT2 at only 24: the pair is asymmetric, and the controller sees it as an uplink that is worse than the downlink.</figcaption>
+</figure>
+<p>The matrix starts from a file that lists every radio the lab created and a baseline value for
+every pair. After that it lives in memory and changes while the lab runs, as the next sections
+show. The SNR is the whole description of a link: wmediumd's noise floor is fixed at −91 dBm, so a
+link at 40 dB is received at about −51 dBm and one at 10 dB at about −81 dBm.</p>
+</section>
+
+<section id="loss">
+<h2>From signal to loss</h2>
+<p>A link's SNR does not decide a frame by itself. A frame sent at a high data rate needs a much
+cleaner signal than the same frame at a robust low rate, and a long frame is more likely to be hit
+by an error than a short one. wmediumd turns SNR, rate and frame length into a packet error
+probability using curves for the 802.11 modulations, then draws a random number to decide this
+particular frame.</p>
+<figure class="wide" id="fig-per">
+<div class="fig">
+<svg viewBox="0 6 820 274" role="img" aria-label="Packet error rate falls from 1 to 0 as SNR rises; the curve for 54 Mbit/s needs about 17 dB more than 6 Mbit/s. A frame tried twice at 54 Mbit/s then succeeds at 24 Mbit/s.">
+  <path class="grid" d="M60 30 H460 M60 80 H460 M60 130 H460 M60 180 H460 M60 230 H460"/>
+  <path class="ln" d="M60 30 V230 H460"/>
+  <text class="xs" x="52" y="34" text-anchor="end">1</text>
+  <text class="xs" x="52" y="134" text-anchor="end">0.5</text>
+  <text class="xs" x="52" y="234" text-anchor="end">0</text>
+  <text class="xs" x="60" y="250" text-anchor="middle">0</text>
+  <text class="xs" x="160" y="250" text-anchor="middle">10</text>
+  <text class="xs" x="260" y="250" text-anchor="middle">20</text>
+  <text class="xs" x="360" y="250" text-anchor="middle">30</text>
+  <text class="xs" x="460" y="250" text-anchor="middle">40 dB SNR</text>
+  <text class="xs" x="24" y="134" text-anchor="middle" transform="rotate(-90 24 134)">frame loss</text>
+  <polyline class="ln-good" points="60,35.5 70,40.9 80,51.0 90,68.7 100,95.7 110,130.0 120,164.3 130,191.3 140,209.0 150,219.1 160,224.5 170,227.3 180,228.7 190,229.3 200,229.7 210,229.8 220,229.9 230,230.0"/>
+  <polyline class="ln-accent" points="110,30.7 120,31.3 130,32.7 140,35.5 150,40.9 160,51.0 170,68.7 180,95.7 190,130.0 200,164.3 210,191.3 220,209.0 230,219.1 240,224.5 250,227.3 260,228.7 270,229.3 280,229.7 290,229.8 300,229.9"/>
+  <polyline class="ln-radio" points="200,30.7 210,31.3 220,32.7 230,35.5 240,40.9 250,51.0 260,68.7 270,95.7 280,130.0 290,164.3 300,191.3 310,209.0 320,219.1 330,224.5 340,227.3 350,228.7 360,229.3 370,229.7 380,229.8 390,229.9 400,230.0"/>
+  <text class="xs lbl-good" x="118" y="120">6 Mbit/s</text>
+  <text class="xs lbl-accent" x="162" y="70" text-anchor="end">24 Mbit/s</text>
+  <text class="xs lbl-radio" x="296" y="120">54 Mbit/s</text>
+  <path class="ln-faint dash" d="M210 30 V230"/>
+  <text class="xs" x="210" y="22" text-anchor="middle">15 dB</text>
+
+  <text class="t" x="520" y="44">One unicast frame at 15 dB</text>
+  <rect class="box-bad" x="520" y="62" width="130" height="38" rx="8"/><text class="s" x="585" y="86" text-anchor="middle">try 1 · 54 Mbit/s</text>
+  <rect class="box-bad" x="520" y="110" width="130" height="38" rx="8"/><text class="s" x="585" y="134" text-anchor="middle">try 2 · 54 Mbit/s</text>
+  <rect class="box-good" x="520" y="158" width="130" height="38" rx="8"/><text class="s" x="585" y="182" text-anchor="middle">try 3 · 24 Mbit/s</text>
+  <text class="s lbl-bad" x="662" y="86">lost</text>
+  <text class="s lbl-bad" x="662" y="134">lost</text>
+  <text class="s lbl-good" x="662" y="182">acknowledged</text>
+  <text class="xs" x="520" y="222">the sender's rate control learns</text>
+  <text class="xs" x="520" y="238">from the status wmediumd returns</text>
+</svg>
+</div>
+<figcaption><b>Higher rates need cleaner air.</b> The shape of the loss curves (a sketch, not the
+exact tables): at 15 dB a frame at 6 Mbit/s nearly always arrives, at 54 Mbit/s nearly never.
+wmediumd plays out the sender's retry series try by try and reports the result, so the sender's
+rate control adapts as it would on hardware.</figcaption>
+</figure>
+<p>This is why a client that walks away from an access point slows down before it disconnects,
+and why the controller's link metrics (data rates, retries, the signal it reports) move together
+in the lab the way they do in a house.</p>
+</section>
+
+<section id="airtime">
+<h2>Airtime and channels</h2>
+<p>Deciding whether a frame arrives is half the job; the other half is when. A radio cannot
+transmit while the channel is busy, and every frame takes time on the air. wmediumd keeps a queue
+per radio and per 802.11 access category (voice, video, best effort, background) and schedules
+each frame with the waits the standard prescribes: an idle gap before transmitting, a random
+backoff, the frame's airtime at its rate, a short gap, the acknowledgement.</p>
+<figure class="wide" id="fig-airtime">
+<div class="fig">
+<svg viewBox="0 0 820 230" role="img" aria-label="On 5180 MHz radio B waits while radio A transmits and is acknowledged, then sends its own frame; on 2437 MHz radio C's beacon is scheduled independently.">
+  <text class="t" x="16" y="40">5180 MHz</text>
+  <text class="s" x="120" y="64" text-anchor="end">radio A</text>
+  <text class="s" x="120" y="104" text-anchor="end">radio B</text>
+  <path class="ln-faint" d="M130 70 H800 M130 110 H800"/>
+  <rect class="box-soft" x="140" y="50" width="30" height="20"/><text class="xs" x="155" y="44" text-anchor="middle">wait</text>
+  <rect class="box-soft" x="170" y="50" width="34" height="20"/><text class="xs" x="187" y="44" text-anchor="middle">backoff</text>
+  <rect class="box-accent" x="204" y="50" width="220" height="20"/><text class="xs" x="314" y="64" text-anchor="middle">data frame</text>
+  <rect class="box-good" x="434" y="90" width="44" height="20"/><text class="xs" x="456" y="104" text-anchor="middle">ACK</text>
+  <path class="ln dot" d="M150 100 H430"/><text class="xs" x="300" y="96" text-anchor="middle">B receives A's frame</text>
+  <rect class="box-soft" x="478" y="90" width="30" height="20"/>
+  <rect class="box-soft" x="508" y="90" width="52" height="20"/>
+  <rect class="box-accent" x="560" y="90" width="150" height="20"/><text class="xs" x="635" y="104" text-anchor="middle">data frame</text>
+  <rect class="box-good" x="720" y="50" width="44" height="20"/><text class="xs" x="742" y="64" text-anchor="middle">ACK</text>
+
+  <text class="t" x="16" y="158">2437 MHz</text>
+  <text class="s" x="120" y="184" text-anchor="end">radio C</text>
+  <path class="ln-faint" d="M130 190 H800"/>
+  <rect class="box-soft" x="250" y="170" width="30" height="20"/>
+  <rect class="box-radio" x="280" y="170" width="120" height="20"/><text class="xs" x="340" y="184" text-anchor="middle">beacon</text>
+  <text class="xs" x="420" y="184">scheduled on its own, never blocked by 5 GHz</text>
+  <text class="xs" x="535" y="84" text-anchor="middle">then B's own frame</text>
+  <path class="ln" d="M130 214 H800" marker-end="url(#ah)"/><text class="xs" x="800" y="208" text-anchor="end">time</text>
+</svg>
+</div>
+<figcaption><b>Contention on one channel, independence across channels.</b> A sends to B and B
+acknowledges; only then does B get the channel for its own frame, which A acknowledges. A radio on
+another frequency is scheduled independently and never receives either.</figcaption>
+</figure>
+<p>The labs' patches make this per frequency. Upstream wmediumd assumed one channel for everyone;
+a mesh does not work that way. The gateway serves three bands at once, the extenders' backhaul
+runs on its own 5 GHz channel, and a client is on one channel at a time. So the patched daemon
+learns the frequency of every transmission, delivers only to radios on the same centre frequency,
+and keeps each frequency's queues separate: a 2.4 GHz beacon cannot hold up 5 GHz traffic.</p>
+<p>Airtime is also what the stacks measure. Channel utilization, the BSS load an access point
+advertises and the survey a controller asks for come from the time each frequency was busy, which
+the medium accounts for and the patched hwsim reports through the normal channel-survey interface.</p>
+</section>
+
+<section id="live">
+<h2>Changing the air while it runs</h2>
+<p>A matrix fixed at startup describes a house where nobody moves. To make a client walk, the
+matrix has to change while the lab is running, without restarting anything: a restart would drop
+every association and teach the experiment nothing.</p>
+<p>The labs' wmediumd has a control socket for this. A change is sent as a <em>generation</em>: a
+set of link values that apply together, at one instant, or not at all. Half a step of a walk never
+exists. After each generation the sender reads the values back and compares them; a scenario that
+cannot confirm what it applied stops instead of producing results about air it did not create.
+When the scenario ends, it restores the exact values it found, and checks those too.</p>
+<figure class="wide" id="fig-pipeline">
+<div class="fig">
+<svg viewBox="0 0 820 190" role="img" aria-label="A layout and a mobility file compile into a world plan with SNR for every tick; generations are applied over the control socket, read back, and restored at the end.">
+  <rect class="box" x="16" y="30" width="140" height="44" rx="8"/><text class="s" x="86" y="57" text-anchor="middle">layout</text>
+  <rect class="box" x="16" y="96" width="140" height="44" rx="8"/><text class="s" x="86" y="123" text-anchor="middle">mobility</text>
+  <path class="ln" d="M156 52 C190 52 190 85 214 85 M156 118 C190 118 190 85 214 85" marker-end="url(#ah)"/>
+  <rect class="box-accent" x="218" y="56" width="150" height="58" rx="10"/>
+  <text class="t" x="293" y="80" text-anchor="middle">compile</text>
+  <text class="xs" x="293" y="100" text-anchor="middle">once, offline</text>
+  <path class="ln" d="M368 85 H402" marker-end="url(#ah)"/>
+  <rect class="box" x="406" y="40" width="170" height="90" rx="10"/>
+  <text class="t" x="491" y="64" text-anchor="middle">world plan</text>
+  <text class="xs" x="491" y="84" text-anchor="middle">every tick: positions,</text>
+  <text class="xs" x="491" y="100" text-anchor="middle">presence, SNR per band</text>
+  <text class="xs" x="491" y="116" text-anchor="middle">hashed, checked in</text>
+  <path class="ln-accent" d="M576 85 H610" marker-end="url(#ah-accent)"/>
+  <text class="xs lbl-accent" x="593" y="76" text-anchor="middle">tick</text>
+  <rect class="box-accent" x="614" y="40" width="190" height="90" rx="10"/>
+  <text class="t" x="709" y="64" text-anchor="middle">wmediumd</text>
+  <text class="xs" x="709" y="84" text-anchor="middle">apply generation n</text>
+  <text class="xs" x="709" y="100" text-anchor="middle">read back, compare</text>
+  <text class="xs" x="709" y="116" text-anchor="middle">at the end: restore</text>
+  <text class="xs" x="16" y="172">the room service plays a plan in time with the lab; while it plays, nothing else rewrites the matrix</text>
+</svg>
+</div>
+<figcaption><b>From files to air.</b> The expensive part, geometry, happens once. Playing a room
+is a timed series of small, atomic, verified updates.</figcaption>
+</figure>
+</section>
+
+<section id="rooms">
+<h2>Rooms: a floor plan becomes numbers</h2>
+<p>Nobody wants to write a thousand link values by hand. The medium's configurator,
+<code>wmdcfg</code>, computes them from two small files. The <em>layout</em> is the house: its size,
+where the gateway and extenders stand, where clients sit, the walls and how much each one costs.
+The <em>mobility</em> file is what happens: who walks where and when, who appears and disappears.
+Together they are a <em>world</em>, and the configurator compiles a world into a plan with every
+directed link's SNR on every band at every tick.</p>
+<p>The model is deliberately simple and reproducible: a reference signal per band at one metre,
+log-distance path loss, and a fixed loss for every wall the straight line between two radios
+crosses.</p>
+<pre><code>SNR(band) = reference(band)
+          − 10 · path_loss_exponent · log10(distance / 1 m)
+          − Σ wall losses crossed
+          + transmitter adjustment(band)
+          + seeded shadowing (zero in the standard home)
+                                                 clamped to [−20, 60] dB</code></pre>
+<p>The standard home is 20 by 14 metres with a gateway in the middle, four extenders in the
+corners, ten clients that stay put and four interior walls of 5 dB each. Its reference signals are
+50 dB at 5 GHz, 54 at 2.4 and 47 at 6, with a path loss exponent of 2.2. Here is its shortest room,
+<em>one-client handover</em>: a laptop starts next to extender 1 and walks eight metres towards the
+gateway in sixteen seconds.</p>
+<figure class="wide" id="fig-room">
+<div class="fig">
+<svg viewBox="0 0 940 430" role="img" aria-label="Floor plan of the standard home with the walking client's path from extender 1 towards the gateway, and a chart of the client's 5 GHz SNR to extender 1 falling and to the gateway rising, crossing at about 10.5 seconds where the path crosses the hall wall.">
+  <!-- floor plan: 26 px per metre, origin (30, 20) -->
+  <rect class="box" x="30" y="20" width="520" height="364" rx="4"/>
+  <g class="grid">
+    <path d="M82 20 V384 M134 20 V384 M186 20 V384 M238 20 V384 M290 20 V384 M342 20 V384 M394 20 V384 M446 20 V384 M498 20 V384"/>
+    <path d="M30 72 H550 M30 124 H550 M30 176 H550 M30 228 H550 M30 280 H550 M30 332 H550"/>
+  </g>
+  <path class="wall" d="M186 20 V254"/>
+  <path class="wall" d="M394 150 V384"/>
+  <path class="wall" d="M30 254 H264"/>
+  <path class="wall" d="M316 150 H550"/>
+  <text class="xs" x="192" y="244">hall wall, 5 dB</text>
+  <!-- static clients -->
+  <g class="fill-muted">
+    <circle cx="56" cy="46" r="4"/><circle cx="134" cy="98" r="4"/><circle cx="238" cy="72" r="4"/>
+    <circle cx="316" cy="98" r="4"/><circle cx="524" cy="46" r="4"/><circle cx="56" cy="358" r="4"/>
+    <circle cx="160" cy="306" r="4"/><circle cx="290" cy="332" r="4"/><circle cx="420" cy="280" r="4"/>
+    <circle cx="524" cy="358" r="4"/>
+  </g>
+  <!-- rays at the end of the walk -->
+  <path class="ln-accent dash" d="M290 98 L290 202"/>
+  <!-- walk -->
+  <path class="ln-radio" stroke-width="3" d="M82 72 L290 98" marker-end="url(#ah-radio)"/>
+  <!-- APs -->
+  <g>
+    <rect class="box-accent" x="276" y="188" width="28" height="28" rx="6"/><text class="s" x="290" y="234" text-anchor="middle">gateway</text>
+    <rect class="box-warn" x="68" y="58" width="28" height="28" rx="6"/><text class="s" x="82" y="104" text-anchor="middle">extender 1</text>
+    <rect class="box" x="484" y="58" width="28" height="28" rx="6"/><text class="s" x="498" y="104" text-anchor="middle">extender 2</text>
+    <rect class="box" x="68" y="318" width="28" height="28" rx="6"/><text class="s" x="82" y="312" text-anchor="middle">extender 3</text>
+    <rect class="box" x="484" y="318" width="28" height="28" rx="6"/><text class="s" x="498" y="312" text-anchor="middle">extender 4</text>
+  </g>
+  <circle class="fill-radio" cx="290" cy="98" r="6"/>
+  <text class="s lbl-radio" x="304" y="90">at t = 18 s</text>
+  <text class="xs lbl-accent" x="304" y="110">gateway: 37 dB</text>
+  <text class="xs lbl-warn" x="304" y="126">extender 1: 25 dB, through the wall</text>
+  <text class="xs" x="30" y="404">20 m × 14 m, grid 2 m · dots: the ten clients that stay put</text>
+
+  <!-- chart: t 0..19 s -> x 620..900, SNR 20..52 -> y 340..84 -->
+  <path class="grid" d="M620 100 H900 M620 180 H900 M620 260 H900 M620 340 H900"/>
+  <path class="ln" d="M620 84 V340 H900"/>
+  <text class="xs" x="612" y="104" text-anchor="end">50</text>
+  <text class="xs" x="612" y="184" text-anchor="end">40</text>
+  <text class="xs" x="612" y="264" text-anchor="end">30</text>
+  <text class="xs" x="612" y="344" text-anchor="end">20 dB</text>
+  <text class="xs" x="620" y="358" text-anchor="middle">0</text>
+  <text class="xs" x="694" y="358" text-anchor="middle">5</text>
+  <text class="xs" x="767" y="358" text-anchor="middle">10</text>
+  <text class="xs" x="841" y="358" text-anchor="middle">15 s</text>
+  <polyline class="ln-warn" points="620,100 634.7,100 649.5,100 664.2,100 679,100 693.7,132 708.4,156 723.2,172 737.9,188 752.7,196 767.4,204 782.1,252 796.9,260 811.6,268 826.4,276 841.1,284 855.8,292 870.6,292 885.3,300 900,300"/>
+  <polyline class="ln-accent" points="620,308 634.7,308 649.5,308 664.2,308 679,300 693.7,300 708.4,292 723.2,292 737.9,284 752.7,284 767.4,236 782.1,236 796.9,228 811.6,220 826.4,220 841.1,212 855.8,212 870.6,204 885.3,204 900,204"/>
+  <text class="xs lbl-warn" x="640" y="92">to extender 1</text>
+  <text class="xs lbl-accent" x="640" y="328">to the gateway</text>
+  <path class="ln-faint dash" d="M775 84 V340"/>
+  <text class="xs" x="780" y="96">crosses the hall wall</text>
+  <text class="xs" x="780" y="110">−5 dB to one, +5 to the other</text>
+  <text class="t" x="620" y="40">The walking client's 5 GHz SNR</text>
+  <text class="xs" x="620" y="60">from the room's golden plan, one value per second</text>
+  <rect class="box-warn" x="620" y="376" width="160" height="22" rx="4"/>
+  <rect class="box-accent" x="780" y="376" width="120" height="22" rx="4"/>
+  <text class="xs" x="700" y="391" text-anchor="middle">associated: extender 1</text>
+  <text class="xs" x="840" y="391" text-anchor="middle">gateway</text>
+  <text class="xs" x="620" y="418">for example: when it roams depends on the stack and the optimizer</text>
+</svg>
+</div>
+<figcaption><b>One room, as the medium sees it.</b> Left, the house; the line is the walk. Right,
+the two links that matter, taken from the room's compiled plan. As the laptop leaves extender 1
+the signal falls with distance; at the hall wall it drops by 5 dB more while the gateway's rises by
+5. From there on the gateway is the better access point. Whether and when the client moves is
+what the experiment is about.</figcaption>
+</figure>
+<p>A room plan is computed once and checked in, with a hash of its inputs and of its content: a
+change to the model or to a room that does not regenerate the plans fails the medium's CI. Three
+families of rooms exist: the standard rooms (27), the same rooms with a wired extender (31), and
+the rooms with two OpenSync pods as access points (31). They cover walks and crossings, crowds
+arriving at once, clients hovering at a border, extenders failing and coming back, band changes,
+asymmetric links and traffic. Backhaul links follow the geometry too in the rooms that ask for it,
+so an extender can lose its parent and pick another one.</p>
+</section>
+
+<section id="roles">
+<h2>The air follows the room, not the roam</h2>
+<p>There is a tempting shortcut in writing a steering test: "make the current access point weak
+and the other one strong". It is wrong, and the medium does not allow it. The moment the client
+roams, "current" means the other access point, and the rule rewrites the air around the decision
+it was supposed to test.</p>
+<p>So the medium keys every link to physical radios, through roles fixed for the whole run:
+<em>extender 1</em> is a particular radio in a particular container, wherever its clients go. In
+the chart above, the two lines are the same whether the client stays with extender 1 for the whole
+walk, roams at second 11, or roams back and forth. Association is something the experiment
+observes and records. It is never an input to the air.</p>
+<aside class="note"><span class="t">Keeping cause and effect apart</span>
+<p>The same room can test doing nothing, a manual steer, the controller's own logic and an external
+optimizer, because the stimulus never depends on the decision. That is what makes two runs, or two
+stacks, comparable.</p></aside>
+</section>
+
+<section id="identity">
+<h2>Who is who</h2>
+<p>wmediumd does not query the containers. It loads the list of radios once, from a file the lab
+generates by asking each running container for its radio's permanent address. hwsim names the
+transmitting radio with that address plus one bit (<code>0x40</code> on the first byte), so
+<code>02:00:00:00:0e:00</code> in a container is <code>42:00:00:00:0e:00</code> to the medium. Free
+radios in the pool are left out: they would only receive copies of every broadcast.</p>
+<p>One radio carries many addresses at run time: an extender's private and IoT access points, its
+backhaul access point, its backhaul station, each on its own frequency. wmediumd learns these as
+frames flow, from the transmitter address inside each frame and the frequency hwsim reports. A new
+BSSID or a client that associates needs no restart. Only a radio that joins or leaves the lab
+does.</p>
+<figure id="fig-identity">
+<div class="fig">
+<svg viewBox="0 0 640 210" role="img" aria-label="One configured radio with identity 42:00:00:00:0e:00 owns four learned interfaces, each on its own frequency.">
+  <rect class="box-radio" x="16" y="70" width="210" height="70" rx="10"/>
+  <text class="t" x="30" y="98">configured radio</text>
+  <text class="s mono" x="30" y="120">42:00:00:00:0e:00</text>
+  <g>
+    <path class="ln" d="M226 105 C270 105 270 34 310 34 M226 105 C270 105 270 82 310 82 M226 105 C270 105 270 130 310 130 M226 105 C270 105 270 178 310 178"/>
+    <rect class="box" x="312" y="16" width="310" height="36" rx="8"/><text class="s" x="326" y="39">private access point · 5180 MHz</text>
+    <rect class="box" x="312" y="64" width="310" height="36" rx="8"/><text class="s" x="326" y="87">IoT access point · 2437 MHz</text>
+    <rect class="box" x="312" y="112" width="310" height="36" rx="8"/><text class="s" x="326" y="135">backhaul access point · 5745 MHz</text>
+    <rect class="box" x="312" y="160" width="310" height="36" rx="8"/><text class="s" x="326" y="183">backhaul station · 5745 MHz</text>
+  </g>
+</svg>
+</div>
+<figcaption><b>Learned, not configured.</b> The radio list is fixed at startup; the interfaces a
+radio carries, and their frequencies, are learned from the frames themselves. (Frequencies here
+are examples.)</figcaption>
+</figure>
+<p>Containers that are not one of the lab's own roles can join as guests. The EMOSA option of the
+RDK lab uses this for OpenSync pods: a container marked as a medium guest gets all its radios into
+the matrix, and can pin a few links of its own, such as a pod's fixed backhaul to its gateway
+tunnel.</p>
+</section>
+
+<section id="watching">
+<h2>Watching the medium</h2>
+<p>A medium that decides everything invisibly is hard to trust. Three windows look into it, and
+none of them can change it.</p>
+<ul>
+  <li><strong>wmediumd Console</strong>, a read-only web application that every lab serves. It
+  shows the radios in 3D, the directed matrix as wmediumd actually holds it, which pairs are
+  carrying frames, per-frame-type counters, airtime and load per channel, and the identity of the
+  configuration in force. It reads a host-only telemetry socket; it has no way to write.</li>
+  <li><strong>The room viewer</strong>, the house in 3D: the walls, the access points, the clients
+  moving, their links coloured by quality and the roams as they happen. The labs' room service
+  serves it live; the labs' sites carry a copy that previews the rooms without a lab.</li>
+  <li><strong>A metrics socket</strong> that the stacks' radio layers use to report what a real
+  radio would measure: the received signal of a client, channel surveys and BSS load. The
+  controller then gets its link metrics through its own protocol, as it would in a house.</li>
+</ul>
+<p>The repository also holds the controller's topology page that both labs serve: one page for
+both stacks, with a profile for each. It lives here because it follows the room and shares the
+viewer's room projection and signal meters.</p>
+</section>
+
+<section id="two-labs">
+<h2>One medium, two labs</h2>
+<p>The RDK lab and the prplMesh lab build their medium from this repository at a pinned commit.
+Same daemon, same patches, same rooms, same compiled plans: when a policy behaves differently on
+the two stacks, the difference is in the stacks.</p>
+<figure id="fig-two-labs">
+<div class="fig">
+<svg viewBox="0 0 700 250" role="img" aria-label="easymesh-medium, pinned by the RDK lab and the prplMesh lab; only container names, runtime paths and how the controller is read differ.">
+  <rect class="box-accent" x="200" y="16" width="300" height="70" rx="12"/>
+  <text class="t" x="350" y="44" text-anchor="middle">easymesh-medium</text>
+  <text class="s" x="350" y="66" text-anchor="middle">daemon · radios · rooms · console · page</text>
+  <path class="ln" d="M300 86 L180 140" marker-end="url(#ah)"/>
+  <path class="ln" d="M400 86 L520 140" marker-end="url(#ah)"/>
+  <text class="xs" x="350" y="128" text-anchor="middle">pinned commit, checked by each lab's build</text>
+  <rect class="box" x="30" y="144" width="300" height="90" rx="12"/>
+  <text class="t" x="180" y="170" text-anchor="middle">RDK lab</text>
+  <text class="s mono" x="180" y="192" text-anchor="middle">bpibroadband · bpiap-NNN</text>
+  <text class="s mono" x="180" y="212" text-anchor="middle">wlan-client-NNN</text>
+  <rect class="box" x="370" y="144" width="300" height="90" rx="12"/>
+  <text class="t" x="520" y="170" text-anchor="middle">prplMesh lab</text>
+  <text class="s mono" x="520" y="192" text-anchor="middle">prpl-controller · prpl-agent-NN</text>
+  <text class="s mono" x="520" y="212" text-anchor="middle">prpl-client-NN</text>
+</svg>
+</div>
+<figcaption><b>What differs is named in one place.</b> The configurator's stack table holds the
+container names, where the medium's runtime files live and how the controller's model is read.
+Everything else is shared.</figcaption>
+</figure>
+<p>A tool picks its stack from an explicit option, an environment variable, or the controller
+container it finds running; it never guesses between two labs. A change to the medium is
+requalified in both.</p>
+</section>
+
+<section id="limits">
+<h2>What it does not model</h2>
+<p>The medium is built for comparing steering decisions under the same, reproducible air. It is
+not a calibrated radio simulator, and it says so:</p>
+<ul>
+  <li>Channels are isolated by exact centre frequency. Partial overlap and adjacent-channel
+  interference are not modelled.</li>
+  <li>The loss curves are the legacy OFDM and CCK ones. HT and VHT rates map to the nearest of them;
+  there is no error model for HE, EHT, channel width, guard interval, spatial streams, beamforming
+  or multi-link operation.</li>
+  <li>Same-frequency interference accounting exists but is off in the labs' baseline; there is no
+  random fading in the rooms, by design.</li>
+  <li>Signal levels are model values, SNR minus a fixed −91 dBm noise floor, not calibrated
+  hardware RSSI.</li>
+  <li>An extender that the air cuts off is unreachable, not deleted: when a controller removes it
+  from its topology is the controller's own ageing behaviour, which is one of the things the labs
+  measure.</li>
+</ul>
+<p>The medium's documents go further: what each RF property means, which rooms show it, and what
+is qualified live and what is not.</p>
+</section>
+
+<section id="repository">
+<h2>The repository</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Part</th><th>What it is</th></tr></thead>
+<tbody>
+<tr><td><code>wmediumd/</code></td><td>upstream wmediumd at a pinned commit and one patch series: per-frequency scheduling and delivery, the atomic control socket, frequency-qualified SNR, the metrics and observer sockets, airtime and surveys; its build, launcher and tests</td></tr>
+<tr><td><code>hwsim/</code></td><td>the <code>mac80211_hwsim</code> patches (multichannel, 6 GHz, surveys, the optional kernel medium), their build and evaluators</td></tr>
+<tr><td><code>configurator/</code></td><td><code>wmdcfg</code>: the room language, the compiler, the runner, the stack table; the rooms themselves (standard, wired, pods) and their golden plans; the room viewer</td></tr>
+<tr><td><code>observer/</code></td><td>wmediumd Console, in Go, with its web pages</td></tr>
+<tr><td><code>topology-ui/</code></td><td>the controller's topology page both labs serve, with a profile per stack</td></tr>
+<tr><td><code>lxd-monitoring/</code></td><td>optional monitoring of a lab VM: the inner LXD UI, Grafana, Prometheus</td></tr>
+<tr><td><code>docs/</code></td><td>how the medium works in depth, and how far it can be trusted</td></tr>
+</tbody></table></div>
+<p>Everything builds and is tested without a lab: the CI builds and self-tests the daemon,
+regenerates every room plan and compares it, and runs the configurator's, the viewer's, the
+console's and the topology page's tests. No built binary is ever committed; each lab builds the
+daemon and the console from the commit it pins.</p>
+</section>
+
+<footer class="end">
+<p>easymesh-medium is one of the two core components of the
+<a href="https://boardfarmdevs.github.io/easymesh-labs/">EasyMesh labs</a>; the
+<a href="https://boardfarmdevs.github.io/easymesh-optimizer/">optimizer</a> is what the rooms
+are built to test. The source and the full documentation are in the
+<a href="https://github.com/boardfarmdevs/easymesh-medium">repository</a>.</p>
+</footer>
+</article>
+</div>
+</body>
+</html>
