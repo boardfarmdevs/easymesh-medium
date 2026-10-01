@@ -1,0 +1,14 @@
+[Unit]
+Description=Opt-in non-turbo profile for a thermally constrained EasyMesh host
+ConditionVirtualization=no
+ConditionPathExists=/sys/devices/system/cpu/intel_pstate/no_turbo
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+RuntimeDirectory=easymesh-host-cooling
+ExecStart=/bin/sh -ec 'cat /sys/devices/system/cpu/intel_pstate/no_turbo > /run/easymesh-host-cooling/no_turbo; echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo; test "$(cat /sys/devices/system/cpu/intel_pstate/no_turbo)" = 1'
+ExecStop=/bin/sh -ec 'if test "$(cat /sys/devices/system/cpu/intel_pstate/no_turbo)" = 1; then cat /run/easymesh-host-cooling/no_turbo > /sys/devices/system/cpu/intel_pstate/no_turbo; fi'
+
+[Install]
+WantedBy=multi-user.target

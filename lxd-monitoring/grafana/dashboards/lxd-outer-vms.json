@@ -1,0 +1,625 @@
+{
+  "uid": "easymesh-lxd-outer",
+  "title": "EasyMesh outer LXD VM",
+  "description": "Guest VM metrics from outer LXD, not physical-host totals or QEMU RSS. This in-VM monitoring stack cannot observe its own VM while stopped. Unsupported metric families display No data.",
+  "tags": [
+    "easymesh",
+    "lxd",
+    "outer-vm"
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "host",
+        "label": "Host",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "lxd-prometheus"
+        },
+        "definition": "label_values(lxd_cpu_seconds_total{job=\"lxd-outer\",type=\"virtual-machine\"}, host)",
+        "query": {
+          "query": "label_values(lxd_cpu_seconds_total{job=\"lxd-outer\",type=\"virtual-machine\"}, host)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "lab",
+        "label": "lab",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "lxd-prometheus"
+        },
+        "definition": "label_values(lxd_cpu_seconds_total{job=\"lxd-outer\",host=~\"$host\",type=\"virtual-machine\"},lab)",
+        "query": {
+          "query": "label_values(lxd_cpu_seconds_total{job=\"lxd-outer\",host=~\"$host\",type=\"virtual-machine\"},lab)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "project",
+        "label": "project",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "lxd-prometheus"
+        },
+        "definition": "label_values(lxd_cpu_seconds_total{job=\"lxd-outer\",host=~\"$host\",type=\"virtual-machine\",lab=~\"$lab\"},project)",
+        "query": {
+          "query": "label_values(lxd_cpu_seconds_total{job=\"lxd-outer\",host=~\"$host\",type=\"virtual-machine\",lab=~\"$lab\"},project)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "name",
+        "label": "VM",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "lxd-prometheus"
+        },
+        "definition": "label_values(lxd_cpu_seconds_total{job=\"lxd-outer\",host=~\"$host\",type=\"virtual-machine\",lab=~\"$lab\",project=~\"$project\"},name)",
+        "query": {
+          "query": "label_values(lxd_cpu_seconds_total{job=\"lxd-outer\",host=~\"$host\",type=\"virtual-machine\",lab=~\"$lab\",project=~\"$project\"},name)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Outer LXD scrape health",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lxd-prometheus"
+      },
+      "description": "1 means the exporter is reachable; this is not an instance count.",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "min(up{job=\"lxd-outer\",host=~\"$host\",lab=~\"$lab\"})",
+          "legendFormat": "{{name}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lxd-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Running VMs with CPU metrics",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lxd-prometheus"
+      },
+      "description": "Selected running containers with metrics; stopped instances are visible in LXD UI, not counted here.",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(count by (host,lab,project,name) (lxd_cpu_seconds_total{job=\"lxd-outer\",host=~\"$host\",type=\"virtual-machine\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\",mode=\"idle\"}))",
+          "legendFormat": "{{name}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lxd-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "VM CPU execution (100% = one vCPU)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lxd-prometheus"
+      },
+      "description": "User, nice, system, IRQ and softIRQ execution. Excludes idle, I/O wait and steal; not the CPU consumption of the physical host or QEMU process.",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * sum by (host,lab,project,name) (rate(lxd_cpu_seconds_total{job=\"lxd-outer\",host=~\"$host\",type=\"virtual-machine\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\",mode=~\"user|nice|system|irq|softirq\"}[$__rate_interval]))",
+          "legendFormat": "{{name}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lxd-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "VM memory used (total minus available)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lxd-prometheus"
+      },
+      "description": "Guest MemTotal minus MemAvailable; not QEMU RSS or physical-host memory use. No data if either metric is absent.",
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "lxd_memory_MemTotal_bytes{job=\"lxd-outer\",host=~\"$host\",type=\"virtual-machine\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\"} - lxd_memory_MemAvailable_bytes{job=\"lxd-outer\",host=~\"$host\",type=\"virtual-machine\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\"}",
+          "legendFormat": "{{name}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lxd-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Receive traffic by interface",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lxd-prometheus"
+      },
+      "description": "Interface counters are not end-to-end throughput; avoid summing bridged paths twice.",
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(lxd_network_receive_bytes_total{job=\"lxd-outer\",host=~\"$host\",type=\"virtual-machine\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\",device!=\"lo\"}[$__rate_interval])",
+          "legendFormat": "{{name}} {{device}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lxd-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Transmit traffic by interface",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lxd-prometheus"
+      },
+      "description": "Bytes per second for each interface reported by LXD.",
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(lxd_network_transmit_bytes_total{job=\"lxd-outer\",host=~\"$host\",type=\"virtual-machine\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\",device!=\"lo\"}[$__rate_interval])",
+          "legendFormat": "{{name}} {{device}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lxd-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Disk I/O by device",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lxd-prometheus"
+      },
+      "description": "Some storage drivers or kernels do not expose every I/O metric.",
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(lxd_disk_read_bytes_total{job=\"lxd-outer\",host=~\"$host\",type=\"virtual-machine\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\"}[$__rate_interval])",
+          "legendFormat": "{{name}} {{device}} read",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lxd-prometheus"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "rate(lxd_disk_written_bytes_total{job=\"lxd-outer\",host=~\"$host\",type=\"virtual-machine\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\"}[$__rate_interval])",
+          "legendFormat": "{{name}} {{device}} write",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lxd-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Processes",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lxd-prometheus"
+      },
+      "description": "Current process count per container.",
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "lxd_procs_total{job=\"lxd-outer\",host=~\"$host\",type=\"virtual-machine\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\"}",
+          "legendFormat": "{{name}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lxd-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Available filesystem bytes",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lxd-prometheus"
+      },
+      "description": "Mounted filesystem availability can reflect shared backing storage, not a per-container disk quota.",
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "lxd_filesystem_avail_bytes{job=\"lxd-outer\",host=~\"$host\",type=\"virtual-machine\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\",fstype!~\"tmpfs|devtmpfs|squashfs\"} ",
+          "legendFormat": "{{name}} {{device}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lxd-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "VM CPU execution (% of vCPU capacity)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lxd-prometheus"
+      },
+      "description": "Capacity counted from per-vCPU idle series, never the effective-CPU gauge (reported as zero by some LXD VM exporters). Missing series are not replaced by zero.",
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * (sum by (host,lab,project,name) (rate(lxd_cpu_seconds_total{job=\"lxd-outer\",host=~\"$host\",type=\"virtual-machine\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\",mode=~\"user|nice|system|irq|softirq\"}[$__rate_interval]))) / (count by (host,lab,project,name) (lxd_cpu_seconds_total{job=\"lxd-outer\",host=~\"$host\",type=\"virtual-machine\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\",mode=\"idle\"}))",
+          "legendFormat": "{{name}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lxd-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Reported vCPUs per VM",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lxd-prometheus"
+      },
+      "description": "Selected running containers with metrics; stopped instances are visible in LXD UI, not counted here.",
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count by (host,lab,project,name) (lxd_cpu_seconds_total{job=\"lxd-outer\",host=~\"$host\",type=\"virtual-machine\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\",mode=\"idle\"})",
+          "legendFormat": "{{name}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lxd-prometheus"
+          }
+        }
+      ]
+    }
+  ]
+}

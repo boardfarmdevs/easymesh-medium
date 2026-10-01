@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="IoT sensor">
+  <circle cx="32" cy="32" r="29" fill="#e8f7f0" stroke="#198754" stroke-width="4"/>
+  <rect x="20" y="21" width="24" height="24" rx="5" fill="#198754"/>
+  <circle cx="32" cy="33" r="7" fill="#ffffff"/>
+  <circle cx="32" cy="33" r="3" fill="#55d6a0"/>
+  <path d="M25 16v5m14-5v5M25 45v5m14-5v5M16 25h5m-5 14h5m23-14h5m-5 14h5"
+        fill="none" stroke="#198754" stroke-width="3" stroke-linecap="round"/>
+</svg>

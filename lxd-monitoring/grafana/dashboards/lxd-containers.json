@@ -1,0 +1,555 @@
+{
+  "uid": "easymesh-lxd",
+  "title": "EasyMesh nested LXD containers",
+  "description": "LXD instance metrics from the appliance VM; separate from EasyMesh radio metrics and Docker/outer-host metrics.",
+  "tags": [
+    "easymesh",
+    "lxd"
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "lab",
+        "label": "lab",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "lxd-prometheus"
+        },
+        "definition": "label_values(lxd_cpu_effective_total{job=\"lxd\",type=\"container\"},lab)",
+        "query": {
+          "query": "label_values(lxd_cpu_effective_total{job=\"lxd\",type=\"container\"},lab)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "project",
+        "label": "project",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "lxd-prometheus"
+        },
+        "definition": "label_values(lxd_cpu_effective_total{job=\"lxd\",type=\"container\",lab=~\"$lab\"},project)",
+        "query": {
+          "query": "label_values(lxd_cpu_effective_total{job=\"lxd\",type=\"container\",lab=~\"$lab\"},project)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "name",
+        "label": "Container",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "lxd-prometheus"
+        },
+        "definition": "label_values(lxd_cpu_effective_total{job=\"lxd\",type=\"container\",lab=~\"$lab\",project=~\"$project\"},name)",
+        "query": {
+          "query": "label_values(lxd_cpu_effective_total{job=\"lxd\",type=\"container\",lab=~\"$lab\",project=~\"$project\"},name)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "LXD scrape health",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lxd-prometheus"
+      },
+      "description": "1 means the exporter is reachable; this is not an instance count.",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "min(up{job=\"lxd\",lab=~\"$lab\"})",
+          "legendFormat": "{{name}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lxd-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Running LXD containers",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lxd-prometheus"
+      },
+      "description": "Selected running containers with metrics; stopped instances are visible in LXD UI, not counted here.",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(lxd_cpu_effective_total{job=\"lxd\",type=\"container\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\"})",
+          "legendFormat": "{{name}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lxd-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "CPU usage (100% = one core)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lxd-prometheus"
+      },
+      "description": "CPU usage can exceed 100% for a multi-core container; this is not percent of its quota.",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * sum by (project,name) (rate(lxd_cpu_seconds_total{job=\"lxd\",type=\"container\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\",mode!=\"idle\"}[$__rate_interval]))",
+          "legendFormat": "{{name}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lxd-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Memory used (including cache)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lxd-prometheus"
+      },
+      "description": "LXD 6.9 container memory: MemTotal minus MemFree, including cache. Not process RSS; MemTotal alone is the configured limit. Check exporter HELP semantics when changing LXD versions.",
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "lxd_memory_MemTotal_bytes{job=\"lxd\",type=\"container\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\"} - lxd_memory_MemFree_bytes{job=\"lxd\",type=\"container\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\"}",
+          "legendFormat": "{{name}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lxd-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Receive traffic by interface",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lxd-prometheus"
+      },
+      "description": "Interface counters are not end-to-end throughput; avoid summing bridged paths twice.",
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(lxd_network_receive_bytes_total{job=\"lxd\",type=\"container\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\",device!=\"lo\"}[$__rate_interval])",
+          "legendFormat": "{{name}} {{device}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lxd-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Transmit traffic by interface",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lxd-prometheus"
+      },
+      "description": "Bytes per second for each interface reported by LXD.",
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(lxd_network_transmit_bytes_total{job=\"lxd\",type=\"container\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\",device!=\"lo\"}[$__rate_interval])",
+          "legendFormat": "{{name}} {{device}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lxd-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Disk I/O by device",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lxd-prometheus"
+      },
+      "description": "Some storage drivers or kernels do not expose every I/O metric.",
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(lxd_disk_read_bytes_total{job=\"lxd\",type=\"container\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\"}[$__rate_interval])",
+          "legendFormat": "{{name}} {{device}} read",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lxd-prometheus"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "rate(lxd_disk_written_bytes_total{job=\"lxd\",type=\"container\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\"}[$__rate_interval])",
+          "legendFormat": "{{name}} {{device}} write",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lxd-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Processes",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lxd-prometheus"
+      },
+      "description": "Current process count per container.",
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "lxd_procs_total{job=\"lxd\",type=\"container\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\"}",
+          "legendFormat": "{{name}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lxd-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Available filesystem bytes",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lxd-prometheus"
+      },
+      "description": "Mounted filesystem availability can reflect shared backing storage, not a per-container disk quota.",
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "lxd_filesystem_avail_bytes{job=\"lxd\",type=\"container\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\",fstype!~\"tmpfs|devtmpfs|squashfs\"} ",
+          "legendFormat": "{{name}} {{device}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lxd-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "OOM kills over the selected interval",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lxd-prometheus"
+      },
+      "description": "An absent metric is not proof of zero OOM kills; check exporter/platform support.",
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "increase(lxd_memory_OOM_kills_total{job=\"lxd\",type=\"container\",lab=~\"$lab\",project=~\"$project\",name=~\"$name\"}[$__rate_interval])",
+          "legendFormat": "{{name}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lxd-prometheus"
+          }
+        }
+      ]
+    }
+  ]
+}

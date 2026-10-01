@@ -34,6 +34,8 @@ medium and in the same rooms.
 | [hwsim/](hwsim) | the `mac80211_hwsim` patches (multichannel, 6 GHz, the optional kernel medium, surveys, receive contexts), its build, the cfg80211 note, the backend evaluators |
 | [configurator/](configurator) | `wmdcfg`: the room language (layouts, mobility, scenarios), the compiler to the medium's plans, the runner and actuators, the inventory of a lab's radios; the rooms themselves: [worlds](configurator/worlds) (the standard rooms), [worlds-wired](configurator/worlds-wired) (with the wired extender), [worlds-pods](configurator/worlds-pods) (with OpenSync pods) and their golden plans; the room viewer |
 | [observer/](observer) | wmediumd Console: a read-only live view of the medium (Go, and its web pages) |
+| [topology-ui/](topology-ui) | the controller's topology page both labs serve (RDK's em_cli, prplMesh's controller-ui), one page with a profile per stack, and its tests |
+| [lxd-monitoring/](lxd-monitoring) | the labs' optional LXD monitoring of a lab VM (inner LXD UI, Grafana, Prometheus, outer-VM metrics), one copy for both labs; its tests in `lxd-monitoring/tests` |
 | [docs/](docs) | how the medium works and how far it can be trusted: [docs/README.md](docs/README.md) |
 
 ## Two labs, one medium
@@ -55,6 +57,7 @@ wmediumd/build/wmediumd -T            # the daemon's self-test
 (cd configurator && sh worlds/build-goldens.sh --check &&
     python3 worlds-wired/build-goldens.py --check && python3 worlds-pods/build-goldens.py --check)
 for t in configurator/tests/viewer/*-test.js; do node "$t"; done   # the room viewer
+topology-ui/tests/run.sh && python3 -m pytest -q topology-ui/tests  # the topology page
 (cd observer && go test ./...) && bash observer/build.sh
 hwsim/build-hwsim.sh --6ghz           # the kernel module, for the running kernel (see hwsim/README.md)
 ```
