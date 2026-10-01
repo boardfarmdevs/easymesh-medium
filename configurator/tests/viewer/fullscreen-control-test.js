@@ -66,5 +66,5 @@ function fixture() {
     await disabled.toggle();
     assert.equal(unavailable.document.fullscreenElement, null);
   }
-  console.log('PASS: full screen enter/exit, Esc state/focus, rejection, pending clicks, unsupported embedding and shared Yocto helper');
+  console.log('PASS: full screen enter/exit, Esc state/focus, rejection, pending clicks and unsupported embedding');
 })().catch(error => {console.error(error); process.exitCode = 1;});

@@ -49,6 +49,7 @@ python3 -m pytest -q topology-ui/tests   # the vendor bundle
 topology or the steering cues with a mocked DOM. The `*browser-test.js` ones
 need Playwright and run in the labs' suites: the steering cues and room follow
 against an assembled page, the RF hover against a live lab. CI runs the rest.
+[tests/README.md](tests/README.md) says what each holds.
 
 ## Where it came from
 
