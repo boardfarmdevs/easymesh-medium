@@ -51,14 +51,9 @@ need Playwright and run in the labs' suites: the steering cues and room follow
 against an assembled page, the RF hover against a live lab. CI runs the rest.
 [tests/README.md](tests/README.md) says what each holds.
 
-## Where it came from
+## Origin
 
-unified-wifi-mesh's `src/rdkb-cli/static` at upstream `1ef3cfd3`, with the page
-hunks of meta-cmf-bananapi-vcpe's unified-wifi-mesh patches as built at
-`96188ea` (the September controller image), and the room viewer's modules,
-which the recipe already took from the medium. prplmesh-lab's copy
-(`controller-ui/web/static` at `111c506`) differed in three ways, merged here:
-its names and tab set (now its profile), no WebSocket (its profile), and the
-room service's recent steering actions as roam cues next to the controller's
-(`topologySteeringActions`). RDK's later work (the OpenSync pod kind, Wi-Fi
-reset) is kept. The upstream files keep their Apache-2.0 RDK headers.
+The page is unified-wifi-mesh's RDK-B command-line web UI (`src/rdkb-cli/static`, at
+upstream `1ef3cfd3`) as the RDK lab developed it, with prplMesh's controller-ui
+differences as a profile, and the room viewer's modules. The upstream files keep their
+Apache-2.0 RDK headers.

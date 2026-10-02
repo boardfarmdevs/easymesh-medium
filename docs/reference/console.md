@@ -1,6 +1,6 @@
 # wmediumd Console: architecture, operation and design
 
-[Subsystem index](README.md)
+[Documents](../README.md)
 
 ## Goal
 
@@ -25,8 +25,8 @@ scenario writer, steering optimizer or source of EasyMesh measurements.
 ## Implementation status
 
 **Console NG is the default presentation and collector.** Start with the
-[NG manual](../console/guide.md) and
-[implementation/acceptance specification](../console/design.md).
+[NG manual](../guides/console.md) and
+[implementation/acceptance specification](console-design.md).
 The protocol/counting contracts below retain v1 compatibility. The old UI and
 typed controls are retired: `/classic/` redirects to NG, legacy mode/control
 flags are ignored, and every HTTP mutation is rejected. NG adds `/api/v2/`
@@ -201,7 +201,7 @@ The accepted profile requires 25 resolved identities, 600 directed pairs,
 healthy packet telemetry, immutable read-only HTTP behavior, and no change to
 wmediumd state when the Console starts, stops, or fails. Exact binary hashes
 belong in the deployment evidence described by
-[current state](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/current-state.md).
+current state (in [meta-cmf-bananapi-vcpe](https://vcpe.dev/meta-cmf-bananapi-vcpe/)).
 
 ## wmediumd telemetry additions
 
@@ -414,7 +414,7 @@ The room/configurator remains the RF writer. New readiness consumers use
 ## Historical v1 UI
 
 The following describes the retired presentation. Use the
-[NG operator manual](../console/guide.md) for the deployed UI.
+[NG operator manual](../guides/console.md) for the deployed UI.
 
 ### Live overview
 

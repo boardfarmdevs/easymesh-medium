@@ -1,6 +1,6 @@
 # wmediumd configurator
 
-[Subsystem index](README.md)
+[Documents](../README.md)
 
 ## Purpose and boundary
 
@@ -299,7 +299,7 @@ Before using a configurator build, require all of the following:
 - every run restores all touched values, leaves no unexpected override and
   preserves the complete current topology.
 
-The runnable scenarios under [experiments](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/experiments/README.md) produce
+The runnable scenarios under experiments (in [meta-cmf-bananapi-vcpe](https://vcpe.dev/meta-cmf-bananapi-vcpe/)) produce
 the evidence needed to evaluate these gates.
 
 ## Limits

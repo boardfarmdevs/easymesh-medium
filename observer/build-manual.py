@@ -79,7 +79,7 @@ if __name__ == "__main__":
         (here / "web/ng/rf-catalog.json").write_text(catalog)
         (here.parent / "configurator/worlds/viewer/rf-catalog.json").write_text(catalog)
     for document, filename in [
-        ("console/guide.md", "manual.html"),
+        ("guides/console.md", "manual.html"),
         ("reference/console-rf-properties.md", "rf-properties.html"),
     ]:
         source = (here.parent / "docs" / document).read_text()

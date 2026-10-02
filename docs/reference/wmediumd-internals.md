@@ -1,6 +1,6 @@
 # wmediumd: operation, control and simulation model
 
-[Subsystem index](README.md)
+[Documents](../README.md)
 
 ## Purpose and current conclusion
 
@@ -607,12 +607,12 @@ increase in those diagnostics is a regression.
 - `configurator/wmdcfg/actuator.py` implements the socket client.
 - [wmediumd configurator](configurator.md) defines the supported scenario language
   and restoration contract.
-- [extender outage](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/experiments/README.md) tests RF isolation
+- extender outage (in [meta-cmf-bananapi-vcpe](https://vcpe.dev/meta-cmf-bananapi-vcpe/)) tests RF isolation
   and recovery without stopping a container.
-- [client carousel](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/experiments/README.md) exercises repeated
+- client carousel (in [meta-cmf-bananapi-vcpe](https://vcpe.dev/meta-cmf-bananapi-vcpe/)) exercises repeated
   client movement visible in the live topology.
-- [client scale](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/experiments/README.md) covers larger online cohorts within
-  the fixed 100-client pool; [performance diagnostics](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/testing/performance.md)
+- client scale (in [meta-cmf-bananapi-vcpe](https://vcpe.dev/meta-cmf-bananapi-vcpe/)) covers larger online cohorts within
+  the fixed 100-client pool; performance diagnostics (in [meta-cmf-bananapi-vcpe](https://vcpe.dev/meta-cmf-bananapi-vcpe/))
   covers measured wmediumd cost and overload gates.
-- [patch set](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/platform/patch-set.md) places the wmediumd and kernel patches in the
+- patch set (in [meta-cmf-bananapi-vcpe](https://vcpe.dev/meta-cmf-bananapi-vcpe/)) places the wmediumd and kernel patches in the
   complete component ownership model.

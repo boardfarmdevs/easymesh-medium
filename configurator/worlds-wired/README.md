@@ -63,7 +63,7 @@ L2 loop). So: no LAN port at creation, marked wired, medium regenerated, then
 the reference extender's in-place binaries (OneWifi with its own libraries:
 a newer OneWifi with the image's libwifi_bus or libwifi_webconfig never
 finishes starting), em_agent's backhaul wait extended to a wired uplink
-(unified-wifi-mesh bbappend, `e8682fa`), a unit that keeps `eth1` a port of
+(the RDK lab's unified-wifi-mesh bbappend), a unit that keeps `eth1` a port of
 `brlan0` (RDK does not bridge it in extender mode), and only then `eth1` on
 the LAN bridge.
 
@@ -78,9 +78,9 @@ The unit still restarts OneWifi, then em_agent, if the fronthaul stays down for
 and keeps every station interface down.
 
 `up` on an existing extender restarts the medium only when it would change: a
-restart drops every Wi-Fi backhaul, and on 27 Sep the Wi-Fi extenders lost
-their APs and their stations with it and had not recovered 3 minutes later
-(restarting OneWifi, then em_agent, on each brought them back).
+restart drops every Wi-Fi backhaul: the Wi-Fi extenders lose their APs and their
+stations with it and need OneWifi, then em_agent, restarted on each (the RDK lab's
+`gen/lab-bringup.sh up` does that).
 
 OneWifi never creates the wired extender's own 5 GHz backhaul BSS: in EasyMesh
 node mode it starts only the station, and the controller's settings match what

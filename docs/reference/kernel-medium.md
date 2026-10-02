@@ -1,6 +1,6 @@
 # Optional kernel medium
 
-[Radio reference](README.md)
+[Documents](../README.md)
 
 Userspace wmediumd remains the default and reference backend. The optional
 hwsim kernel medium is an experimental frame-delivery path, not a requirement

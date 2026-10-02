@@ -11,7 +11,7 @@ the HAL.
 Mutation remains generation protected and identity resolution succeeds only
 after a radio has actually transmitted with that VIF address.
 
-Origin: prplmesh-lab patches/wmediumd/0015 (92a60f1); rebased onto the
+Origin: prplmesh-lab patches/wmediumd/0015 (28 August); rebased onto the
 single series of easymesh-medium as its last patch.
 
 --- a/wmediumd/control.c

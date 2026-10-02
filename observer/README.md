@@ -5,8 +5,8 @@ directed RF matrix, selected RF/traffic/load inspector, source/service status
 and embedded manual. The existing binary name, systemd unit and port remain
 `wmediumd-console`, `wmediumd-console.service` and guest port 8890.
 
-- [Operator manual](../docs/console/guide.md)
-- [Implementation and acceptance contract](../docs/console/design.md)
+- [Operator manual](../docs/guides/console.md)
+- [Implementation and acceptance contract](../docs/reference/console-design.md)
 - [RF property field guide](../docs/reference/console-rf-properties.md)
 - [Protocol reference](../docs/reference/console.md)
 

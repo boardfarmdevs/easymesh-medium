@@ -1,54 +1,46 @@
 # easymesh-medium: the RF medium of the EasyMesh labs
 
 <!-- labs block: the same in every repository of the EasyMesh labs, but for the Site line -->
-**Site:** <https://boardfarmdevs.github.io/easymesh-medium/>
-The [EasyMesh labs](https://boardfarmdevs.github.io/easymesh-labs/) serve three
+**Site:** <https://vcpe.dev/easymesh-medium/>
+The [EasyMesh labs](https://mesh.vcpe.dev/) serve three
 goals: EasyMesh optimizer development
-([easymesh-optimizer](https://github.com/boardfarmdevs/easymesh-optimizer)) in a rich
+([easymesh-optimizer](https://vcpe.dev/easymesh-optimizer/)) in a rich
 virtual lab, on both stacks
-([RDK EasyMesh](https://boardfarmdevs.github.io/meta-cmf-bananapi-vcpe/),
-[prplMesh](https://boardfarmdevs.github.io/prplmesh-lab/)); unchanged OpenSync
+([RDK EasyMesh](https://vcpe.dev/meta-cmf-bananapi-vcpe/),
+[prplMesh](https://vcpe.dev/prplmesh-lab/)); unchanged OpenSync
 pods as EasyMesh agents under a local controller, without the OpenSync cloud
-([EMOSA](https://boardfarmdevs.github.io/emosa-lab/), with the
-[OpenSync lab](https://boardfarmdevs.github.io/opensync-lab/)'s pods); and
+([EMOSA](https://vcpe.dev/emosa-lab/), with the
+[OpenSync lab](https://vcpe.dev/opensync-lab/)'s pods); and
 EasyMesh on physical hardware
-([Protocol lab](https://boardfarmdevs.github.io/easymesh-lab/)). Two core
+([Protocol lab](https://vcpe.dev/easymesh-lab/)). Two core
 components carry them: the RF medium
-([easymesh-medium](https://github.com/boardfarmdevs/easymesh-medium)) and EMOSA's
-OVSDB ⇄ EasyMesh conversion. The rest is infrastructure and learning around them.
+([easymesh-medium](https://vcpe.dev/easymesh-medium/)) and EMOSA's
+OVSDB ⇄ EasyMesh conversion. The rest is infrastructure, tools (the
+[room builder](https://vcpe.dev/easymesh-room-builder/)) and learning
+around them.
 <!-- /labs block -->
 
-The virtual radio medium every EasyMesh lab runs on: `mac80211_hwsim` radios
-whose frames pass through **wmediumd**, which decides for every frame, from a
-room model, what each receiver hears. It is one of the two core components of
-the [EasyMesh labs](https://boardfarmdevs.github.io/easymesh-labs/); the other
-is EMOSA, the OpenSync adapter. The optimizer labs on RDK
-([meta-cmf-bananapi-vcpe](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe))
-and prplMesh ([prplmesh-lab](https://github.com/boardfarmdevs/prplmesh-lab))
-both use this repository at a pinned commit, so the two stacks run on the same
-medium and in the same rooms.
+The virtual radio medium both optimizer labs run on: `mac80211_hwsim` radios whose
+frames pass through **wmediumd**, which decides for every frame, from a room model,
+what each receiver hears. The RDK lab and the prplMesh lab build it from this
+repository at a pinned commit, so the two stacks run on the same medium and in the
+same rooms. What differs between the labs is named in one place,
+[configurator/wmdcfg/stacks.py](configurator/wmdcfg/stacks.py): the labs' container
+names, where the medium's runtime files are, and how the controller's model is read.
+
+## Components
 
 | Part | What it is |
 | --- | --- |
-| [wmediumd/](wmediumd) | upstream wmediumd at a pinned commit ([upstream.env](wmediumd/upstream.env)) and one patch series: per-frequency scheduling and interference, the atomic scenario-control socket, frequency-qualified SNR, the metrics and observer endpoints, airtime and surveys, association ownership; [build-wmediumd.sh](wmediumd/build-wmediumd.sh), the launcher and its tests |
-| [hwsim/](hwsim) | the `mac80211_hwsim` patches (multichannel, 6 GHz, the optional kernel medium, surveys, receive contexts), its build, the cfg80211 note, the backend evaluators |
-| [configurator/](configurator) | `wmdcfg`: the room language (layouts, mobility, scenarios), the compiler to the medium's plans, the runner and actuators, the inventory of a lab's radios; the rooms themselves: [worlds](configurator/worlds) (the standard rooms), [worlds-wired](configurator/worlds-wired) (with the wired extender), [worlds-pods](configurator/worlds-pods) (with OpenSync pods) and their golden plans; the room viewer |
-| [observer/](observer) | wmediumd Console: a read-only live view of the medium (Go, and its web pages) |
-| [topology-ui/](topology-ui) | the controller's topology page both labs serve (RDK's em_cli, prplMesh's controller-ui), one page with a profile per stack, and its tests |
-| [lxd-monitoring/](lxd-monitoring) | the labs' optional LXD monitoring of a lab VM (inner LXD UI, Grafana, Prometheus, outer-VM metrics), one copy for both labs; its tests in `lxd-monitoring/tests` |
-| [docs/](docs) | how the medium works and how far it can be trusted: [docs/README.md](docs/README.md) |
+| [wmediumd/](wmediumd) | upstream wmediumd at a pinned commit ([upstream.env](wmediumd/upstream.env)) and one patch series: per-frequency scheduling and interference, the atomic scenario-control socket, frequency-qualified SNR, the metrics and observer sockets, airtime and surveys, association ownership; its build, launcher and tests |
+| [hwsim/](hwsim/README.md) | the `mac80211_hwsim` patches (multichannel, 6 GHz, surveys, receive contexts, the optional kernel medium), its build, the cfg80211 companion, the backend evaluators |
+| [configurator/](configurator/README.md) | `wmdcfg`: the room language (layouts, mobility, scenarios), the compiler to the medium's plans, the runner and actuators, the inventory of a lab's radios; the rooms: [worlds](configurator/worlds/README.md) (standard), [worlds-wired](configurator/worlds-wired/README.md) (with the wired extender), [worlds-pods](configurator/worlds-pods/README.md) (with OpenSync pods) and their golden plans; the room viewer |
+| [observer/](observer/README.md) | wmediumd Console: a read-only live view of the medium (Go, and its web pages) |
+| [topology-ui/](topology-ui/README.md) | the controller's topology page both labs serve, one page with a profile per stack |
+| [lxd-monitoring/](lxd-monitoring/README.md) | optional monitoring of a lab VM (inner LXD UI, Grafana, Prometheus, outer-VM metrics) |
+| [site/](site) | the explainer site: how the medium works |
 
-## Two labs, one medium
-
-What differs between the labs is named in one place,
-[configurator/wmdcfg/stacks.py](configurator/wmdcfg/stacks.py): the lab's
-container names, where the medium's runtime files are, and how the controller's
-model is read. A tool takes the stack from `--stack`, else `WMDCFG_STACK`
-(`rdk` or `prplmesh`), else from the controller container running in the lab.
-Everything else, the daemon, the patches, the room language and the rooms, is
-the same for both.
-
-## Build and check
+## Getting started
 
 ```sh
 wmediumd/build-wmediumd.sh            # -> wmediumd/build/wmediumd and its provenance
@@ -59,42 +51,21 @@ wmediumd/build/wmediumd -T            # the daemon's self-test
 for t in configurator/tests/viewer/*-test.js; do node "$t"; done   # the room viewer
 topology-ui/tests/run.sh && python3 -m pytest -q topology-ui/tests  # the topology page
 (cd observer && go test ./...) && bash observer/build.sh
-hwsim/build-hwsim.sh --6ghz           # the kernel module, for the running kernel (see hwsim/README.md)
+hwsim/build-hwsim.sh --6ghz           # the kernel module, for the running kernel
 ```
 
-wmediumd needs `libnl-3`, `libnl-genl-3` and `libconfig` headers; the
-configurator only Python 3 (and pytest for its tests); the viewer's tests Node,
-and Playwright for the `*browser-test.js` ones and
-[observer/tests](observer/tests), which the labs' suites run; the console Go.
-[CI](.github/workflows/checks.yml) runs all of it except the kernel module and the
-browser tests.
-No built binary is ever committed: a lab builds the daemon and the console
-from its pinned commit, and the provenance file says which.
+wmediumd needs `libnl-3`, `libnl-genl-3` and `libconfig` headers; the configurator only
+Python 3 (and pytest for its tests); the viewer's and the page's tests Node, and
+Playwright for their `*browser-test.js` ones, which the labs' suites run; the console Go.
+[CI](.github/workflows/checks.yml) runs all of it except the kernel module and the browser
+tests. No built binary is committed: a lab builds the daemon and the console from its
+pinned commit, and the provenance file says which.
 
-## Where it came from
+The patches to wmediumd and to Linux's `mac80211_hwsim` are GPL-2.0, as their upstreams
+require.
 
-The history is meta-cmf-bananapi-vcpe's (`gen/wmediumd`, `gen/hwsim` and its
-radio documents) up to 29 Sep 2026, when the medium existed twice, in that
-repository and in prplmesh-lab, changed independently. They were merged here
-from meta-cmf-bananapi-vcpe `2ce6e9b` (the medium last changed in `521c3a3`) and
-prplmesh-lab `2187d4a` (last changed in `9fb9017`); a later change to either
-lab's copy is ported here until the labs consume this repository:
-- wmediumd: RDK's 35 patches plus the one prplMesh feature they lacked
-  (resolve learned VIF identities on readback, 0036). The series reproduces
-  prplmesh-lab's patched sources exactly.
-- hwsim: the 11 patches were the same.
-- configurator: RDK's, which was ahead (the OpenSync pods, the wired
-  extender), with prplMesh's lab behind the stack profile and its own
-  features (kernel-medium identity aliases, a stricter atomic apply); the
-  rooms are RDK's, whose goldens regenerate identically.
-- console: the same code; both labs' packaging.
+## Documentation
 
-## Status
-
-Being formed (alignment plan phase 6, easymesh-labs `docs/alignment-plan.md`):
-the labs still carry their own copies until they consume this repository and
-are requalified from scratch.
-
-License: the patches to wmediumd and to Linux's `mac80211_hwsim` are GPL-2.0,
-as their upstreams require. The rest carries no separate license, as in the
-labs it came from.
+The [site](https://vcpe.dev/easymesh-medium/) explains how the medium works.
+The documents, indexed in [docs/README.md](docs/README.md), go further: the daemon's
+internals, the room language, the console, and how faithfully each RF property is modelled.

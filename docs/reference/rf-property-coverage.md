@@ -1,12 +1,12 @@
 # RF property demonstration coverage
 
-[Radio reference](README.md) · [Room catalog](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/rooms/catalog.md) ·
+[Documents](../README.md) · Room catalog (in [meta-cmf-bananapi-vcpe](https://vcpe.dev/meta-cmf-bananapi-vcpe/)) ·
 [Field guide](console-rf-properties.md)
 
 This is the maintained RDK property-to-room contract, not a declaration that
 every room or daemon mode is live-qualified. The complete property inventory
-is `PROPERTIES` in [rf_observations.py](https://github.com/boardfarmdevs/easymesh-optimizer/blob/main/optimizer/rf_observations.py).
-[rf_coverage.py](https://github.com/boardfarmdevs/easymesh-optimizer/blob/main/optimizer/rf_coverage.py) adds named
+is `PROPERTIES` in rf_observations.py (easymesh-optimizer `optimizer/rf_observations.py`).
+rf_coverage.py (easymesh-optimizer `optimizer/rf_coverage.py`) adds named
 rooms, machine-readable check categories and expectations to both generated
 catalogs and the room catalog API. Coverage tests require exact property-set
 equality, signed existing rooms and this document. A catalog entry neither
@@ -38,7 +38,7 @@ provider replacement, counter resets and implausible deltas invalidate the
 affected windows. Existing native path validation rejects unknown parents,
 cycles and conflicting topology; room geometry never fills a missing hop.
 
-The new optional [counter-guard policy](https://github.com/boardfarmdevs/easymesh-optimizer/blob/main/configs/load-counter-guard-policy.yaml)
+The new optional counter-guard policy (easymesh-optimizer `configs/load-counter-guard-policy.yaml`)
 requires `load_aware_enabled` and `load_counter_guard_enabled`. For an otherwise
 overloaded strong serving link it checks three native AP counter rates:
 retries ≤100/s, TX failures ≤10/s and RX drops ≤10/s by default. These are
@@ -65,7 +65,7 @@ or claims that a quieter target fixes reverse-link impairment.
 | Weak serving link | Existing signal rescue and its guards; high counters do not suppress rescue |
 
 Selecting a room alone does not enable this policy. The checked-in
-[native-counter-guard-room-profile manifest](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/gen/rooms/manifests/native-counter-guard-room-profile.json)
+native-counter-guard-room-profile manifest (meta-cmf-bananapi-vcpe `gen/rooms/manifests/native-counter-guard-room-profile.json`)
 selects `rf-asymmetric-ack`, its real client binding and the opt-in policy.
 Stop the room service before operating it; never start a second actuator:
 
@@ -134,8 +134,8 @@ These must also retain named observation checks, including disabled modes.
 | Beacon station count, utilization, available admission capacity | `rf-packet-size-counters`, `home-a-flash-crowd`: fresh received IE and exact context; capacity stays diagnostic in 32 µs/s units | Console BSS Load parsing tests; AP Metrics is not beacon proof; no ESP/free-bandwidth inference |
 
 Source anchors are the [world compiler](../../configurator/wmdcfg/world.py),
-[native load provider](https://github.com/boardfarmdevs/easymesh-optimizer/blob/main/optimizer/load_observer.py),
-[load policy](https://github.com/boardfarmdevs/easymesh-optimizer/blob/main/optimizer/load_policy.py),
+native load provider (easymesh-optimizer `optimizer/load_observer.py`),
+load policy (easymesh-optimizer `optimizer/load_policy.py`),
 [medium patches](../../wmediumd/patches) and
 [field guide](console-rf-properties.md). Independent TX power, noise and CCA
 controls, adjacent-channel spectra, receiver collision/capture, MIMO,
@@ -166,13 +166,13 @@ settle. Select `sta_static_03` in the RF inspector, then play at 1×.
 
 The labs' live qualification of these properties is theirs: the RDK lab's native counter
 pressure, native load action, room catalog and native recovery records are in its
-[RF property qualification records](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/testing/rf-qualification.md), prplMesh's in its
-[RF property coverage](https://github.com/boardfarmdevs/prplmesh-lab/blob/main/reference/radio/rf-property-coverage.md).
+RF property qualification records (in [meta-cmf-bananapi-vcpe](https://vcpe.dev/meta-cmf-bananapi-vcpe/)), prplMesh's in its
+RF property coverage (in [prplmesh-lab](https://vcpe.dev/prplmesh-lab/)).
 
 ## Cold room initialization
 
 The native recovery a cold room exposed in the RDK lab is in its
-[qualification records](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/testing/rf-qualification.md#native-recovery-during-cold-room-initialization).
+qualification records (in [meta-cmf-bananapi-vcpe](https://vcpe.dev/meta-cmf-bananapi-vcpe/)).
 
 ### Medium initialization cost
 
@@ -298,7 +298,7 @@ existing static section also discovers the new pytest tests. The rooms
 section includes the same live check alongside its broader catalog tests;
 use `rf` alone for this work, not a full catalog/soak.
 
-The standalone [live runner](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/gen/tests/rf-property-rooms-smoke.py)
+The standalone live runner (meta-cmf-bananapi-vcpe `gen/tests/rf-property-rooms-smoke.py`)
 uses the normal lease/revision protocol, refuses a held lease or suite room
 guard, saves timestamped samples and traffic phase results, and restores the
 paused Default in `finally`. It never starts another optimizer, retunes radios

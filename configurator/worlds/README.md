@@ -42,13 +42,13 @@ briefly plays all 21 room previews, checks the guide/fullscreen controls, and
 rejects backend, cross-origin and write requests. This checks the disconnected
 presentation, not native convergence.
 
-<https://boardfarmdevs.github.io/meta-cmf-bananapi-vcpe/viewer/>
+<https://vcpe.dev/meta-cmf-bananapi-vcpe/viewer/>
 
 Static hosting defaults to the explicitly disconnected sandbox without a
 `mode` parameter or any backend discovery requests. It calculates the same
 browser-side geometry previews but cannot change a live lab:
 
-<https://boardfarmdevs.github.io/meta-cmf-bananapi-vcpe/viewer/?world=home-a-private-client-room-walk>
+<https://vcpe.dev/meta-cmf-bananapi-vcpe/viewer/?world=home-a-private-client-room-walk>
 
 On an interactive lab server, open its base URL or `/viewer/` to use live play,
 dragging and world changes. The server sets the default in the HTML without an
@@ -59,7 +59,7 @@ work. Browser modes do not change the server's optimizer authority.
 
 Select a world in the sidebar or address one directly, for example:
 
-<https://boardfarmdevs.github.io/meta-cmf-bananapi-vcpe/viewer/?world=home-a-slow-walk-ten>
+<https://vcpe.dev/meta-cmf-bananapi-vcpe/viewer/?world=home-a-slow-walk-ten>
 
 For local use, serve the `worlds/` directory over HTTP so the viewer can fetch
 the golden JSON files:
@@ -98,7 +98,7 @@ waits are additional wall-clock time, not part of the 60-second script. No
 pause proves that roaming succeeded. Raw `.wmd` exports remain RF sequences
 and do not implement these viewer checkpoints.
 
-See the [per-room inspection guide](https://github.com/boardfarmdevs/meta-cmf-bananapi-vcpe/blob/main/doc/easymesh/reference/rooms/catalog.md)
+See the per-room inspection guide (in [meta-cmf-bananapi-vcpe](https://vcpe.dev/meta-cmf-bananapi-vcpe/))
 for the expected AP sequences and checks in both views.
 
 ## Install the renderer dependencies
