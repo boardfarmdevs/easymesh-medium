@@ -145,7 +145,9 @@ def main(argv=None) -> int:
     parser.add_argument("--socket", required=True)
     parser.add_argument("--kernel-root", type=Path, default=Path("/sys/kernel/debug/ieee80211"))
     parser.add_argument("--enable", action="store_true", help="explicitly select the hwsim survey cache")
-    parser.add_argument("--interval", type=float, default=0.1)
+    # 0.25 s: the driver drops a context older than one second and hostapd reads it about
+    # once a second; 0.1 s cost a lab 0.14 cores (128 radios read each tick)
+    parser.add_argument("--interval", type=float, default=0.25)
     parser.add_argument("--fixed-utilization", type=int, choices=range(256), metavar="0..255")
     parser.add_argument("--status-file", type=Path)
     parser.add_argument("--iterations", type=int, default=0, help="zero runs until stopped")

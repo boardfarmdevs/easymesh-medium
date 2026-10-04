@@ -122,7 +122,7 @@ zero is not proof of zero available throughput.
 
 The survey bridge already writes `/run/wmdcfg-survey.json`, including channels,
 context records, provider/epoch information and errors. Prefer reading this
-bounded publication over making a second survey collector. Its normal 100 ms
+bounded publication over making a second survey collector. Its normal 250 ms
 sampling serves the RF system independently of the console. The driver cache
 expires after one second; bridge status publication has a 250 ms minimum
 interval. A slow console must retain the original sample time and mark stale

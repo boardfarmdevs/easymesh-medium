@@ -437,7 +437,7 @@ uninitialized placeholder as a valid measurement.
 
 One medium event loop accounts for bounded transmission/ACK intervals.
 hwsim tracks radio/VIF lifecycle and operating/receive contexts. A root-only,
-versioned debugfs bridge polls every 100 ms, batches observer requests and
+versioned debugfs bridge polls every 250 ms, batches observer requests and
 feeds driver caches; nl80211 readers never wait synchronously on userspace.
 Epoch changes and a one-second TTL invalidate data. See §12.4 for wire formats,
 limits and service setup; §12.5 covers optional visibility reservations.
@@ -851,11 +851,13 @@ surrogates. This is **measurement of this model**, not hardware RF capacity.
   `SLOT EPOCH FREQ WIDTH PROVIDER OBSERVED_US ACTIVE_US BUSY_US VALID`.
   Write: `v1 SLOT EPOCH PROVIDER OBSERVED_US ACTIVE_US BUSY_US`.
   Epoch, monotonic counters and provider identity are checked in the driver.
-- The single root bridge polls every **100 ms**: one request per frequency
-  plus one batched observer request. Scan/ROC, disable, retune, context reuse
-  and provider restart reset measurements. Cache TTL is **one second**;
-  driver reads never wait synchronously for userspace. Status JSON has a
-  250 ms minimum publication interval (normally 300 ms at this tick).
+- The single root bridge polls every **250 ms** (`--interval`, 0.05 to 0.5 s;
+  100 ms until October 2026, which cost a lab VM 0.14 cores): one request per
+  frequency plus one batched observer request. Scan/ROC, disable, retune,
+  context reuse and provider restart reset measurements. Cache TTL is **one
+  second**, so a tick can run 750 ms late before a context expires; driver
+  reads never wait synchronously for userspace. Status JSON has a 250 ms
+  minimum publication interval (normally every tick).
 - Native nl80211 survey supplies TIME/BUSY/IN_USE in **milliseconds**, without
   invented noise/TX/RX flags. RDK converts time to **microseconds** for OneWifi.
   Native utilization is a byte **0–255**, not a percentage. Zero is valid;
@@ -973,7 +975,7 @@ not calibrated saturation.
 
 Native reporting remains separate: observed RDK periodic AP reports take
 about 5 seconds, prpl about 1 second; prpl threshold checks remain 10 seconds.
-The 100 ms cache period does not guarantee controller/UI freshness.
+The 250 ms bridge period does not guarantee controller/UI freshness.
 
 Current evidence: `/home/rev/work/profiling-gates-0912/*-feedback-rf-evidence/`.
 Prior results remain in `/home/rev/work/rf-phases12-0911/`.
