@@ -1,0 +1,156 @@
+From: EasyMesh labs
+Subject: [PATCH] wmediumd: remember error probabilities
+
+The error probability of a frame is a pure function of the SNR, the rate, the
+band and the frame length. A still room asks for the same few values with every
+beacon to every receiver on its channel: in an idle RDK lab (4 October 2026,
+perf over 30 s) the BER series behind it (pow, erfc in libm) was 30 % of
+wmediumd's CPU, while checking the stations on other channels was under 7 %.
+
+Remember the last answers in a table of 4096 entries, two slots per key, keyed
+by exactly those inputs (the SNR by its bits). A hit takes about 6 ns where the
+series takes 5 to 9 us, and returns what the direct computation returns; the
+self-test compares 71,136 of them bit for bit.
+
+diff --git a/wmediumd/per.c b/wmediumd/per.c
+index 1f89a77..12de914 100644
+--- a/wmediumd/per.c
++++ b/wmediumd/per.c
+@@ -159,8 +159,8 @@ static double per(double ber, enum fec_rate rate, int frame_len)
+ 	return 1.0 - pow(1 - prob_uncorrected, 8 * frame_len);
+ }
+ 
+-double get_error_prob_from_snr(double snr, unsigned int rate_idx, u32 freq,
+-			       int frame_len)
++double get_error_prob_from_snr_direct(double snr, unsigned int rate_idx, u32 freq,
++				      int frame_len)
+ {
+ 	int m;
+ 	enum fec_rate fec;
+@@ -186,6 +186,70 @@ double get_error_prob_from_snr(double snr, unsigned int rate_idx, u32 freq,
+ 	return per(ber, fec, frame_len);
+ }
+ 
++/*
++ * The error probability is a pure function of the SNR, the rate, the band
++ * (freq only selects 2.4 or 5 GHz rates) and the frame length, and a still
++ * room asks for the same few values with every beacon to every receiver:
++ * the BER series (pow, erfc) was 30 % of wmediumd's CPU in an idle lab.
++ * Remember recent answers (4096 entries, two slots per key); a hit returns
++ * exactly what the direct computation returns.
++ */
++#define PER_CACHE_SLOTS 4096
++
++static struct per_cache_entry {
++	double snr;
++	double value;
++	unsigned int rate_idx;
++	int frame_len;
++	bool high_band;
++	bool valid;
++} per_cache[PER_CACHE_SLOTS];
++
++static bool per_cache_holds(const struct per_cache_entry *entry, double snr,
++			    unsigned int rate_idx, int frame_len, bool high_band)
++{
++	return entry->valid && entry->rate_idx == rate_idx &&
++	       entry->frame_len == frame_len && entry->high_band == high_band &&
++	       memcmp(&entry->snr, &snr, sizeof(snr)) == 0;
++}
++
++double get_error_prob_from_snr(double snr, unsigned int rate_idx, u32 freq,
++			       int frame_len)
++{
++	bool high_band = freq > 5000;
++	struct per_cache_entry *first, *second;
++	uint64_t key;
++
++	/* an SNR's bits differ in the exponent and the top of the mantissa:
++	 * mix every bit into the slot (MurmurHash3's 64-bit finalizer) */
++	memcpy(&key, &snr, sizeof(key));
++	key ^= (uint64_t)rate_idx * 0x9e3779b97f4a7c15ULL;
++	key ^= (uint64_t)(uint32_t)frame_len * 0xc2b2ae3d27d4eb4fULL;
++	key ^= high_band;
++	key ^= key >> 33;
++	key *= 0xff51afd7ed558ccdULL;
++	key ^= key >> 33;
++	key *= 0xc4ceb9fe1a85ec53ULL;
++	key ^= key >> 33;
++	/* two slots per key: two values that share a slot do not evict each
++	 * other on every frame; a new value goes first, the older one second */
++	first = &per_cache[key % PER_CACHE_SLOTS];
++	second = &per_cache[(key >> 32) % PER_CACHE_SLOTS];
++	if (per_cache_holds(first, snr, rate_idx, frame_len, high_band))
++		return first->value;
++	if (per_cache_holds(second, snr, rate_idx, frame_len, high_band))
++		return second->value;
++	if (second != first)
++		*second = *first;
++	*first = (struct per_cache_entry) {
++		.snr = snr, .rate_idx = rate_idx, .frame_len = frame_len,
++		.high_band = high_band, .valid = true,
++		.value = get_error_prob_from_snr_direct(snr, rate_idx, freq,
++							frame_len),
++	};
++	return first->value;
++}
++
+ static double get_error_prob_from_per_matrix(struct wmediumd *ctx, double snr,
+ 					     unsigned int rate_idx, u32 freq,
+ 					     int frame_len, struct station *src,
+diff --git a/wmediumd/wmediumd.c b/wmediumd/wmediumd.c
+index d067f29..cd142b3 100644
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -2706,6 +2706,38 @@ static int wmd_selftest(void)
+ 		}
+ 	}
+ 
++	/* ---------- WMD6: remembered error probabilities are exact ---------- */
++	{
++		static const u32 freqs[] = { 2437, 5180, 6135 };
++		static const int lengths[] = { 14, 60, 98, 300, 1500, 2304 };
++		int mismatches = 0, checked = 0;
++
++		for (int pass = 0; pass < 2; pass++)
++			for (int snr = -5; snr <= 70; snr++)
++				for (unsigned int rate = 0; rate < 13; rate++)
++					for (size_t f = 0; f < sizeof(freqs) / sizeof(freqs[0]); f++)
++						for (size_t l = 0; l < sizeof(lengths) / sizeof(lengths[0]); l++) {
++							double remembered = get_error_prob_from_snr(
++								snr + 0.5 * pass, rate, freqs[f], lengths[l]);
++							double direct = get_error_prob_from_snr_direct(
++								snr + 0.5 * pass, rate, freqs[f], lengths[l]);
++							double again = get_error_prob_from_snr(
++								snr + 0.5 * pass, rate, freqs[f], lengths[l]);
++
++							mismatches += memcmp(&remembered, &direct, sizeof(direct)) != 0;
++							mismatches += memcmp(&again, &direct, sizeof(direct)) != 0;
++							checked += 2;
++						}
++		if (!mismatches)
++			printf("PASS PER memo: %d remembered error probabilities equal the direct computation bit for bit\n",
++			       checked);
++		else {
++			printf("FAIL PER memo: %d of %d remembered error probabilities differ\n",
++			       mismatches, checked);
++			fails++;
++		}
++	}
++
+ 	if (wmd_telemetry_selftest()) {
+ 		printf("FAIL telemetry: bounded counters and ownership state\n");
+ 		fails++;
+diff --git a/wmediumd/wmediumd.h b/wmediumd/wmediumd.h
+index be4f56a..715f1cf 100644
+--- a/wmediumd/wmediumd.h
++++ b/wmediumd/wmediumd.h
+@@ -374,6 +374,8 @@ struct intf_info {          /* WMD 3/4: interference bucketed per frequency */
+ void station_init_queues(struct station *station);
+ double get_error_prob_from_snr(double snr, unsigned int rate_idx, u32 freq,
+ 			       int frame_len);
++double get_error_prob_from_snr_direct(double snr, unsigned int rate_idx, u32 freq,
++				      int frame_len);
+ int set_default_per(struct wmediumd *ctx);
+ int read_per_file(struct wmediumd *ctx, const char *file_name);
+ int w_logf(struct wmediumd *ctx, u8 level, const char *format, ...);
