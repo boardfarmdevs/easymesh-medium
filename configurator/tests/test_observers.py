@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-from wmdcfg.observers import mesh_health, snapshot
+from wmdcfg.observers import foreign_devices, mesh_health, snapshot
 
 
 class ObserverTests(unittest.TestCase):
@@ -130,6 +133,43 @@ class ObserverTests(unittest.TestCase):
         health = mesh_health(expected_agents=3, expected_clients=1, wired=1)
         self.assertEqual(health["expected_model_associated"], 2)
         self.assertEqual(health["complete_nodes"], 4)
+
+    @patch("wmdcfg.observers._run")
+    def test_foreign_devices_are_left_out(self, run):
+        # a physical pod joined to the controller (opensync-rpi), listed in the foreign
+        # devices file: out of the topology's nodes and the model's counts
+        nodes = [{"name": "Controller", "id": "00:60:2f:da:68:d4", "STAList": [], "haulTypes": []},
+                 {"name": "Agent-1", "id": "00:60:2f:da:68:e4",
+                  "STAList": [{"staMAC": "02:00:00:00:05:00"}], "haulTypes": []},
+                 {"name": "Pod-1", "id": "02:C0:9E:DF:C1:A2", "kind": "opensync-pod",
+                  "STAList": [{"staMAC": "aa:00:00:00:00:01"}], "haulTypes": []}]
+        run.side_effect = [json.dumps({"nodes": nodes}), "1 3 10 1"]
+        with tempfile.TemporaryDirectory() as directory:
+            listed = Path(directory) / "foreign-devices"
+            listed.write_text("# opensync-rpi\n02:c0:9e:df:c1:a2  # pi1\n\n")
+            with patch.dict(os.environ, {"EASYMESH_FOREIGN_DEVICES": str(listed)}):
+                health = mesh_health(expected_agents=1, expected_clients=1)
+        self.assertEqual((health["topology_nodes"], health["api_active"], health["complete_nodes"]), (2, 1, 2))
+        query = run.call_args_list[1].args[-1]
+        self.assertIn("not in ('02:c0:9e:df:c1:a2')", query)
+        self.assertIn("BackhaulSTA is not null", query)
+
+    @patch("wmdcfg.observers._run")
+    def test_without_foreign_devices_the_query_is_unchanged(self, run):
+        nodes = [{"name": "Controller", "STAList": [], "haulTypes": []},
+                 {"name": "Agent-1", "STAList": [{"staMAC": "02:00:00:00:05:00"}], "haulTypes": []}]
+        run.side_effect = [json.dumps({"nodes": nodes}), "1 3 10 1"]
+        with patch.dict(os.environ, {"EASYMESH_FOREIGN_DEVICES": "/nonexistent/foreign-devices"}):
+            mesh_health(expected_agents=1, expected_clients=1)
+        self.assertNotIn("not in", run.call_args_list[1].args[-1])
+
+    def test_a_malformed_foreign_device_is_an_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            listed = Path(directory) / "foreign-devices"
+            listed.write_text("02:c0:9e:df:c1\n")
+            with patch.dict(os.environ, {"EASYMESH_FOREIGN_DEVICES": str(listed)}):
+                with self.assertRaises(ValueError):
+                    foreign_devices()
 
 
 if __name__ == "__main__":

@@ -7,13 +7,37 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
+import re
 import subprocess
 import time
+from pathlib import Path
 
 from .stacks import STACKS, get as _stack
 
 # prplmesh-lab's room service reads this name; new code uses the stack's topology_url.
 TOPOLOGY_URL = STACKS["prplmesh"].topology_url
+
+# Mesh devices on the lab's controller that the room does not own, by AL MAC, one per line
+# (# comments): a physical OpenSync pod joined to the RDK lab (opensync-rpi). Left out of
+# the mesh's health, so the lab's own nodes are counted as the room expects them.
+FOREIGN_DEVICES = "/etc/easymesh-lab/foreign-devices"
+_MAC = re.compile(r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$")
+
+
+def foreign_devices() -> set[str]:
+    """The AL MACs in EASYMESH_FOREIGN_DEVICES (a file, default FOREIGN_DEVICES); none
+    when it is absent. A line that is not a MAC address is an error."""
+    path = Path(os.environ.get("EASYMESH_FOREIGN_DEVICES", FOREIGN_DEVICES))
+    try:
+        text = path.read_text()
+    except FileNotFoundError:
+        return set()
+    macs = {line.split("#", 1)[0].strip().lower() for line in text.splitlines()} - {""}
+    malformed = sorted(mac for mac in macs if not _MAC.match(mac))
+    if malformed:
+        raise ValueError(f"{path}: not an AL MAC: {', '.join(malformed)}")
+    return macs
 
 
 def snapshot(plan: dict, stack: str | None = None) -> dict:
@@ -102,8 +126,10 @@ def _rdk_mesh_health(
     lab's own extenders on a wired backhaul (among ``expected_agents``): no
     backhaul station associated anywhere."""
     adapters = adapters or []
+    foreign = foreign_devices()
     topology = json.loads(_run("curl", "-fsS", STACKS["rdk"].topology_url))
-    nodes = topology.get("nodes", [])
+    nodes = [node for node in topology.get("nodes", [])
+             if str(node.get("id") or "").lower() not in foreign]
     clients = {
         station.get("staMAC")
         for node in nodes
@@ -131,15 +157,32 @@ def _rdk_mesh_health(
         if node.get("kind") == "opensync-pod" and node.get("backhaulMedia") == "Wireless LAN"
     )
     if expected_agents is not None and expected_clients is not None:
-        query = (
-            "select (select count(*) from DeviceList),"
-            "(select count(*) from RadioList),"
-            "(select count(*) from BSSList),"
-            "(select count(*) from STAList where Associated=1);"
-        )
+        if foreign:
+            # each row's device is its ID's second field (OneWifiMesh@<AL MAC>@...); a
+            # foreign device's stations are those on its BSSes and its backhaul station
+            al = "substring_index(substring_index(ID,'@',2),'@',-1)"
+            macs = ",".join(f"'{mac}'" for mac in sorted(foreign))
+            query = (
+                f"select (select count(*) from DeviceList where {al} not in ({macs})),"
+                f"(select count(*) from RadioList where {al} not in ({macs})),"
+                f"(select count(*) from BSSList where {al} not in ({macs})),"
+                "(select count(*) from STAList where Associated=1"
+                f" and coalesce(BSSID,'') not in (select BSSID from BSSList where {al} in ({macs})"
+                " and BSSID is not null)"
+                f" and coalesce(MACAddress,'') not in (select BackhaulSTA from DeviceList where {al} in ({macs})"
+                " and BackhaulSTA is not null));"
+            )
+        else:
+            query = (
+                "select (select count(*) from DeviceList),"
+                "(select count(*) from RadioList),"
+                "(select count(*) from BSSList),"
+                "(select count(*) from STAList where Associated=1);"
+            )
+        # the query as an argument, not in the shell's words: it may quote strings
         text = _run(
             "lxc", "exec", STACKS["rdk"].controller, "--", "sh", "-c",
-            f"mysql -N -ubpi -proot OneWifiMesh -e '{query}' 2>/dev/null",
+            'mysql -N -ubpi -proot OneWifiMesh -e "$1" 2>/dev/null', "sh", query,
         )
         values = [int(value) for value in text.split()]
         if len(values) != 4:
