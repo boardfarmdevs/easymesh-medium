@@ -1,0 +1,105 @@
+From: EasyMesh labs
+Subject: [PATCH] wmediumd: the queue bound counted from the frame's arrival
+
+0040 dropped a frame whose wait for the air, counted from the moment it was scheduled, was
+past the bound. A frame is scheduled only at the head of its radio's queue: before that it
+waits behind the radio's earlier frames, and that wait was not counted. On rdk-1004 (9
+October 21:12Z, 0040 in place) a ping every 10 ms from 100 clients queued 61,098 frames,
+delivered them up to 35.6 s late and dropped none (drops_queue_bound 0); the telemetry's
+queue delay, counted from arrival (queued_at), showed it.
+
+The bound is now counted from the frame's arrival, as the queue delay is: a frame that
+waited past it in its radio's queue is dropped when it reaches the head (dropped at dequeue),
+unacknowledged and counted as before. The self-test adds a frame on free air that waited
+2 s in its radio's queue (dropped under a 1 s bound) and one that waited 0.5 s (sent at once);
+it fails on 0040's measure.
+
+diff --git a/wmediumd/wmediumd.c b/wmediumd/wmediumd.c
+index c6794bb..87670e9 100644
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -1017,10 +1017,16 @@ static bool queue_frame(struct wmediumd *ctx, struct station *station,
+ 		}
+ 	}
+ 
+-	if (ctx->queue_bound_usec && target - scheduler.current_time > ctx->queue_bound_usec) {
++	/*
++	 * The wait counted from the frame's arrival (queued_at), as the telemetry's queue delay is:
++	 * a frame first waits in its radio's queue behind that radio's earlier frames, and only the
++	 * head is scheduled here. Counted from now, a frame that had waited 35 s there went out
++	 * (rdk-1004, 9 October: a ping every 10 ms from 100 clients, 61,098 frames queued, no drop).
++	 */
++	if (ctx->queue_bound_usec && target - frame->queued_at > ctx->queue_bound_usec) {
+ 		if (!frame->radio_queue)
+ 			frame->src = station->client;
+-		queue_bound_drop(ctx, frame, target - scheduler.current_time);
++		queue_bound_drop(ctx, frame, target - frame->queued_at);
+ 		return false;
+ 	}
+ 
+@@ -2371,7 +2377,64 @@ static int queue_bound_selftest(void)
+ 		}
+ 		scheduler.current_time = started;
+ 	}
+-	printf("%s queue bound: frames past it dropped and freed, the kept ones within it, the air free again at once, unbounded without it\n",
++	/* the wait counted from arrival: on free air, a frame that waited 2 s in its radio's queue
++	 * is dropped under a 1 s bound, one that waited 0.5 s goes at once (0042) */
++	for (int waited_ms = 2000; waited_ms >= 500; waited_ms -= 1500) {
++		struct wmediumd test = {0};
++		struct station stations[2] = {0};
++		struct station *pointers[] = {&stations[0], &stations[1]};
++		int matrix[] = {0, 40, 40, 0};
++		struct frame *frame = calloc(1, sizeof(*frame) + 1000);
++		struct ieee80211_hdr *header;
++		bool kept;
++		if (!frame)
++			return failures + 1;
++		INIT_LIST_HEAD(&test.stations);
++		test.sta_array = pointers;
++		test.num_stas = 2;
++		test.snr_matrix = matrix;
++		test.get_link_snr = selftest_pair_snr;
++		test.get_error_prob = packet_test_per;
++		test.get_fading_signal = packet_test_fading;
++		test.queue_bound_usec = 1000000;
++		for (int index = 0; index < 2; index++) {
++			stations[index].index = index;
++			stations[index].addr[0] = 0x02;
++			stations[index].addr[1] = 0xee;
++			stations[index].addr[5] = index;
++			station_init_queues(&stations[index]);
++			list_add_tail(&stations[index].list, &test.stations);
++			mc_update_vif_owner(&test, &stations[index], stations[index].addr, 5180);
++		}
++		scheduler.current_time = started + 5000000;
++		header = (void *)frame->data;
++		frame->sender = &stations[0];
++		frame->freq = 5180;
++		frame->data_len = 1000;
++		frame->tx_rates_count = 1;
++		frame->tx_rates[0].idx = 0;
++		frame->tx_rates[0].count = 1;
++		frame->flags |= HWSIM_TX_CTL_NO_ACK;
++		frame->queue_accounted = true;
++		frame->queued_at = scheduler.current_time - (uint64_t)waited_ms * 1000;
++		header->frame_control[0] = 0x08;
++		memcpy(header->addr1, stations[1].addr, ETH_ALEN);
++		memcpy(header->addr2, stations[0].addr, ETH_ALEN);
++		kept = queue_frame(&test, &stations[0], frame);
++		if (waited_ms > 1000) {
++			failures += kept;
++		} else {
++			failures += !kept || frame->job.start - frame->duration != scheduler.current_time;
++			if (kept) {
++				rf_release_frame(frame);
++				list_del(&frame->list);
++				usfstl_sched_del_job(&frame->job);
++				free(frame);
++			}
++		}
++		scheduler.current_time = started;
++	}
++	printf("%s queue bound: frames past it dropped and freed, the kept ones within it, the air free again at once, unbounded without it; the wait counted from arrival\n",
+ 		failures ? "FAIL" : "PASS");
+ 	return failures;
+ }
