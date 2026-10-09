@@ -71,7 +71,7 @@ func deriveRates(current *model.Snapshot, previous *model.Snapshot) {
 		return float64(a-b) / seconds
 	}
 	drops := func(value *model.TelemetrySummary) uint64 {
-		return value.DropsOffChannel + value.DropsCCA + value.DropsInterference + value.DropsPER + value.DropsNoReceiver
+		return value.DropsOffChannel + value.DropsCCA + value.DropsInterference + value.DropsPER + value.DropsNoReceiver + value.DropsQueueBound
 	}
 	current.PacketMetrics.Rates = model.TelemetryRates{
 		WindowSeconds:     seconds,

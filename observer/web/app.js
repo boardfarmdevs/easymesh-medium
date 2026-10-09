@@ -34,7 +34,7 @@ function bytes(value) {
   return `${current < 10 && index ? current.toFixed(1) : Math.round(current)} ${units[index]}`;
 }
 function frameType(value) { return ['management', 'control', 'data', 'other'][Number(value)] || `type-${value}`; }
-function totalDrops(item) { return Number(item.drops_offchannel || 0) + Number(item.drops_cca || 0) + Number(item.drops_interference || 0) + Number(item.drops_per || 0) + Number(item.drops_no_receiver || 0); }
+function totalDrops(item) { return Number(item.drops_offchannel || 0) + Number(item.drops_cca || 0) + Number(item.drops_interference || 0) + Number(item.drops_per || 0) + Number(item.drops_no_receiver || 0) + Number(item.drops_queue_bound || 0); }
 
 function setConnection(text, kind) {
   const item = $('connection'); item.textContent = text; item.className = `badge ${kind}`;
@@ -91,7 +91,8 @@ function renderTelemetry(summary) {
     ['PER / no receiver', `${number(summary.drops_per)} / ${number(summary.drops_no_receiver)}`],
     ['Netlink tracked clone EINVAL / other', `${number(summary.netlink_clone_einval)} / ${number(summary.netlink_other_errors)}`],
     ['Link evictions / event-ring overwrites', `${number(summary.active_link_evictions)} / ${number(summary.event_overruns)}`],
-    ['Queue delay last / max', `${number(summary.queue_delay_usec_last)} / ${number(summary.queue_delay_usec_max)} µs`]
+    ['Queue delay last / max', `${number(summary.queue_delay_usec_last)} / ${number(summary.queue_delay_usec_max)} µs`],
+    ['Queue-bound drops', number(summary.drops_queue_bound)]
   ]);
 }
 

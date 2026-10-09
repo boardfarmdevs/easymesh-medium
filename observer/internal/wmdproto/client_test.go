@@ -109,7 +109,7 @@ func TestTelemetrySnapshotPagedGolden(t *testing.T) {
 		t.Fatalf("paged link-dump capability missing: %v", snapshot.Daemon.Capabilities)
 	}
 	summary := snapshot.PacketMetrics.Summary
-	if summary.FramesSeen != 102 || summary.EventCapacity != 8 || summary.QueueDepth != 2 {
+	if summary.FramesSeen != 102 || summary.EventCapacity != 8 || summary.QueueDepth != 2 || summary.DropsQueueBound != 9 {
 		t.Fatalf("summary decoded incorrectly: %+v", summary)
 	}
 	if len(snapshot.RadioFrequencies) != 2 || snapshot.RadioFrequencies[1].FrequencyMHz != 5955 || snapshot.RadioFrequencies[1].Channel != 1 {
@@ -400,6 +400,7 @@ func telemetrySummaryPayload(sequence uint64) []byte {
 	for i, value := range values {
 		binary.BigEndian.PutUint32(payload[offset+i*4:offset+i*4+4], value)
 	}
+	binary.BigEndian.PutUint64(payload[offset+24:offset+32], 9)
 	return payload
 }
 

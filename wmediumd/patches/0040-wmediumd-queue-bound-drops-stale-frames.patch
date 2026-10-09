@@ -1,0 +1,355 @@
+From: EasyMesh labs
+Subject: [PATCH] wmediumd: a frame waits at most the queue bound for the air
+
+A frame is scheduled for the time the air is free for it, however far away. Offered
+faster than the air carries, the queue grows without bound and never drains: on rdk-1009
+(the K8, 9 October) a ping load from 100 clients left 172,244 frames queued, each waiting
+28 minutes, the medium serving about 147 frames a second against about 5,000 offered;
+every beacon and backhaul frame came half an hour late and every Wi-Fi backhaul stayed
+down for good. After a lab's bring-up the delay reached 4 s (rdk-1004, the same day) and
+pings were lost on clients of every access point.
+
+A frame that would wait longer than the queue bound (-B, microseconds; default 1 s; 0:
+no bound) is dropped as a radio's full transmit queue drops it: its status goes back
+unacknowledged, it is freed, and a radio queue goes on with its next frame (in a loop,
+not recursively). The drops are counted in the telemetry summary (drops_queue_bound,
+appended: the summary is now 256 bytes) and logged at most once a second. The self-test
+offers 100 frames to a 50 ms bound: the kept ones start within it, the rest are dropped,
+a frame on the free air afterwards goes at once, and with no bound every frame waits.
+
+diff --git a/wmediumd/control.c b/wmediumd/control.c
+index a15775f..7f218ae 100644
+--- a/wmediumd/control.c
++++ b/wmediumd/control.c
+@@ -163,6 +163,7 @@ struct wmd_telemetry {
+ 	uint64_t drops_no_receiver;
+ 	uint64_t netlink_clone_einval;
+ 	uint64_t netlink_other_errors;
++	uint64_t drops_queue_bound;
+ 	uint64_t active_link_evictions;
+ 	uint64_t event_overruns;
+ 	uint64_t queue_delay_usec_max;
+@@ -879,6 +880,12 @@ void wmd_telemetry_frame_done(struct wmediumd *ctx)
+ 		ctx->telemetry->queue_depth--;
+ }
+ 
++void wmd_telemetry_queue_bound_drop(struct wmediumd *ctx)
++{
++	if (ctx->telemetry)
++		ctx->telemetry->drops_queue_bound++;
++}
++
+ void wmd_telemetry_vif_update(struct wmediumd *ctx, const u8 *vif,
+ 			      struct station *owner, u32 frequency_mhz,
+ 			      bool changed)
+@@ -1505,6 +1512,7 @@ static int handle_telemetry_summary(struct wmd_control_client *client,
+ 		htobe32(telemetry_count_radio_frequencies(telemetry));
+ 	summary.vifs = htobe32(telemetry_count_vifs(telemetry));
+ 	summary.event_capacity = htobe32(WMDT_EVENT_CAPACITY);
++	summary.drops_queue_bound = htobe64(telemetry->drops_queue_bound);
+ 	return send_response(client->loop.fd, WMDC_OP_TELEMETRY_SUMMARY,
+ 		WMDC_OK, client->ctx->control_generation, &summary,
+ 		sizeof(summary));
+diff --git a/wmediumd/control.h b/wmediumd/control.h
+index f91e15e..18e853d 100644
+--- a/wmediumd/control.h
++++ b/wmediumd/control.h
+@@ -168,6 +168,8 @@ struct wmdc_telemetry_summary {
+ 	uint32_t radio_frequencies;
+ 	uint32_t vifs;
+ 	uint32_t event_capacity;
++	/* frames dropped past the queue bound (-B): waiting longer for the air */
++	uint64_t drops_queue_bound;
+ } __attribute__((packed));
+ 
+ struct wmdc_radio_frequency {
+diff --git a/wmediumd/wmediumd.c b/wmediumd/wmediumd.c
+index 60f4b90..ac940a1 100644
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -793,7 +793,37 @@ static bool rf_decodes(int signal_dbm, double probability, double draw, bool eli
+ 	return eligible && signal_dbm >= CCA_THRESHOLD && draw >= probability;
+ }
+ 
+-static void queue_frame(struct wmediumd *ctx, struct station *station,
++/*
++ * A frame that would wait longer than the queue bound for the air is dropped, as a radio's full
++ * transmit queue drops it: its status goes back unacknowledged and it is freed. Delivered
++ * seconds or minutes late it serves no one, and a queue fed faster than the air carries never
++ * drains: rdk-1009 (9 October) had 172,244 frames waiting 28 minutes after a ping overload, and
++ * every Wi-Fi backhaul stayed down. Counted in the telemetry, logged at most once a second.
++ */
++static void queue_bound_drop(struct wmediumd *ctx, struct frame *frame, u64 wait_usec)
++{
++	time_t now = time(NULL);
++
++	frame->flags &= ~HWSIM_TX_STAT_ACK;
++	if (frame->src)
++		send_tx_info_frame_nl(ctx, frame);
++	wmd_telemetry_queue_bound_drop(ctx);
++	wmd_telemetry_frame_done(ctx);
++	ctx->queue_bound_unlogged++;
++	if (now != ctx->queue_bound_logged_at) {
++		w_logf(ctx, LOG_NOTICE, "queue bound: %llu frames dropped, waiting over %llu us (this one %llu us)\n",
++		       (unsigned long long)ctx->queue_bound_unlogged,
++		       (unsigned long long)ctx->queue_bound_usec, (unsigned long long)wait_usec);
++		ctx->queue_bound_unlogged = 0;
++		ctx->queue_bound_logged_at = now;
++	}
++	if (frame->radio_queue)
++		frame->radio_queue->active_frame = NULL;    /* its next frame: schedule_next_radio_frame */
++	free(frame);
++}
++
++/* false: the frame was dropped (queue_bound_drop) and freed */
++static bool queue_frame(struct wmediumd *ctx, struct station *station,
+ 			struct frame *frame)
+ {
+ 	wmd_telemetry_frame_queued(ctx, frame);
+@@ -964,6 +994,13 @@ static void queue_frame(struct wmediumd *ctx, struct station *station,
+ 		}
+ 	}
+ 
++	if (ctx->queue_bound_usec && target - scheduler.current_time > ctx->queue_bound_usec) {
++		if (!frame->radio_queue)
++			frame->src = station->client;
++		queue_bound_drop(ctx, frame, target - scheduler.current_time);
++		return false;
++	}
++
+ 	if (ctx->pcap_file) {
+ 		log2pcap(ctx, frame, target);
+ 
+@@ -1020,36 +1057,39 @@ static void queue_frame(struct wmediumd *ctx, struct station *station,
+ 	usfstl_sched_add_job(&scheduler, &frame->job);
+ 	rf_reserve_frame(ctx, frame);
+ 	list_add_tail(&frame->list, &queue->frames);
++	return true;
+ }
+ 
+ static void schedule_next_radio_frame(struct wmediumd *ctx, struct radio_queue *radio)
+ {
+ 	struct frame *frame;
+-	if (radio->active_frame)
+-		return;
+-	if (list_empty(&radio->pending_frames)) {
+-		list_del(&radio->list);
+-		free(radio);
+-		return;
+-	}
+-	frame = list_first_entry(&radio->pending_frames, struct frame, list);
+-	if (ctx->priority_queues && radio->priority_burst < 8) {
+-		for (unsigned int category = 0; category < IEEE80211_NUM_ACS; category++) {
+-			if (list_empty(&radio->pending_by_ac[category]))
+-				continue;
+-			struct frame *preferred = list_first_entry(&radio->pending_by_ac[category],
+-				struct frame, ac_pending);
+-			radio->priority_burst = preferred == frame ? 0 : radio->priority_burst + 1;
+-			frame = preferred;
+-			break;
++	/* a frame the queue bound drops leaves the radio idle: the next one is tried here, in a
++	 * loop, not from the drop, which would recurse once for every frame dropped */
++	while (!radio->active_frame) {
++		if (list_empty(&radio->pending_frames)) {
++			list_del(&radio->list);
++			free(radio);
++			return;
+ 		}
+-	} else {
+-		radio->priority_burst = 0;
++		frame = list_first_entry(&radio->pending_frames, struct frame, list);
++		if (ctx->priority_queues && radio->priority_burst < 8) {
++			for (unsigned int category = 0; category < IEEE80211_NUM_ACS; category++) {
++				if (list_empty(&radio->pending_by_ac[category]))
++					continue;
++				struct frame *preferred = list_first_entry(&radio->pending_by_ac[category],
++					struct frame, ac_pending);
++				radio->priority_burst = preferred == frame ? 0 : radio->priority_burst + 1;
++				frame = preferred;
++				break;
++			}
++		} else {
++			radio->priority_burst = 0;
++		}
++		list_del(&frame->list);
++		list_del(&frame->ac_pending);
++		radio->active_frame = frame;
++		queue_frame(ctx, frame->sender, frame);    /* a drop leaves the radio idle again */
+ 	}
+-	list_del(&frame->list);
+-	list_del(&frame->ac_pending);
+-	radio->active_frame = frame;
+-	queue_frame(ctx, frame->sender, frame);
+ }
+ 
+ static void enqueue_radio_frame(struct wmediumd *ctx, struct station *station,
+@@ -1942,6 +1982,8 @@ static void print_help(int exval)
+ 	printf("  -n              force netlink use even with vhost-user\n");
+ 	printf("  -p FILE         log packets to pcapng file FILE\n");
+ 	printf("  -L BYTES        a log on a file: past BYTES, renamed to FILE.1 and continued\n");
++	printf("  -B USEC         drop a frame that would wait longer than USEC for the air\n"
++	       "                  (default 1000000; 0: no bound)\n");
+ 
+ 	exit(exval);
+ }
+@@ -2226,6 +2268,91 @@ static int packet_path_selftest(void)
+ 	return failures;
+ }
+ 
++/* The queue bound (-B): offered faster than the air carries, the frames past the bound are
++ * dropped and freed, every one kept starts within it, and once the air is free a new frame
++ * goes at once (the medium recovers); with no bound every frame waits (the old queue). */
++static int queue_bound_selftest(void)
++{
++	int failures = 0;
++	uint64_t started = scheduler.current_time;
++	for (int bounded = 1; bounded >= 0; bounded--) {
++		struct wmediumd test = {0};
++		struct station stations[2] = {0};
++		struct station *pointers[] = {&stations[0], &stations[1]};
++		int matrix[] = {0, 40, 40, 0};
++		struct frame *kept[100];
++		int kept_count = 0, dropped = 0;
++		INIT_LIST_HEAD(&test.stations);
++		test.sta_array = pointers;
++		test.num_stas = 2;
++		test.snr_matrix = matrix;
++		test.get_link_snr = selftest_pair_snr;
++		test.get_error_prob = packet_test_per;
++		test.get_fading_signal = packet_test_fading;
++		test.queue_bound_usec = bounded ? 50000 : 0;
++		for (int index = 0; index < 2; index++) {
++			stations[index].index = index;
++			stations[index].addr[0] = 0x02;
++			stations[index].addr[1] = 0xed;
++			stations[index].addr[5] = index;
++			station_init_queues(&stations[index]);
++			list_add_tail(&stations[index].list, &test.stations);
++			mc_update_vif_owner(&test, &stations[index], stations[index].addr, 5180);
++		}
++		for (int n = 0; n < 101; n++) {
++			struct frame *frame = calloc(1, sizeof(*frame) + 1000);
++			if (!frame)
++				return failures + 1;
++			struct ieee80211_hdr *header = (void *)frame->data;
++			frame->sender = &stations[0];
++			frame->freq = 5180;
++			frame->data_len = 1000;
++			frame->tx_rates_count = 1;
++			frame->tx_rates[0].idx = 0;
++			frame->tx_rates[0].count = 1;
++			frame->flags |= HWSIM_TX_CTL_NO_ACK;
++			header->frame_control[0] = 0x08;
++			memcpy(header->addr1, stations[1].addr, ETH_ALEN);
++			memcpy(header->addr2, stations[0].addr, ETH_ALEN);
++			if (n == 100) {
++				/* the air free again: every kept frame sent */
++				uint64_t last = scheduler.current_time;
++				for (int k = 0; k < kept_count; k++) {
++					if (kept[k]->job.start > last)
++						last = kept[k]->job.start;
++					rf_release_frame(kept[k]);
++					list_del(&kept[k]->list);
++					usfstl_sched_del_job(&kept[k]->job);
++					free(kept[k]);
++				}
++				kept_count = 0;
++				scheduler.current_time = last + 1;
++			}
++			if (queue_frame(&test, &stations[0], frame)) {
++				failures += frame->job.start - frame->duration - scheduler.current_time >
++					    (bounded ? 50000 : (uint64_t)-1);
++				kept[kept_count++] = frame;
++			} else {
++				dropped++;
++			}
++		}
++		/* bounded: some kept, the rest dropped, the last (on a free air) kept at once */
++		failures += bounded ? (dropped == 0 || dropped >= 100) : dropped != 0;
++		failures += kept_count != 1 ||
++			    kept[0]->job.start - kept[0]->duration != scheduler.current_time;
++		for (int k = 0; k < kept_count; k++) {
++			rf_release_frame(kept[k]);
++			list_del(&kept[k]->list);
++			usfstl_sched_del_job(&kept[k]->job);
++			free(kept[k]);
++		}
++		scheduler.current_time = started;
++	}
++	printf("%s queue bound: frames past it dropped and freed, the kept ones within it, the air free again at once, unbounded without it\n",
++		failures ? "FAIL" : "PASS");
++	return failures;
++}
++
+ static int spatial_queue_selftest(void)
+ {
+ 	int failures = 0;
+@@ -2517,6 +2644,7 @@ static int wmd_selftest(void)
+ 
+ 	printf("=== wmediumd multichannel + Linux 7 rate-flags self-test ===\n");
+ 	fails += packet_path_selftest();
++	fails += queue_bound_selftest();
+ 	fails += radio_head_selftest(false, false);
+ 	fails += radio_head_selftest(true, false);
+ 	fails += radio_head_selftest(false, true);
+@@ -2944,10 +3072,11 @@ int main(int argc, char *argv[])
+ 	}
+ 
+ 	ctx.log_lvl = 6;
++	ctx.queue_bound_usec = 1000000;    /* -B: a frame waits at most a second for the air */
+ 	unsigned long int parse_log_lvl;
+ 	char* parse_end_token;
+ 
+-	while ((opt = getopt(argc, argv, "hVc:l:x:t:u:a:C:R:O:np:TFSQL:")) != -1) {
++	while ((opt = getopt(argc, argv, "hVc:l:x:t:u:a:C:R:O:np:TFSQL:B:")) != -1) {
+ 		switch (opt) {
+ 		case 'Q':
+ 			ctx.priority_queues = true;
+@@ -3021,6 +3150,15 @@ int main(int argc, char *argv[])
+ 				print_help(EXIT_FAILURE);
+ 			}
+ 			break;
++		case 'B': {
++			long long bound = strtoll(optarg, &parse_end_token, 10);
++			if (*parse_end_token != '\0' || bound < 0) {
++				printf("wmediumd: Error - -B takes microseconds (0: no bound): %s\n\n", optarg);
++				print_help(EXIT_FAILURE);
++			}
++			ctx.queue_bound_usec = (u64)bound;
++			break;
++		}
+ 		case '?':
+ 			printf("wmediumd: Error - No such option: "
+ 			       "`%c'\n\n", optopt);
+diff --git a/wmediumd/wmediumd.h b/wmediumd/wmediumd.h
+index 715f1cf..69d4171 100644
+--- a/wmediumd/wmediumd.h
++++ b/wmediumd/wmediumd.h
+@@ -120,6 +120,7 @@ enum {
+ #include <stdint.h>
+ #include <stdbool.h>
+ #include <syslog.h>
++#include <time.h>
+ #include <usfstl/sched.h>
+ 
+ #include "list.h"
+@@ -265,6 +266,11 @@ struct wmediumd {
+ 	bool visibility_contention;
+ 	bool priority_queues;
+ 	bool survey_disabled;
++	/* the longest a frame may wait for the air (-B, microseconds; 0: no bound) and the
++	 * frames dropped past it since the last log line, which is at most one a second */
++	u64 queue_bound_usec;
++	u64 queue_bound_unlogged;
++	time_t queue_bound_logged_at;
+ 	struct wmd_frequency_override *frequency_overrides;
+ 	size_t frequency_override_capacity;
+ 	size_t frequency_override_count;
+@@ -393,6 +399,7 @@ void wmd_telemetry_record_rx(struct wmediumd *ctx, struct frame *frame,
+ 			     enum wmd_telemetry_outcome outcome,
+ 			     int signal_dbm, int snr_db, double error_prob);
+ void wmd_telemetry_frame_done(struct wmediumd *ctx);
++void wmd_telemetry_queue_bound_drop(struct wmediumd *ctx);
+ void wmd_telemetry_frame_queued(struct wmediumd *ctx, struct frame *frame);
+ void wmd_telemetry_vif_update(struct wmediumd *ctx, const u8 *vif,
+ 			      struct station *owner, u32 frequency_mhz,

@@ -271,6 +271,7 @@ wmediumd toward hwsim, not proven received by an application.
 | `drops_cca` | multicast receiver signal was below the carrier-sense threshold |
 | `drops_per` | receiver-specific random PER decision rejected delivery |
 | `drops_interference` | enabled interference model rejected/overlapped delivery |
+| `drops_queue_bound` | the frame would have waited longer than the queue bound (wmediumd `-B`, default 1 s) for the air: dropped, its status unacknowledged (patch 0040) |
 | `multicast_frames` | original multicast/broadcast transmissions, counted once |
 | `multicast_candidates` | receiver fan-out evaluations before eligibility filters |
 | `netlink_clone_einval` | tracked clone received the known command-2 `EINVAL` |

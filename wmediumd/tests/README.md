@@ -59,6 +59,12 @@ process sent and tracked is counted as `netlink_clone_einval` and logged at debu
 an untracked sequence, another error and a refused TX status (command 3) stay errors
 (`netlink_other_errors`, error level); a clone's record outlives 65535 later clones.
 
+The daemon's own self-test (`wmediumd -T`) covers the queue bound (patch 0040): 100
+frames offered to a 50 ms bound, the kept ones starting within it, the rest dropped and
+freed, a frame on the free air afterwards going at once, and every frame waiting with no
+bound. A queue fed faster than the air carries would otherwise never drain (rdk-1009, 9
+October: 172,244 frames, 28 minutes behind).
+
 These tests do not qualify a live lab. A daemon replacement loses learned
 medium state. Native health, complete client traffic coverage, root-proof
 continuity, and kernel receive-drop deltas still require runtime evidence;

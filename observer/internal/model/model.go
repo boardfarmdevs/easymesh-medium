@@ -92,6 +92,8 @@ type TelemetrySummary struct {
 	RadioFrequencies    uint32 `json:"radio_frequencies"`
 	VIFs                uint32 `json:"vifs"`
 	EventCapacity       uint32 `json:"event_capacity"`
+	// frames dropped past the medium's queue bound (wmediumd -B): waiting longer for the air
+	DropsQueueBound uint64 `json:"drops_queue_bound"`
 }
 
 type TelemetryRates struct {

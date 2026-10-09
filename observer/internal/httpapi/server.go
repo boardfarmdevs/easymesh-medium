@@ -466,7 +466,7 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 			retries = summary.Retries
 			injected = summary.RXInjected
 			queueDepth = summary.QueueDepth
-			drops = summary.DropsOffChannel + summary.DropsCCA + summary.DropsInterference + summary.DropsPER + summary.DropsNoReceiver
+			drops = summary.DropsOffChannel + summary.DropsCCA + summary.DropsInterference + summary.DropsPER + summary.DropsNoReceiver + summary.DropsQueueBound
 		}
 	}
 	fmt.Fprintf(w, "# HELP wmediumd_console_ready Whether a valid read-only snapshot is available.\n")

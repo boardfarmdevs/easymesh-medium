@@ -24,7 +24,7 @@ const (
 	freqLinkSize         = 20
 	pageRequestSize      = 16
 	pageHeaderSize       = 32
-	telemetrySummarySize = 248
+	telemetrySummarySize = 256
 	radioFrequencySize   = 136
 	activeLinkSize       = 164
 	vifSize              = 24
@@ -625,6 +625,7 @@ func decodeTelemetrySummary(payload []byte) (model.TelemetrySummary, error) {
 	s.RadioFrequencies = binary.BigEndian.Uint32(payload[offset+12 : offset+16])
 	s.VIFs = binary.BigEndian.Uint32(payload[offset+16 : offset+20])
 	s.EventCapacity = binary.BigEndian.Uint32(payload[offset+20 : offset+24])
+	s.DropsQueueBound = binary.BigEndian.Uint64(payload[offset+24 : offset+32])
 	return s, nil
 }
 
