@@ -63,7 +63,10 @@ The daemon's own self-test (`wmediumd -T`) covers the queue bound (patch 0040): 
 frames offered to a 50 ms bound, the kept ones starting within it, the rest dropped and
 freed, a frame on the free air afterwards going at once, and every frame waiting with no
 bound. A queue fed faster than the air carries would otherwise never drain (rdk-1009, 9
-October: 172,244 frames, 28 minutes behind).
+October: 172,244 frames, 28 minutes behind). It also covers the ACK's rate (patch 0041): the
+control response rate of every 2.4 and 5 GHz data rate, and an acknowledged frame's air time
+and ACK error probability at it (on 2.4 GHz the ACK of a 54 Mbit/s frame takes 28 us, not
+the 304 us of 1 Mbit/s).
 
 These tests do not qualify a live lab. A daemon replacement loses learned
 medium state. Native health, complete client traffic coverage, root-proof

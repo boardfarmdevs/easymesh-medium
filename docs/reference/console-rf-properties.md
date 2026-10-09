@@ -220,7 +220,12 @@ room acceptance are separate gates. No current room-test result is claimed.
 
 - **Model:** the reverse ACK link has its own RF success decision, so data
   delivery can succeed while the sender retries after a lost ACK. Rate/retry
-  information originates with mac80211 and is consumed by the medium.
+  information originates with mac80211 and is consumed by the medium: every
+  frame is charged at the rate mac80211 chose for it (beacons and broadcasts
+  at the lowest rate it was given, so a BSS's basic rate set is honoured only
+  when its stack programs it into the kernel). The ACK goes at the control
+  response rate (patch 0041): 6, 12 or 24 Mbit/s for OFDM data, a CCK frame's
+  own rate, for its air time and its error probability.
 - **Observe:** RF forward/reverse values; Traffic ACK/no-ACK, attempts/retries
   and RX injections. Correlate native counters separately in the topology.
 - **Boundary:** summed TX and RX counters double-count different events.
