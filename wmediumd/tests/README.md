@@ -48,6 +48,12 @@ line printed in parts is stamped once, and with `-L` the log on a file is rename
 passes `-L` (`WMEDIUMD_LOG_MAX_BYTES`, 16 MiB) and keeps the previous start's log as
 `wmediumd.log.prev`.
 
+`test-netlink-rejection-class.sh PATCHED_SOURCE/wmediumd.c` compiles the clone tracker
+and `nl_err_cb` against libnl (patch 0039): hwsim's `EINVAL` for a cloned frame this
+process sent and tracked is counted as `netlink_clone_einval` and logged at debug level;
+an untracked sequence, another error and a refused TX status (command 3) stay errors
+(`netlink_other_errors`, error level); a clone's record outlives 65535 later clones.
+
 These tests do not qualify a live lab. A daemon replacement loses learned
 medium state. Native health, complete client traffic coverage, root-proof
 continuity, and kernel receive-drop deltas still require runtime evidence;

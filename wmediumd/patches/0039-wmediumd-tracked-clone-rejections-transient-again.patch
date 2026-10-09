@@ -1,0 +1,55 @@
+From: EasyMesh labs
+Subject: [PATCH] wmediumd: a tracked clone's EINVAL is transient again
+
+Patch 0011 classified hwsim's EINVAL for a cloned frame this process sent and
+tracked as RF delivery loss (the receiving radio idle, scanning or between
+channel contexts): logged at debug level, and since 0014 counted as
+netlink_clone_einval, as the console's reference still says. Patch 0022
+dropped that branch: every such refusal was logged at error level and counted
+as netlink_other_errors. On rdk-1004 (9 October) hundreds of them during a room
+restart read as medium faults.
+
+Restore the classification for tracked command-2 EINVAL only; untracked
+sequences, other errors and refused TX status (command 3, which can also mean
+hwsim dropped pending frames because the medium fell behind) stay errors. The
+record of clones grows from 4096 to 65536 entries (2 MiB): the lab clones
+thousands of frames a second, and a starved medium reads the replies late.
+
+diff --git a/wmediumd/wmediumd.c b/wmediumd/wmediumd.c
+index 4458808..60f4b90 100644
+--- a/wmediumd/wmediumd.c
++++ b/wmediumd/wmediumd.c
+@@ -379,7 +379,10 @@ struct mc_vif_state {
+ static struct mc_vif_state *mc_vifs;
+ static size_t mc_n_vifs;
+ 
+-#define NL_CLONED_FRAME_TRACK_SLOTS 4096
++/* A clone's record must outlive the wait for its error reply: the lab clones
++ * thousands of frames a second (every beacon to every radio in range), and a
++ * busy or starved medium reads the replies late. 65536 records, 2 MiB. */
++#define NL_CLONED_FRAME_TRACK_SLOTS 65536
+ struct nl_cloned_frame_track {
+ 	u32 sequence;
+ 	struct station *source;
+@@ -1462,7 +1465,20 @@ int nl_err_cb(struct sockaddr_nl *nla, struct nlmsgerr *nlerr, void *arg)
+ 	u32 seq = nlerr->msg.nlmsg_seq;
+ 	struct nl_cloned_frame_track *track = nl_tracked_cloned_frame(seq);
+ 
+-
++	/* mac80211_hwsim returns EINVAL when a well-formed cloned frame reaches a
++	 * radio while it is idle, stopped, or between channel contexts: normal RF
++	 * delivery loss while a radio scans or changes channel, not a daemon or
++	 * protocol failure (0011). Only requests this process constructed and
++	 * tracked are classified so; malformed or unrelated failures, and refused
++	 * TX status (command 3), remain errors. */
++	if (gnlh->cmd == HWSIM_CMD_FRAME && nlerr->error == -EINVAL && track) {
++		wmd_telemetry_netlink_rejection(ctx, track->source,
++			track->destination, track->frequency_mhz,
++			nlerr->error, true);
++		w_logf(ctx, LOG_DEBUG,
++			"nl: cloned frame not received, seq %u\n", seq);
++		return NL_SKIP;
++	}
+ 	wmd_telemetry_netlink_rejection(ctx,
+ 		track ? track->source : NULL,
+ 		track ? track->destination : NULL,

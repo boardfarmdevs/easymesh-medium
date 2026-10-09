@@ -27,6 +27,8 @@ jobs:
         run: bash wmediumd/tests/test-offline-build.sh
       - name: Every log line stamped, the log bounded (patch 0038)
         run: bash wmediumd/tests/test-log-stamps.sh wmediumd/src/wmediumd/wmediumd.c
+      - name: A tracked clone's EINVAL is transient, the rest errors (patch 0039)
+        run: bash wmediumd/tests/test-netlink-rejection-class.sh wmediumd/src/wmediumd/wmediumd.c
       - uses: actions/upload-artifact@v4
         with:
           name: wmediumd
