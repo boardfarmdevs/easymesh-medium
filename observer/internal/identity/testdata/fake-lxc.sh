@@ -3,7 +3,17 @@ set -eu
 
 case "$1" in
     list)
-        printf '%s\n' bpibroadband bpiap bpiap-001 wlan-client wlan-client-001 ignored-container
+        case "$*" in
+            *json*)
+                # every instance's own config, as `lxc list --format json` gives it
+                printf '%s' '[{"name":"bpibroadband","config":{}},{"name":"bpiap","config":{}},'
+                printf '%s' '{"name":"bpiap-001","config":{}},'
+                printf '%s' '{"name":"wlan-client","config":{"user.easymesh.cohort":"private","user.easymesh.ordinal":"3","user.easymesh.ssid":"private_ssid"}},'
+                printf '%s' '{"name":"wlan-client-001","config":{"user.easymesh.cohort":"iot","user.easymesh.ordinal":"2","user.easymesh.ssid":"iot_ssid"}},'
+                printf '%s\n' '{"name":"ignored-container","config":{}}]'
+                ;;
+            *) printf '%s\n' bpibroadband bpiap bpiap-001 wlan-client wlan-client-001 ignored-container ;;
+        esac
         ;;
     exec)
         case "$2" in
@@ -13,18 +23,6 @@ case "$1" in
             wlan-client) echo 02:00:00:00:04:00 ;;
             wlan-client-001) echo 02:00:00:00:05:00 ;;
             *) exit 1 ;;
-        esac
-        ;;
-    config)
-        container=$3
-        key=$4
-        case "$container:$key" in
-            wlan-client:user.easymesh.cohort) echo private ;;
-            wlan-client:user.easymesh.ordinal) echo 3 ;;
-            wlan-client:user.easymesh.ssid) echo private_ssid ;;
-            wlan-client-001:user.easymesh.cohort) echo iot ;;
-            wlan-client-001:user.easymesh.ordinal) echo 2 ;;
-            wlan-client-001:user.easymesh.ssid) echo iot_ssid ;;
         esac
         ;;
     *) exit 2 ;;

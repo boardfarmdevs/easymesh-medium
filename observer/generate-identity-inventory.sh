@@ -63,8 +63,20 @@ easymesh_id_for_transmitter() {
     printf '%s%s20\n' "$first" "${mac:2:13}"
 }
 
+# Every instance's own user.easymesh settings from one LXD query: three `lxc config get` per
+# client made each medium start spend minutes here in a lab of 100 clients (rdk-1004).
+"$lxc_bin" list --format json 2>/dev/null | python3 -c '
+import json, sys
+for instance in json.load(sys.stdin):
+    name, config = instance.get("name", ""), instance.get("config") or {}
+    for key in ("user.easymesh.cohort", "user.easymesh.ordinal", "user.easymesh.ssid"):
+        value = config.get(key, "")
+        if name and value and "\t" not in value and "\n" not in value:
+            print(name, key, value, sep="\t")
+' > "$work/config.tsv" 2>/dev/null || : > "$work/config.tsv"
+
 config_value() {
-    "$lxc_bin" config get "$1" "$2" 2>/dev/null || true
+    awk -F'\t' -v instance="$1" -v key="$2" '$1 == instance && $2 == key { print $3; exit }' "$work/config.tsv"
 }
 
 for container in "${containers[@]}"; do
