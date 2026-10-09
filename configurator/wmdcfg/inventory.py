@@ -136,6 +136,43 @@ def _backhaul_station(
     }
 
 
+def _backhaul_stations(
+    name: str, interfaces: list[dict[str, Any]], permanent_by_phy: dict[str, str]
+) -> list[dict[str, Any]]:
+    """Every backhaul station of a pod, each with its band (OpenSync keeps a bhaul-sta-* on
+    every radio): the one on a radio of its own, and the one on its fronthaul radio, whose
+    links are that radio's (the medium keys links by radio). A move to another pod's 2.4 GHz
+    backhaul BSS uses the 2.4 GHz one (emosa-lab spec 8.3)."""
+    serving = {
+        item.get("phy"): _band(item.get("frequency_mhz"))
+        for item in interfaces
+        if item.get("type") == "AP" and item.get("ssid") and _band(item.get("frequency_mhz"))
+    }
+    result = []
+    for station in sorted(
+        (item for item in interfaces
+         if item.get("type") == "managed" and item.get("phy") in permanent_by_phy),
+        key=lambda item: item["name"],
+    ):
+        link = _exec(name, f"iw dev {station['name']} link 2>/dev/null || true")
+        parent = re.search(r"Connected to ([0-9a-f:]{17})", link, re.I)
+        frequency = re.search(r"^\s*freq:\s*(\d+)", link, re.M)
+        mhz = int(frequency.group(1)) if frequency else station.get("frequency_mhz")
+        permanent = permanent_by_phy[station["phy"]]
+        result.append({
+            "interface": station["name"],
+            "phy": station["phy"],
+            "band": serving.get(station["phy"]) or (_band(mhz) if mhz else None),
+            "on_fronthaul_radio": station["phy"] in serving,
+            "permanent_mac": permanent,
+            "tx_mac": _tx_mac(permanent),
+            "station_mac": station.get("mac"),
+            "parent": parent.group(1).lower() if parent else None,
+            "frequency_mhz": mhz,
+        })
+    return result
+
+
 def discover(client_names: set[str] | None = None, stack: str | None = None) -> dict[str, Any]:
     lab = stacks.get(stack)
     # A scaled lab intentionally retains stopped containers across cold-start
@@ -236,12 +273,14 @@ def discover(client_names: set[str] | None = None, stack: str | None = None) -> 
                     ],
                 }
         backhaul_station = None
+        backhaul_stations: list[dict[str, Any]] = []
         if adapter:
             # An adapter-managed pod: only the bands it serves as an AP.
             if not band_radios:
                 raise ScenarioError(f"{name}: no operating AP radio")
             default = band_radios[sorted(band_radios)[0]]
             backhaul_station = _backhaul_station(name, interfaces, permanent_by_phy)
+            backhaul_stations = _backhaul_stations(name, interfaces, permanent_by_phy)
         elif set(band_radios) != {"2.4", "5", "6"}:
             raise ScenarioError(
                 f"{name}: expected tri-band radio inventory, found {sorted(band_radios)}"
@@ -261,6 +300,7 @@ def discover(client_names: set[str] | None = None, stack: str | None = None) -> 
             "kind": "mesh",
             **({"adapter": "emosa"} if adapter else {}),
             **({"backhaul_station": backhaul_station} if backhaul_station else {}),
+            **({"backhaul_stations": backhaul_stations} if backhaul_stations else {}),
             **({"backhaul": "wired"} if wired else {}),
             **({"wired_guard": "hal"} if guarded else {}),
             "permanent_mac": default["permanent_mac"],

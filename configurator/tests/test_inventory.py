@@ -181,6 +181,12 @@ def test_discover_maps_an_adapter_pod_by_its_ap_bands_only():
         "bhaul-sta-50", "phy110", "02:00:00:00:6e:00")
     assert station["tx_mac"] == "42:00:00:00:6e:00" and station["frequency_mhz"] == 5220
     assert station["parent"] is None  # not connected in this fixture
+    # every backhaul station, with its band: the 2.4 GHz one shares the fronthaul radio
+    stations = {s["interface"]: s for s in pod["backhaul_stations"]}
+    assert set(stations) == {"bhaul-sta-24", "bhaul-sta-50"}
+    assert (stations["bhaul-sta-24"]["band"], stations["bhaul-sta-24"]["on_fronthaul_radio"]) == ("2.4", True)
+    assert stations["bhaul-sta-24"]["tx_mac"] == pod["band_radios"]["2.4"]["tx_mac"]
+    assert (stations["bhaul-sta-50"]["band"], stations["bhaul-sta-50"]["on_fronthaul_radio"]) == ("5", False)
 
 
 def test_a_wired_extender_is_marked_and_counted_in_the_plans_expected_lab():

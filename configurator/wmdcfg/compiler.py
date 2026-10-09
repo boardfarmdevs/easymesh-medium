@@ -116,6 +116,10 @@ def _bind(
                 result[role]["adapter"] = item["adapter"]
                 if item.get("backhaul_station"):
                     result[role]["backhaul_station"] = item["backhaul_station"]
+                # every backhaul station of the pod, each with its band: a pod parent's
+                # 2.4 GHz backhaul BSS takes the child's 2.4 GHz one (emosa-lab spec 8.3)
+                if item.get("backhaul_stations"):
+                    result[role]["backhaul_stations"] = item["backhaul_stations"]
             if item.get("backhaul") == "wired":
                 result[role]["backhaul"] = "wired"
                 if item.get("wired_guard"):
