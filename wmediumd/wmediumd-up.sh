@@ -28,6 +28,9 @@ IDENTITY_GENERATOR=${WMEDIUMD_IDENTITY_GENERATOR:-$MEDIUM/observer/generate-iden
 CFG=${CFG:-$RUNTIME/wmediumd.cfg}
 PIDF=${WMEDIUMD_PIDFILE:-$RUNTIME/wmediumd.pid}
 LOG=${WMEDIUMD_LOG:-$RUNTIME/wmediumd.log}
+# the log's bound (patch 0038's -L): past it LOG goes to LOG.1 and a new LOG starts; a start
+# keeps the previous start's LOG and LOG.1 as LOG.prev and LOG.prev.1
+LOG_MAX=${WMEDIUMD_LOG_MAX_BYTES:-16777216}
 CPU_AFFINITY=${WMEDIUMD_CPU_AFFINITY:-}
 VISIBILITY_FLAG=
 PRIORITY_FLAG=
@@ -143,16 +146,26 @@ case "${1:-up}" in
         exit 1
     }
     echo ">> starting wmediumd"
-    sudo rm -f "$PIDF" "$CONTROL" "$METRICS" "$OBSERVER" "$LOG" "$IDENTITY" "$DAEMON_MANIFEST"
+    sudo rm -f "$PIDF" "$CONTROL" "$METRICS" "$OBSERVER" "$IDENTITY" "$DAEMON_MANIFEST"
+    # The previous start's log is evidence of the run before (a redeploy or a reproduction
+    # restarts the medium): kept as LOG.prev (and its LOG.1 as LOG.prev.1), one generation.
+    if sudo test -e "$LOG"; then
+        sudo mv -f "$LOG" "$LOG.prev"
+        if sudo test -e "$LOG.1"; then sudo mv -f "$LOG.1" "$LOG.prev.1"; else sudo rm -f "$LOG.prev.1"; fi
+    fi
+    # each line with its time and the log bounded (patch 0038); a binary without -L logs as before
+    LOG_FLAG=
+    help=$("$WMD" -h 2>/dev/null || true)
+    case $help in *"-L BYTES"*) LOG_FLAG="-L $LOG_MAX" ;; esac
     echo ">> generating Console radio identities -> $IDENTITY"
     if ! "$IDENTITY_GENERATOR" --output "$IDENTITY"; then
         echo "WARN: Console identity inventory unavailable; telemetry will use radio MAC labels" >&2
         sudo rm -f "$IDENTITY"
     fi
     if [ -n "$CPU_AFFINITY" ]; then
-        sudo sh -c "taskset -c '$CPU_AFFINITY' '$WMD' $VISIBILITY_FLAG $PRIORITY_FLAG -c '$CFG' -C '$CONTROL' -R '$METRICS' -O '$OBSERVER' >'$LOG' 2>&1 & echo \$! > '$PIDF'"
+        sudo sh -c "taskset -c '$CPU_AFFINITY' '$WMD' $VISIBILITY_FLAG $PRIORITY_FLAG $LOG_FLAG -c '$CFG' -C '$CONTROL' -R '$METRICS' -O '$OBSERVER' >'$LOG' 2>&1 & echo \$! > '$PIDF'"
     else
-        sudo sh -c "'$WMD' $VISIBILITY_FLAG $PRIORITY_FLAG -c '$CFG' -C '$CONTROL' -R '$METRICS' -O '$OBSERVER' >'$LOG' 2>&1 & echo \$! > '$PIDF'"
+        sudo sh -c "'$WMD' $VISIBILITY_FLAG $PRIORITY_FLAG $LOG_FLAG -c '$CFG' -C '$CONTROL' -R '$METRICS' -O '$OBSERVER' >'$LOG' 2>&1 & echo \$! > '$PIDF'"
     fi
     sleep 1
     pid=$(cat "$PIDF" 2>/dev/null || true)

@@ -25,6 +25,8 @@ jobs:
         run: wmediumd/build/wmediumd -T
       - name: The offline build never fetches
         run: bash wmediumd/tests/test-offline-build.sh
+      - name: Every log line stamped, the log bounded (patch 0038)
+        run: bash wmediumd/tests/test-log-stamps.sh wmediumd/src/wmediumd/wmediumd.c
       - uses: actions/upload-artifact@v4
         with:
           name: wmediumd

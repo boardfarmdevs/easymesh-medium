@@ -9,7 +9,7 @@ From the repository root, choosing an unused evidence directory:
 
 ```sh
 record=$(mktemp -d)
-source=wmediumd/build/wmediumd.c
+source=wmediumd/src/wmediumd/wmediumd.c    # the patched source the build leaves
 python3 wmediumd/tests/test-netlink-ack.py \
   --source "$source" --output "$record/ack.json"
 python3 wmediumd/tests/test-netlink-receive.py \
@@ -40,6 +40,13 @@ asynchronous radio parser is unchanged.
 64-KiB control frame, as consecutive generations through the configurator's
 client; it reads them back, pages the dump and clears one frequency of a pair
 (patch 0035: overrides indexed per radio pair). The previous daemon rejects it.
+
+`test-log-stamps.sh PATCHED_SOURCE/wmediumd.c` compiles the daemon's own log code
+(patch 0038) with a driver: every stdout and stderr line starts with its UTC time, a
+line printed in parts is stamped once, and with `-L` the log on a file is renamed to
+`FILE.1` past the limit and continued, nothing lost between them. `wmediumd-up.sh`
+passes `-L` (`WMEDIUMD_LOG_MAX_BYTES`, 16 MiB) and keeps the previous start's log as
+`wmediumd.log.prev`.
 
 These tests do not qualify a live lab. A daemon replacement loses learned
 medium state. Native health, complete client traffic coverage, root-proof
