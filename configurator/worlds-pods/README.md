@@ -9,7 +9,8 @@ room they are ordinary `fronthaul_ap` roles, `pod_1` and `pod_2`, bound to the
 containers `pod-1` and `pod-2`.
 
 - `golden/`: one pod variant per standard world, **same world ID**, so a test
-  that addresses a room by ID runs the pod variant against this tree.
+  that addresses a room by ID runs the pod variant against this tree; and the
+  rooms about the pods themselves, which have no standard room (below).
 - `layouts/NAME-pods.json`: the native layout plus the pods at
   `pod-positions.json` and `extender_5` at `../worlds-wired/wired-positions.json`.
   `mobility` is the native mobility tree.
@@ -29,9 +30,20 @@ What the pods change and what they do not:
   `docs/reference/wmediumd-internals.md`), the medium's default
   to the rest. In the geometry rooms, which model the backhaul, its links to
   the native APs' 5 GHz radios follow the room instead, and before such a room
-  applies, the room moves each pod to the native AP with its strongest 5 GHz
-  backhaul link there (always an extender), through the controller's
-  Backhaul Steering (easymesh-optimizer's `room_service.backhaul.PodBackhaul`; EMOSA carries it out).
+  applies, the room moves each pod to its parent there, through the
+  controller's Backhaul Steering (easymesh-optimizer's
+  `room_service.backhaul.PodBackhaul`; EMOSA carries it out): the native AP
+  with its strongest 5 GHz backhaul link when one is in reach (5 dB or more
+  both ways), else the pod in reach with the best path, on 2.4 GHz. A pod's
+  2.4 GHz backhaul BSS is on its fronthaul radio, which the child's 2.4 GHz
+  station (`backhaul_stations` in the inventory, one per band) shares with the
+  child's fronthaul, so the room's 2.4 GHz link between the two pods is their
+  backhaul link.
+- The rooms about the pods themselves (`POD_ROOMS` in `build-goldens.py`) have
+  no standard room. `backhaul-pod-chain` (the courtyard): pod_2 behind the
+  partition, out of every native AP's reach, under pod_1 on 2.4 GHz, two hops
+  from a native AP; `build-goldens.py` refuses it when the geometry no longer
+  makes that chain.
 - A band-steered client's scripted band changes assume the native APs. A pod
   near its path would hold it on 2.4 GHz (the pod is the stronger 2.4 GHz AP,
   and no 5 GHz AP is then a safe band upgrade), so `build-goldens.py` refuses a
