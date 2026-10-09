@@ -99,7 +99,7 @@
 </ul>
 <h2 id="ack-direction-retries-and-rate-outcomes">ACK direction, retries and rate outcomes</h2>
 <ul>
-<li><strong>Model:</strong> the reverse ACK link has its own RF success decision, so data delivery can succeed while the sender retries after a lost ACK. Rate/retry information originates with mac80211 and is consumed by the medium.</li>
+<li><strong>Model:</strong> the reverse ACK link has its own RF success decision, so data delivery can succeed while the sender retries after a lost ACK. Rate/retry information originates with mac80211 and is consumed by the medium: every frame is charged at the rate mac80211 chose for it (beacons and broadcasts at the lowest rate it was given, so a BSS&#x27;s basic rate set is honoured only when its stack programs it into the kernel). The ACK goes at the control response rate (patch 0041): 6, 12 or 24 Mbit/s for OFDM data, a CCK frame&#x27;s own rate, for its air time and its error probability.</li>
 <li><strong>Observe:</strong> RF forward/reverse values; Traffic ACK/no-ACK, attempts/retries and RX injections. Correlate native counters separately in the topology.</li>
 <li><strong>Boundary:</strong> summed TX and RX counters double-count different events. A monitor trace, modeled legacy rate or successful ACK does not prove modern PHY throughput, nor does every modeled ACK appear as a captured radio frame.</li>
 </ul>
