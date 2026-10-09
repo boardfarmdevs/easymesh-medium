@@ -29,6 +29,8 @@ jobs:
         run: bash wmediumd/tests/test-log-stamps.sh wmediumd/src/wmediumd/wmediumd.c
       - name: A tracked clone's EINVAL is transient, the rest errors (patch 0039)
         run: bash wmediumd/tests/test-netlink-rejection-class.sh wmediumd/src/wmediumd/wmediumd.c
+      - name: Three starts' logs kept, each with its rotation
+        run: bash wmediumd/tests/test-log-rotation.sh
       - uses: actions/upload-artifact@v4
         with:
           name: wmediumd

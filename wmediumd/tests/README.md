@@ -46,7 +46,12 @@ client; it reads them back, pages the dump and clears one frequency of a pair
 line printed in parts is stamped once, and with `-L` the log on a file is renamed to
 `FILE.1` past the limit and continued, nothing lost between them. `wmediumd-up.sh`
 passes `-L` (`WMEDIUMD_LOG_MAX_BYTES`, 16 MiB) and keeps the previous start's log as
-`wmediumd.log.prev`.
+`wmediumd.log.prev`, the two starts before it as `wmediumd.log.prev2` and
+`wmediumd.log.prev3`, each with its `.1`.
+
+`test-log-rotation.sh` runs `wmediumd-up.sh`'s own rotation over a directory, start after
+start: three generations kept, each with its rotated part or none, the fourth start back
+gone, a start with no log leaving them as they are.
 
 `test-netlink-rejection-class.sh PATCHED_SOURCE/wmediumd.c` compiles the clone tracker
 and `nl_err_cb` against libnl (patch 0039): hwsim's `EINVAL` for a cloned frame this

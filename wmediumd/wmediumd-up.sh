@@ -29,7 +29,8 @@ CFG=${CFG:-$RUNTIME/wmediumd.cfg}
 PIDF=${WMEDIUMD_PIDFILE:-$RUNTIME/wmediumd.pid}
 LOG=${WMEDIUMD_LOG:-$RUNTIME/wmediumd.log}
 # the log's bound (patch 0038's -L): past it LOG goes to LOG.1 and a new LOG starts; a start
-# keeps the previous start's LOG and LOG.1 as LOG.prev and LOG.prev.1
+# keeps the previous start's LOG and LOG.1 as LOG.prev and LOG.prev.1, and the two starts before
+# it as LOG.prev2 and LOG.prev3 (each with its .1): at most 8 times LOG_MAX in all
 LOG_MAX=${WMEDIUMD_LOG_MAX_BYTES:-16777216}
 CPU_AFFINITY=${WMEDIUMD_CPU_AFFINITY:-}
 VISIBILITY_FLAG=
@@ -114,6 +115,17 @@ stop_running_wmediumd() {
     sudo rm -f "$PIDF" "$CONTROL" "$METRICS" "$OBSERVER" "$IDENTITY" "$DAEMON_MANIFEST"
 }
 
+log_shift() {    # log_shift FROM TO: LOG.FROM and its .1 become LOG.TO and its .1, or those go
+    local suffix
+    for suffix in "" .1; do
+        if sudo test -e "$LOG.$1$suffix"; then
+            sudo mv -f "$LOG.$1$suffix" "$LOG.$2$suffix"
+        else
+            sudo rm -f "$LOG.$2$suffix"
+        fi
+    done
+}
+
 case "${1:-up}" in
   up)
     [ -x "$WMD" ] || { echo "no wmediumd binary ($WMD); run build-wmediumd.sh" >&2; exit 1; }
@@ -147,9 +159,13 @@ case "${1:-up}" in
     }
     echo ">> starting wmediumd"
     sudo rm -f "$PIDF" "$CONTROL" "$METRICS" "$OBSERVER" "$IDENTITY" "$DAEMON_MANIFEST"
-    # The previous start's log is evidence of the run before (a redeploy or a reproduction
-    # restarts the medium): kept as LOG.prev (and its LOG.1 as LOG.prev.1), one generation.
+    # The previous starts' logs are evidence of the runs before (a redeploy, a reproduction or a
+    # lab's bring-up restarts the medium; three restarts in an afternoon on rdk-1004, 9 October,
+    # lost a health audit's log): kept as LOG.prev (its LOG.1 as LOG.prev.1), the two before
+    # as LOG.prev2 and LOG.prev3, three generations.
     if sudo test -e "$LOG"; then
+        log_shift prev2 prev3
+        log_shift prev prev2
         sudo mv -f "$LOG" "$LOG.prev"
         if sudo test -e "$LOG.1"; then sudo mv -f "$LOG.1" "$LOG.prev.1"; else sudo rm -f "$LOG.prev.1"; fi
     fi
