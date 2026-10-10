@@ -11,13 +11,14 @@
 #   --install     install to /lib/modules/<kernel>/updates and run depmod
 #   --load        install, then reload the pool (HWSIM_RADIOS, HWSIM_CHANNELS,
 #                 HWSIM_REGTEST; HWSIM_KERNEL_MEDIUM=1 turns on the opt-in kernel
-#                 medium with its HWSIM_KERNEL_MEDIUM_* parameters)
+#                 medium with its HWSIM_KERNEL_MEDIUM_* parameters; HWSIM_PENDING_LIMIT
+#                 and HWSIM_PENDING_TIMEOUT_MS the transmit ring of 0012, on 7.0)
 #   --source DIR  where the driver source is kept and built (default hwsim/build)
 #   --cfg80211 DIR  the cfg80211 build directory (default <source>/cfg80211)
 #   INSTALL_MODULE=1 and LOAD_MODULE=1 in the environment mean --install and --load.
 #
 # Proven kernel generations: 6.8 and 7.0; any other needs its hunks verified,
-# then FORCE=1. Patches 0009 and 0011 need 7.0. Userspace wmediumd stays the
+# then FORCE=1. Patches 0009, 0011 and 0012 need 7.0. Userspace wmediumd stays the
 # medium unless the kernel medium is asked for. The source's provenance (the
 # source package's .dsc and the sources' digests) is kept next to it.
 set -euo pipefail
@@ -117,6 +118,7 @@ fi
 apply 0010-mac80211_hwsim-complete-aggregation-feedback.patch
 if [ "$GEN" = 7.0 ]; then
     apply 0011-mac80211_hwsim-report-native-receive-contexts.patch
+    apply 0012-mac80211_hwsim-pending-frames-as-a-transmit-ring.patch
 fi
 grep -q 'EXPERIMENTAL wmediumd' "$SOURCE/mac80211_hwsim.c" \
     || { echo "patch 0001 did not apply: check the source version" >&2; exit 1; }
@@ -161,6 +163,11 @@ if [ "$DO_LOAD" = 1 ]; then
             "kernel_medium_jitter_us=${HWSIM_KERNEL_MEDIUM_JITTER_US:-0}"
             "kernel_medium_delay_queue_limit=${HWSIM_KERNEL_MEDIUM_QUEUE_LIMIT:-4096}"
         )
+    fi
+    # 0012 (7.0): the frames at wmediumd as a transmit ring, its queues stopped when full
+    if [ -n "${HWSIM_PENDING_LIMIT:-}" ] && [ "$GEN" = 7.0 ]; then
+        options+=("pending_limit=$HWSIM_PENDING_LIMIT"
+                  "pending_timeout_ms=${HWSIM_PENDING_TIMEOUT_MS:-5000}")
     fi
     echo "reloading the pool: ${options[*]}"
     $elevate modprobe -r mac80211_hwsim 2>/dev/null || true

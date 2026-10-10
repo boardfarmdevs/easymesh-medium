@@ -43,6 +43,46 @@ Never use `--load` while a BPI or WLAN-client container owns an hwsim PHY. For
 the complete design, controls, results, and limitations, see
 [the kernel-medium reference](../docs/reference/kernel-medium.md).
 
+## The transmit ring (0012, Linux 7.0)
+
+A radio's frames at wmediumd (sent, their status not back) wait in hwsim's
+pending queue. At 200 the stock driver drops the oldest down to 99, 101 frames
+at once, and refuses their status when wmediumd later sends it (EINVAL). With
+`pending_limit=N` the queue is a driver's transmit ring instead: at N frames the
+radio's mac80211 queues stop, and its frames wait there (fair across stations,
+under mac80211's queue management); at N/2 they wake. Beacons, which no queue
+holds back, are kept within 2N, the oldest dropped first. A frame the medium has
+not answered in `pending_timeout_ms` (default 5000), or one sent to a wmediumd
+since gone or replaced, is dropped, so a ring nothing drains never holds the
+queues stopped. The default, 0, keeps the stock queue.
+
+```sh
+HWSIM_PENDING_LIMIT=256 hwsim/build-hwsim.sh --6ghz --load
+ethtool -S <a radio's interface> | grep -E 'd_tx_(pending|flow|dropped)'
+```
+
+`d_tx_pending` is the ring now, `d_tx_pending_max` its high-water mark,
+`d_tx_flow_stops` how often the queues stopped, `d_tx_pending_expired` the frames
+dropped unanswered and `d_tx_dropped` those dropped at 2N (or, without the limit,
+at 200).
+
+The ring's evaluator is destructive too (an isolated Linux 7.0 VM, no lab):
+
+```sh
+sudo hwsim/tests/evaluate-transmit-ring.py \
+  --module ring/mac80211_hwsim.ko --stock-module stock/mac80211_hwsim.ko \
+  --wmediumd wmediumd/build/wmediumd --output /tmp/transmit-ring.json
+```
+
+On 7.0.0-30 (10 October; two radios, eight UDP streams of 4 Mbit/s into a link
+forced to 6 Mbit/s, pings alongside) the stock queue dropped 28,583 frames (283
+times 101), wmediumd's statuses for 27,359 of them were refused and 80 % of the
+pings were lost. A ring of 64 dropped none, refused none, stopped its queues 154
+times and lost no ping; the excess UDP was dropped in mac80211's queues instead.
+With wmediumd killed under the load a ping went through after 0.09 s (48 frames
+expired); with it frozen for 3 s, 119 frames expired and a ping went through
+0.24 s after it resumed. Neither module warned in the kernel log.
+
 The destructive two-radio QEMU evaluator is:
 
 ```sh

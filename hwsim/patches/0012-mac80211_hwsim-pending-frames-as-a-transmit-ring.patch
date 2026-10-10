@@ -1,0 +1,256 @@
+Subject: [PATCH] hwsim: the frames at wmediumd as a transmit ring
+
+A radio's frames at wmediumd (sent, their status not back) wait in its pending queue.
+At 200 the stock driver drops the oldest down to 99, 101 frames at once, whatever they
+are; wmediumd, which still holds them, later sends their status and is refused (EINVAL).
+After a lab's bring-up (rdk-1004, 9 October) the first audit round lost pings this way:
+d_tx_dropped rose in steps of 101 on the busy radios while the medium, its queue bounded
+(wmediumd 0040/0042), was serving them within its bound.
+
+pending_limit=N (0, the default: the stock queue) makes the pending queue a driver's
+transmit ring. At N frames the radio's queues stop, as a full ring stops a driver's, and
+its frames wait in mac80211's queues, fair across stations and under their queue
+management, instead of being dropped here a hundred at a time; at N/2 they wake. Beacons,
+which no queue holds back, are kept within 2N, the oldest frame dropped first (d_tx_dropped).
+A frame the medium has not answered in pending_timeout_ms (default 5000, at least 100), or
+one sent to a medium since gone or replaced, is dropped (d_tx_pending_expired), checked
+when the ring is half full and, while the queues are stopped, every quarter of the timeout:
+a ring nothing drains (a medium gone, a sender it does not know) never holds the queues
+stopped. mac80211 wakes a driver's queues through its tasklets, never into the driver.
+ethtool -S adds d_tx_pending, d_tx_pending_max, d_tx_flow_stops and d_tx_pending_expired.
+
+Upstream-Status: Inappropriate [laboratory medium flow control]
+
+--- a/drivers/net/wireless/virtual/mac80211_hwsim.c
++++ b/drivers/net/wireless/virtual/mac80211_hwsim.c
+@@ -55,6 +55,17 @@ static int channels = 1;
+ module_param(channels, int, 0444);
+ MODULE_PARM_DESC(channels, "Number of concurrent channels");
+ 
++static unsigned int pending_limit;
++module_param(pending_limit, uint, 0444);
++MODULE_PARM_DESC(pending_limit,
++		 "Frames a radio may have at wmediumd before its transmit queues stop, as a full transmit ring stops a driver's; they wake at half (0: none, the oldest dropped down to "
++		 __stringify(WARN_QUEUE) " at " __stringify(MAX_QUEUE) ")");
++
++static unsigned int pending_timeout_ms = 5000;
++module_param(pending_timeout_ms, uint, 0444);
++MODULE_PARM_DESC(pending_timeout_ms,
++		 "With pending_limit: a frame wmediumd has not answered in this time is dropped (milliseconds, at least 100)");
++
+ static bool kernel_medium;
+ module_param(kernel_medium, bool, 0644);
+ MODULE_PARM_DESC(kernel_medium,
+@@ -865,6 +876,14 @@ struct mac80211_hwsim_data {
+ 	u64 tx_dropped;
+ 	u64 tx_failed;
+ 
++	/* pending_limit: the frames at wmediumd as a transmit ring */
++	spinlock_t pending_flow_lock;
++	bool pending_stopped;
++	struct delayed_work pending_watchdog;
++	u64 tx_flow_stops;
++	u64 tx_pending_expired;
++	u64 tx_pending_max;
++
+ 	/* RSSI in rx status of the receiver */
+ 	int rx_rssi;
+ 
+@@ -2237,6 +2256,93 @@ static inline u16 trans_tx_rate_flags_ieee2hwsim(struct ieee80211_tx_rate *rate)
+ 	return result;
+ }
+ 
++/*
++ * pending_limit: the frames a radio has at wmediumd (sent, their status not back) are its
++ * transmit ring. At the limit its queues stop, as a full ring stops a driver's, and its
++ * frames wait in mac80211's queues (fair across stations, under their queue management)
++ * instead of being dropped here a hundred at a time; at half the limit they wake. Beacons,
++ * which no queue holds back, are kept within twice the limit, the oldest frame dropped
++ * first. A frame the medium has not answered in pending_timeout_ms, or sent to a medium
++ * since gone or replaced, is dropped: a ring nothing drains never holds the queues stopped.
++ * Each frame keeps the time it went out and the medium it went to in rate_driver_data[1]
++ * and [2] ([0] is its cookie).
++ */
++static bool hwsim_pending_stale(struct mac80211_hwsim_data *data, struct sk_buff *skb)
++{
++	struct ieee80211_tx_info *txi = IEEE80211_SKB_CB(skb);
++	unsigned long sent = (unsigned long)txi->rate_driver_data[1];
++	u32 portid = (u32)(uintptr_t)txi->rate_driver_data[2];
++
++	return portid != READ_ONCE(data->wmediumd) ||
++	       time_after_eq(jiffies, sent + msecs_to_jiffies(pending_timeout_ms));
++}
++
++/* the stale frames at the ring's head (the oldest), their status: dropped */
++static void hwsim_pending_expire(struct mac80211_hwsim_data *data)
++{
++	struct sk_buff_head stale;
++	struct sk_buff *skb;
++	unsigned long flags;
++
++	__skb_queue_head_init(&stale);
++	spin_lock_irqsave(&data->pending.lock, flags);
++	while ((skb = skb_peek(&data->pending)) && hwsim_pending_stale(data, skb)) {
++		__skb_unlink(skb, &data->pending);
++		__skb_queue_tail(&stale, skb);
++	}
++	spin_unlock_irqrestore(&data->pending.lock, flags);
++
++	while ((skb = __skb_dequeue(&stale))) {
++		ieee80211_free_txskb(data->hw, skb);
++		data->tx_pending_expired++;
++	}
++}
++
++/* after every change to the ring: its queues stopped at the limit, woken at half */
++static void hwsim_pending_flow(struct ieee80211_hw *hw)
++{
++	struct mac80211_hwsim_data *data = hw->priv;
++	unsigned long flags;
++	u32 len;
++
++	if (!pending_limit)
++		return;
++	if (skb_queue_len(&data->pending) >= pending_limit / 2)
++		hwsim_pending_expire(data);
++
++	spin_lock_irqsave(&data->pending_flow_lock, flags);
++	len = skb_queue_len(&data->pending);
++	if (len > data->tx_pending_max)
++		data->tx_pending_max = len;
++	if (!data->pending_stopped && len >= pending_limit) {
++		data->pending_stopped = true;
++		data->tx_flow_stops++;
++		ieee80211_stop_queues(hw);
++		schedule_delayed_work(&data->pending_watchdog,
++				      max(msecs_to_jiffies(pending_timeout_ms) / 4, 1UL));
++	} else if (data->pending_stopped && len <= pending_limit / 2) {
++		data->pending_stopped = false;
++		ieee80211_wake_queues(hw);
++	}
++	spin_unlock_irqrestore(&data->pending_flow_lock, flags);
++}
++
++/* while the queues are stopped: no frame goes out to call the above, the ring is checked */
++static void hwsim_pending_watchdog(struct work_struct *work)
++{
++	struct mac80211_hwsim_data *data =
++		container_of(to_delayed_work(work), struct mac80211_hwsim_data,
++			     pending_watchdog);
++	unsigned long flags;
++
++	hwsim_pending_flow(data->hw);
++	spin_lock_irqsave(&data->pending_flow_lock, flags);
++	if (data->pending_stopped)
++		schedule_delayed_work(&data->pending_watchdog,
++				      max(msecs_to_jiffies(pending_timeout_ms) / 4, 1UL));
++	spin_unlock_irqrestore(&data->pending_flow_lock, flags);
++}
++
+ static void mac80211_hwsim_tx_frame_nl(struct ieee80211_hw *hw,
+ 				       struct sk_buff *my_skb,
+ 				       int dst_portid,
+@@ -2255,8 +2361,18 @@ static void mac80211_hwsim_tx_frame_nl(struct ieee80211_hw *hw,
+ 
+ 	if (data->ps != PS_DISABLED)
+ 		hdr->frame_control |= cpu_to_le16(IEEE80211_FCTL_PM);
+-	/* If the queue contains MAX_QUEUE skb's drop some */
+-	if (skb_queue_len(&data->pending) >= MAX_QUEUE) {
++	if (pending_limit) {
++		/* what the stopped queues do not hold back: within twice the limit */
++		while (skb_queue_len(&data->pending) >= 2 * pending_limit) {
++			struct sk_buff *oldest = skb_dequeue(&data->pending);
++
++			if (!oldest)
++				break;
++			ieee80211_free_txskb(hw, oldest);
++			data->tx_dropped++;
++		}
++	} else if (skb_queue_len(&data->pending) >= MAX_QUEUE) {
++		/* If the queue contains MAX_QUEUE skb's drop some */
+ 		/* Dropping until WARN_QUEUE level */
+ 		while (skb_queue_len(&data->pending) >= WARN_QUEUE) {
+ 			ieee80211_free_txskb(hw, skb_dequeue(&data->pending));
+@@ -2338,9 +2454,12 @@ static void mac80211_hwsim_tx_frame_nl(struct ieee80211_hw *hw,
+ 	}
+ 
+ 	/* Enqueue the packet */
++	info->rate_driver_data[1] = (void *)jiffies;
++	info->rate_driver_data[2] = (void *)(uintptr_t)(u32)dst_portid;
+ 	skb_queue_tail(&data->pending, my_skb);
+ 	data->tx_pkts++;
+ 	data->tx_bytes += my_skb->len;
++	hwsim_pending_flow(hw);
+ 	return;
+ 
+ nla_put_failure:
+@@ -3078,6 +3197,10 @@ static void mac80211_hwsim_stop(struct ieee80211_hw *hw, bool suspend)
+ 	while (!skb_queue_empty(&data->pending))
+ 		ieee80211_free_txskb(hw, skb_dequeue(&data->pending));
+ 
++	/* an empty ring: the queues awake for the next start */
++	cancel_delayed_work_sync(&data->pending_watchdog);
++	hwsim_pending_flow(hw);
++
+ 	wiphy_dbg(hw->wiphy, "%s\n", __func__);
+ }
+ 
+@@ -4264,6 +4387,10 @@ static const char mac80211_hwsim_gstrings_stats[][ETH_GSTRING_LEN] = {
+ 	"d_tx_failed",
+ 	"d_ps_mode",
+ 	"d_group",
++	"d_tx_pending",
++	"d_tx_pending_max",
++	"d_tx_flow_stops",
++	"d_tx_pending_expired",
+ };
+ 
+ #define MAC80211_HWSIM_SSTATS_LEN ARRAY_SIZE(mac80211_hwsim_gstrings_stats)
+@@ -4300,6 +4427,10 @@ static void mac80211_hwsim_get_et_stats(struct ieee80211_hw *hw,
+ 	data[i++] = ar->tx_failed;
+ 	data[i++] = ar->ps;
+ 	data[i++] = ar->group;
++	data[i++] = skb_queue_len(&ar->pending);
++	data[i++] = ar->tx_pending_max;
++	data[i++] = ar->tx_flow_stops;
++	data[i++] = ar->tx_pending_expired;
+ 
+ 	WARN_ON(i != MAC80211_HWSIM_SSTATS_LEN);
+ }
+@@ -6369,6 +6500,8 @@ static int mac80211_hwsim_new_radio(struct genl_info *info,
+ 	}
+ 
+ 	skb_queue_head_init(&data->pending);
++	spin_lock_init(&data->pending_flow_lock);
++	INIT_DELAYED_WORK(&data->pending_watchdog, hwsim_pending_watchdog);
+ 
+ 	SET_IEEE80211_DEV(hw, data->dev);
+ 	if (!param->perm_addr) {
+@@ -6860,6 +6993,7 @@ static void mac80211_hwsim_del_radio(struct mac80211_hwsim_data *data,
+ 	skb_queue_purge(&data->kernel_medium_delay_queue);
+ 	debugfs_remove_recursive(data->debugfs);
+ 	ieee80211_unregister_hw(data->hw);
++	cancel_delayed_work_sync(&data->pending_watchdog);
+ 	device_release_driver(data->dev);
+ 	device_unregister(data->dev);
+ 	ieee80211_free_hw(data->hw);
+@@ -7063,6 +7197,7 @@ static int hwsim_tx_info_frame_received_nl(struct sk_buff *skb_2,
+ 
+ 	mac80211_hwsim_complete_ampdu_status(txi);
+ 	ieee80211_tx_status_irqsafe(data2->hw, skb);
++	hwsim_pending_flow(data2->hw);
+ 	return 0;
+ out:
+ 	return -EINVAL;
+@@ -8019,6 +8154,11 @@ static int __init init_mac80211_hwsim(void)
+ 	if (channels < 1)
+ 		return -EINVAL;
+ 
++	/* the cookie, the time sent and the medium in a frame's rate_driver_data */
++	BUILD_BUG_ON(ARRAY_SIZE(((struct ieee80211_tx_info *)NULL)->rate_driver_data) < 3);
++	if (pending_limit > 65536 || (pending_limit && pending_timeout_ms < 100))
++		return -EINVAL;
++
+ 	err = rhashtable_init(&hwsim_radios_rht, &hwsim_rht_params);
+ 	if (err)
+ 		return err;
