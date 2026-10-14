@@ -23,6 +23,8 @@ TOPOLOGY_URL = STACKS["prplmesh"].topology_url
 # the mesh's health, so the lab's own nodes are counted as the room expects them.
 FOREIGN_DEVICES = "/etc/easymesh-lab/foreign-devices"
 _MAC = re.compile(r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$")
+# RadioList.Band, the controller's em_freq_band_t (GHz)
+_BANDS = {"0": "2.4", "1": "5", "2": "60", "3": "6"}
 
 
 def foreign_devices() -> set[str]:
@@ -53,14 +55,15 @@ def mesh_health(
     adapters: list[dict] | None = None,
     wired: int = 0,
     stack: str | None = None,
+    bss_rows: bool = False,
 ) -> dict:
     """Topology and controller-model completeness (see _rdk_mesh_health for the
-    counts). The prplMesh lab has no adapter-managed nodes."""
+    counts). The prplMesh lab has no adapter-managed nodes, and no model rows."""
     if _stack(stack).name == "prplmesh":
         if adapters:
             raise ValueError("adapter-managed mesh nodes are counted on the rdk stack only")
         return _prplmesh_mesh_health(expected_agents, expected_clients)
-    return _rdk_mesh_health(expected_agents, expected_clients, adapters, wired)
+    return _rdk_mesh_health(expected_agents, expected_clients, adapters, wired, bss_rows)
 
 
 def _run(*args: str) -> str:
@@ -115,6 +118,7 @@ def _rdk_mesh_health(
     expected_clients: int | None = None,
     adapters: list[dict] | None = None,
     wired: int = 0,
+    bss_rows: bool = False,
 ) -> dict:
     """Topology and controller-model completeness. ``expected_agents`` counts the
     lab's own mesh nodes (tri-band, ten BSSes, a backhaul station below the
@@ -124,7 +128,9 @@ def _rdk_mesh_health(
     a Wi-Fi backhaul (the topology's backhaulMedia) has one, which is also a
     station associated with its parent's backhaul BSS. ``wired`` counts the
     lab's own extenders on a wired backhaul (among ``expected_agents``): no
-    backhaul station associated anywhere."""
+    backhaul station associated anywhere. ``bss_rows`` adds the model's BSS
+    rows in the same query (model_bss_rows: device, band, BSSID, SSID), so a
+    caller can name the BSS a short count lacks."""
     adapters = adapters or []
     foreign = foreign_devices()
     topology = json.loads(_run("curl", "-fsS", STACKS["rdk"].topology_url))
@@ -179,14 +185,34 @@ def _rdk_mesh_health(
                 "(select count(*) from BSSList),"
                 "(select count(*) from STAList where Associated=1);"
             )
+        if bss_rows:
+            # one row per BSS after the counts' line: its device (the ID's second field),
+            # its radio's band (NULL when the model lists no such radio), BSSID and SSID
+            device = "substring_index(substring_index(b.ID,'@',2),'@',-1)"
+            where = f" where {device} not in ({macs})" if foreign else ""
+            query += (
+                f"select {device},r.Band,b.BSSID,b.SSID"
+                f" from BSSList b left join RadioList r on r.RadioID=b.RUID{where};"
+            )
         # the query as an argument, not in the shell's words: it may quote strings
         text = _run(
             "lxc", "exec", STACKS["rdk"].controller, "--", "sh", "-c",
             'mysql -N -ubpi -proot OneWifiMesh -e "$1" 2>/dev/null', "sh", query,
         )
-        values = [int(value) for value in text.split()]
+        counts, *rows = text.split("\n")
+        values = [int(value) for value in counts.split()]
         if len(values) != 4:
             raise RuntimeError(f"unexpected EasyMesh model counts: {text!r}")
+        if bss_rows:
+            result["model_bss_rows"] = []
+            for row in rows:
+                # the output is stripped: the last row's empty SSID loses its tab
+                fields = row.split("\t")
+                if len(fields) not in (3, 4):
+                    raise RuntimeError(f"unexpected EasyMesh BSS row: {row!r}")
+                result["model_bss_rows"].append({
+                    "device": fields[0].lower(), "band": _BANDS.get(fields[1]),
+                    "bssid": fields[2].lower(), "ssid": fields[3] if len(fields) == 4 else ""})
         result.update(
             {
                 "expected_topology_nodes": expected_agents + len(adapters) + 1,

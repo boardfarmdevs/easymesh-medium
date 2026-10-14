@@ -163,6 +163,49 @@ class ObserverTests(unittest.TestCase):
             mesh_health(expected_agents=1, expected_clients=1)
         self.assertNotIn("not in", run.call_args_list[1].args[-1])
 
+    @patch("wmdcfg.observers._run")
+    def test_bss_rows_name_each_bss_in_the_model_with_its_device_and_band(self, run):
+        # the same query, then one row per BSS: its device, its radio's band (none for a
+        # row whose radio the model does not list), its BSSID and SSID; _run strips the
+        # output, so the last row's empty SSID has lost its tab
+        nodes = [{"name": "Controller", "STAList": [], "haulTypes": []},
+                 {"name": "Agent-1", "STAList": [{"staMAC": "02:00:00:00:05:00"}], "haulTypes": []}]
+        rows = ("1 3 2 1\n"
+                "00:60:2F:DA:68:E4\t1\t02:00:00:61:4f:f3\tmesh_backhaul\n"
+                "02:00:00:00:6a:01\tNULL\t72:00:00:00:6a:00")
+        run.side_effect = [json.dumps({"nodes": nodes}), rows]
+        health = mesh_health(expected_agents=1, expected_clients=1, bss_rows=True)
+        self.assertEqual(health["model_bsses"], 2)
+        self.assertEqual(health["model_bss_rows"], [
+            {"device": "00:60:2f:da:68:e4", "band": "5", "bssid": "02:00:00:61:4f:f3", "ssid": "mesh_backhaul"},
+            {"device": "02:00:00:00:6a:01", "band": None, "bssid": "72:00:00:00:6a:00", "ssid": ""}])
+        query = run.call_args_list[1].args[-1]
+        self.assertIn("from BSSList b left join RadioList r on r.RadioID=b.RUID", query)
+
+    @patch("wmdcfg.observers._run")
+    def test_bss_rows_leave_foreign_devices_out(self, run):
+        nodes = [{"name": "Controller", "STAList": [], "haulTypes": []},
+                 {"name": "Agent-1", "STAList": [{"staMAC": "02:00:00:00:05:00"}], "haulTypes": []}]
+        run.side_effect = [json.dumps({"nodes": nodes}), "1 3 1 1\n00:60:2f:da:68:e4\t0\t02:00:00:00:0a:00\tiot_ssid"]
+        with tempfile.TemporaryDirectory() as directory:
+            listed = Path(directory) / "foreign-devices"
+            listed.write_text("02:c0:9e:df:c1:a2\n")
+            with patch.dict(os.environ, {"EASYMESH_FOREIGN_DEVICES": str(listed)}):
+                health = mesh_health(expected_agents=1, expected_clients=1, bss_rows=True)
+        self.assertEqual([row["band"] for row in health["model_bss_rows"]], ["2.4"])
+        rows_query = run.call_args_list[1].args[-1].split(";")[1]
+        self.assertIn("where substring_index(substring_index(b.ID,'@',2),'@',-1) not in ('02:c0:9e:df:c1:a2')",
+                      rows_query)
+
+    @patch("wmdcfg.observers._run")
+    def test_without_bss_rows_the_health_has_none(self, run):
+        nodes = [{"name": "Controller", "STAList": [], "haulTypes": []},
+                 {"name": "Agent-1", "STAList": [{"staMAC": "02:00:00:00:05:00"}], "haulTypes": []}]
+        run.side_effect = [json.dumps({"nodes": nodes}), "1 3 10 1"]
+        health = mesh_health(expected_agents=1, expected_clients=1)
+        self.assertNotIn("model_bss_rows", health)
+        self.assertNotIn("RadioList r", run.call_args_list[1].args[-1])
+
     def test_a_malformed_foreign_device_is_an_error(self):
         with tempfile.TemporaryDirectory() as directory:
             listed = Path(directory) / "foreign-devices"
