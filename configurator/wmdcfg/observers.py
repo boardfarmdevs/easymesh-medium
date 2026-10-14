@@ -163,9 +163,16 @@ def _rdk_mesh_health(
         if node.get("kind") == "opensync-pod" and node.get("backhaulMedia") == "Wireless LAN"
     )
     if expected_agents is not None and expected_clients is not None:
+        # A link row: a device's BSS row whose BSSID is its own upstream (DeviceList's
+        # BackhaulMACAddress: its parent's BSS, zero when wired), the model's record of its
+        # backhaul link; every other row is an access point's BSS. A device is its rows' ID's
+        # second field (OneWifiMesh@<AL MAC>@...).
+        device_b = "substring_index(substring_index(b.ID,'@',2),'@',-1)"
+        device_d = "substring_index(substring_index(d.ID,'@',2),'@',-1)"
+        links = (f"select count(*) from BSSList b join DeviceList d on {device_d}={device_b}"
+                 " where b.BSSID=d.BackhaulMACAddress")
         if foreign:
-            # each row's device is its ID's second field (OneWifiMesh@<AL MAC>@...); a
-            # foreign device's stations are those on its BSSes and its backhaul station
+            # a foreign device's stations are those on its BSSes and its backhaul station
             al = "substring_index(substring_index(ID,'@',2),'@',-1)"
             macs = ",".join(f"'{mac}'" for mac in sorted(foreign))
             query = (
@@ -176,23 +183,25 @@ def _rdk_mesh_health(
                 f" and coalesce(BSSID,'') not in (select BSSID from BSSList where {al} in ({macs})"
                 " and BSSID is not null)"
                 f" and coalesce(MACAddress,'') not in (select BackhaulSTA from DeviceList where {al} in ({macs})"
-                " and BackhaulSTA is not null));"
+                " and BackhaulSTA is not null)),"
+                f"({links} and {device_b} not in ({macs}));"
             )
         else:
             query = (
                 "select (select count(*) from DeviceList),"
                 "(select count(*) from RadioList),"
                 "(select count(*) from BSSList),"
-                "(select count(*) from STAList where Associated=1);"
+                "(select count(*) from STAList where Associated=1),"
+                f"({links});"
             )
         if bss_rows:
-            # one row per BSS after the counts' line: its device (the ID's second field),
-            # its radio's band (NULL when the model lists no such radio), BSSID and SSID
-            device = "substring_index(substring_index(b.ID,'@',2),'@',-1)"
-            where = f" where {device} not in ({macs})" if foreign else ""
+            # one row per BSS after the counts' line: its device, its radio's band (NULL when
+            # the model lists no such radio), BSSID, SSID and whether it is a link row
+            where = f" where {device_b} not in ({macs})" if foreign else ""
             query += (
-                f"select {device},r.Band,b.BSSID,b.SSID"
-                f" from BSSList b left join RadioList r on r.RadioID=b.RUID{where};"
+                f"select {device_b},r.Band,b.BSSID,b.SSID,coalesce(b.BSSID=d.BackhaulMACAddress,0)"
+                " from BSSList b left join RadioList r on r.RadioID=b.RUID"
+                f" left join DeviceList d on {device_d}={device_b}{where};"
             )
         # the query as an argument, not in the shell's words: it may quote strings
         text = _run(
@@ -201,29 +210,35 @@ def _rdk_mesh_health(
         )
         counts, *rows = text.split("\n")
         values = [int(value) for value in counts.split()]
-        if len(values) != 4:
+        if len(values) != 5:
             raise RuntimeError(f"unexpected EasyMesh model counts: {text!r}")
         if bss_rows:
             result["model_bss_rows"] = []
             for row in rows:
-                # the output is stripped: the last row's empty SSID loses its tab
                 fields = row.split("\t")
-                if len(fields) not in (3, 4):
+                if len(fields) != 5:
                     raise RuntimeError(f"unexpected EasyMesh BSS row: {row!r}")
                 result["model_bss_rows"].append({
                     "device": fields[0].lower(), "band": _BANDS.get(fields[1]),
-                    "bssid": fields[2].lower(), "ssid": fields[3] if len(fields) == 4 else ""})
+                    "bssid": fields[2].lower(), "ssid": fields[3],
+                    "kind": "link" if fields[4] == "1" else "bss"})
+        # each agent of the lab: nine BSSes and its link row (wired too); an adapter node:
+        # its own BSSes, and a link row while on a Wi-Fi backhaul
         result.update(
             {
                 "expected_topology_nodes": expected_agents + len(adapters) + 1,
                 "model_devices": values[0],
                 "model_radios": values[1],
                 "model_bsses": values[2],
+                "model_ap_bsses": values[2] - values[4],
+                "model_link_rows": values[4],
                 "model_associated": values[3],
                 "expected_model_devices": expected_agents + len(adapters),
                 "expected_model_radios": expected_agents * 3 + sum(item["radios"] for item in adapters),
                 "expected_model_bsses": expected_agents * 10 + sum(item["bsses"] for item in adapters)
                 + wifi_adapters,
+                "expected_model_ap_bsses": expected_agents * 9 + sum(item["bsses"] for item in adapters),
+                "expected_model_link_rows": expected_agents + wifi_adapters,
                 "expected_model_associated": expected_clients + expected_agents - 1 - wired + wifi_adapters,
             }
         )
